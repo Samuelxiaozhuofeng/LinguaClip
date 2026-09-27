@@ -190,7 +190,7 @@ export const formatLastPracticed = (timestamp: number): string => {
 // Re-reads the record before writing so a caller holding a stale copy can't roll back progress.
 export const patchVideoRecord = async (
   videoId: string,
-  patch: Partial<Pick<VideoRecord, 'learningMode' | 'blurPlaybackMode' | 'videoPath' | 'lastPracticed'>>
+  patch: Partial<Pick<VideoRecord, 'learningMode' | 'blurPlaybackMode' | 'videoPath' | 'lastPracticed' | 'lang'>>
 ): Promise<void> => {
   try {
     const record = await getVideoRecord(videoId);

@@ -146,7 +146,7 @@ export default function App() {
   const {
     ankiConfig, ankiStatus, setAnkiStatus,
     handleAddToAnki: ankiHandleAddToAnki, handleWordToAnki: ankiHandleWordToAnki, reloadConfig: reloadAnkiConfig,
-  } = useAnkiIntegration({ videoRef, videoFileName });
+  } = useAnkiIntegration({ videoRef, videoFileName, videoId: currentVideoId });
 
   // Settings autosaves; pick the latest Anki config up whenever we leave that page.
   useEffect(() => {

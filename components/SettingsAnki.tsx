@@ -3,7 +3,11 @@ import { RefreshCw } from 'lucide-react';
 import { APP_DATA_FIELDS, AnkiCardTemplateConfig } from '../types';
 import { AnkiConnectionStatus } from '../hooks/useAnkiConnection';
 import { Btn, Card, Field, inputCls } from './ui';
-import { useT, DictKey } from '../utils/i18n';
+import { useT, DictKey, getLang } from '../utils/i18n';
+import { invokeAnki } from '../utils/anki';
+import { getAllVideosFromDB } from '../utils/fileSystemAccess';
+import { DECK_LANGS, langName, videoLang } from '../utils/deckLang';
+import type { DictLang } from '../utils/dictionary';
 
 // APP_DATA_FIELDS lives in types.ts (out of i18n scope) and can't carry translated
 // labels directly; map each field's key to its own dictionary entry instead.
@@ -38,7 +42,68 @@ interface SettingsAnkiProps {
   fetchModelFields: (modelName: string) => Promise<string[]>;
   saveAnki: (patch?: { fieldMapping?: Mapping }) => void;
   createLinguaClip: () => Promise<AnkiCardTemplateConfig>;
+  deckByLang: DeckByLang;
+  setDeckByLang: (value: DeckByLang) => void;
+  refreshDecks: () => void;
 }
+
+type DeckByLang = NonNullable<AnkiCardTemplateConfig['deckByLang']>;
+
+// One row per language the user's videos are in: which Anki deck its cards go to.
+// "Create sub-decks" makes `<target deck>::日语` etc. in Anki for the unset rows and points them at it.
+const LangDecks: React.FC<{ url: string; decks: string[]; deckName: string; value: DeckByLang; onChange: (v: DeckByLang) => void; refreshDecks: () => void }> = ({ url, decks, deckName, value, onChange, refreshDecks }) => {
+  const t = useT();
+  const [langs, setLangs] = useState<DictLang[]>([]);
+  const [making, setMaking] = useState<'idle' | 'busy' | string>('idle');
+  useEffect(() => {
+    getAllVideosFromDB()
+      .then(rs => { const got = new Set(rs.map(videoLang)); setLangs(DECK_LANGS.filter((l): l is DictLang => l !== 'other' && got.has(l))); })
+      .catch(console.error); // unreadable: no rows, cards keep going to the target deck
+  }, []);
+  if (langs.length === 0) return null;
+  const make = async () => {
+    setMaking('busy');
+    try {
+      const next = { ...value };
+      // Only languages with no deck yet: a second click (maybe in the other interface
+      // language) never re-points one that is set, so cards don't split across two decks.
+      for (const l of langs.filter(l => !value[l])) {
+        const name = `${deckName}::${langName(l, getLang(), '')}`;
+        await invokeAnki('createDeck', { deck: name }, url);
+        next[l] = name;
+      }
+      onChange(next);
+      refreshDecks();
+      setMaking('idle');
+    } catch (e) {
+      setMaking(e instanceof Error ? e.message : String(e));
+    }
+  };
+  return (
+    <div className="mb-4">
+      <div className="flex items-center gap-3 mb-1">
+        <h4 className="text-sm font-semibold flex-1">{t('settingsAnki.byLang')}</h4>
+        <Btn type="button" size="sm" onClick={() => { make().catch(console.error); }} disabled={!deckName || making === 'busy'}>
+          {making === 'busy' && <RefreshCw className="w-4 h-4 animate-spin" />}
+          {t('settingsAnki.makeLangDecks')}
+        </Btn>
+      </div>
+      <p className="text-xs text-mute mb-3">{t('settingsAnki.byLangHint')}</p>
+      {!['idle', 'busy'].includes(making) && <p className="text-sm mb-3">{t('settingsAnki.makeLangDecksFailed')}<span className="text-xs text-mute break-all">{making}</span></p>}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {langs.map(l => (
+          <Field key={l} label={langName(l, getLang(), '')}>
+            <select value={value[l] ?? ''} onChange={(e) => onChange({ ...value, [l]: e.target.value || undefined })} className={inputCls}>
+              <option value="">{t('settingsAnki.sameDeck')}</option>
+              {/* A deck set earlier but gone from Anki stays listed, so the choice isn't silently lost. */}
+              {[...new Set([...decks, ...(value[l] ? [value[l]!] : [])])].map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </Field>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 function pruneMapping(prev: Mapping, fields: string[]): Mapping {
   const next: Mapping = {};
@@ -96,6 +161,9 @@ const SettingsAnki: React.FC<SettingsAnkiProps> = ({
   fetchModelFields,
   saveAnki,
   createLinguaClip,
+  deckByLang,
+  setDeckByLang,
+  refreshDecks,
 }) => {
   const t = useT();
   const [modelFields, setModelFields] = useState<string[]>([]);
@@ -186,6 +254,7 @@ const SettingsAnki: React.FC<SettingsAnkiProps> = ({
               </select>
             </Field>
           </div>
+          <LangDecks url={url} decks={decks} deckName={deckName} value={deckByLang} onChange={setDeckByLang} refreshDecks={refreshDecks} />
           {modelName && modelFields.length > 0 && (
             <FieldMap fields={modelFields} mapping={fieldMapping} onChange={updateMapping} />
           )}

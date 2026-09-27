@@ -103,4 +103,29 @@ assert.ok(!R.isRemembered({ ...stable, start: -1 }));
 assert.ok(!R.isRemembered(fresh));
 assert.equal(R.deckCounts([stable, fresh], now).line.remembered, 1);
 
+// Language decks (utils/deckLang.ts): a card's language is its video's — set by hand,
+// else guessed from the whole subtitle file; orphans by their siblings' lines.
+const outL = join(tmpdir(), `decklang-${process.pid}.mjs`);
+await build({ entryPoints: ['utils/deckLang.ts'], bundle: true, format: 'esm', outfile: outL });
+const L = await import(outL);
+const toSrt = lines => lines.map((t, i) => `${i + 1}\n00:00:0${i},000 --> 00:00:0${i},900\n${t}\n`).join('\n');
+const esSrt = toSrt(['¿Qué es lo que quieres?', 'Yo no sé por qué está aquí.', 'Pero la casa es muy grande.']);
+const jaSrt = toSrt(['今日はいい天気ですね。', 'それはちょっと難しいかもしれない。']);
+const card = (id, videoId, text) => ({ ...base, id, videoId, text });
+const langs = L.cardLangs([
+  card('a', 'es1', 'Hola'),
+  card('b', 'ja1', 'はい'),
+  card('c', 'fixed', 'the cat'),              // guessed Spanish, set to English by hand
+  card('d', 'zh', '你好'),                     // no dictionary language → Unsorted
+  card('e', 'gone', 'Yo no sé qué es esto.'), // video deleted: judged by its siblings together
+  card('f', 'gone', 'Pero la casa es muy grande.'),
+  card('g', '', 'これは古いブックマークです'),     // old bookmark with no video: its own line
+], [
+  { id: 'es1', subtitleText: esSrt }, { id: 'ja1', subtitleText: jaSrt },
+  { id: 'fixed', subtitleText: esSrt, lang: 'en' }, { id: 'zh', subtitleText: toSrt(['你好，我是小明。']) },
+]);
+assert.deepEqual(Object.fromEntries(langs), { a: 'es', b: 'ja', c: 'en', d: 'other', e: 'es', f: 'es', g: 'ja' });
+// Unreadable / empty subtitles are Unsorted, never a crash.
+assert.equal(L.videoLang({ id: 'x' }), 'other');
+
 console.log('test-review: all passed');

@@ -7,7 +7,9 @@ import { parseSRT } from '../utils/srtParser';
 import { buildSections } from '../utils/sections';
 import { fileNameFromPath, isVideoFile, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
 import { canConvertRetry, formatImportError, isCookieError, openYouTubeLogin, retryImport, subscribeImportJobs } from '../utils/importJob';
-import { Btn, Menu, MenuItem } from './ui';
+import { Btn, Menu, MenuItem, inputCls } from './ui';
+import { DECK_LANGS, langName, videoLang } from '../utils/deckLang';
+import type { DictLang } from '../utils/dictionary';
 import VideoCover from './VideoCover';
 import { dialog } from './Dialog';
 import { useT, useLang } from '../utils/i18n';
@@ -295,8 +297,24 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
     return items;
   };
 
+  // Which language deck this video's cards go in: guessed from the subtitles unless set here.
+  // Shows what was actually saved (re-read after the write), so a failed write snaps back.
+  const setVideoLang = async (v: VideoRecord, value: string) => {
+    await VideoStorage.patchVideoRecord(v.id, { lang: (value || undefined) as DictLang | undefined });
+    VideoStorage.getAllVideoRecords().then(setVideos).catch(console.error);
+  };
+  const langRow = (v: VideoRecord) => !v.importJob && (
+    <label className="flex items-center gap-2.5 mt-1.5 mx-1 px-1.5 pt-2.5 pb-1 border-t border-line text-sm text-mute">
+      <span className="shrink-0">{t('deck.videoLang')}</span>
+      <select value={v.lang ?? ''} onChange={e => { setVideoLang(v, e.target.value).catch(console.error); }} className={`${inputCls} !h-8`}>
+        <option value="">{t('deck.auto', { lang: langName(videoLang({ ...v, lang: undefined }), lang, t('deck.unsorted')) })}</option>
+        {DECK_LANGS.filter(l => l !== 'other').map(l => <option key={l} value={l}>{langName(l, lang, '')}</option>)}
+      </select>
+    </label>
+  );
+
   const more = (v: VideoRecord, size: 'sm' | 'lg' = 'sm') => (
-    <Menu items={menuFor(v)} trigger={(open, toggle) => (
+    <Menu items={menuFor(v)} footer={langRow(v)} trigger={(open, toggle) => (
       <Btn square size={size === 'lg' ? 'md' : size} flat onClick={toggle} title={t('home.more')} aria-label={t('home.more')} className={open ? '!bg-shade !text-ink' : ''}>
         {deletingId === v.id ? <Loader2 size={16} className="animate-spin" /> : <MoreHorizontal size={16} />}
       </Btn>

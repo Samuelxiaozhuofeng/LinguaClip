@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AnkiConfig, AIConfig, AudioPaddingConfig } from '../types';
+import { AnkiConfig, AIConfig, AudioPaddingConfig, AnkiCardTemplateConfig } from '../types';
 import * as Anki from '../utils/anki';
 import * as AI from '../utils/ai';
 import * as Storage from '../utils/storage';
@@ -13,6 +13,8 @@ import SettingsTranscribe from './SettingsTranscribe';
 import { useT, useLang, setLang, Lang } from '../utils/i18n';
 import { openExternal } from '../utils/desktop';
 
+type DeckByLang = NonNullable<AnkiCardTemplateConfig['deckByLang']>;
+
 const SPONSOR_URL = 'https://afdian.com/a/SamuelXiao';
 
 type AnkiPatch = {
@@ -20,6 +22,7 @@ type AnkiPatch = {
   deckName?: string;
   modelName?: string;
   fieldMapping?: Record<string, string>;
+  deckByLang?: DeckByLang;
 };
 
 const Settings: React.FC = () => {
@@ -28,6 +31,7 @@ const Settings: React.FC = () => {
   const [deckName, setDeckName] = useState('');
   const [modelName, setModelName] = useState('');
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
+  const [deckByLang, setDeckByLang] = useState<DeckByLang>({});
 
   const [aiModel, setAiModel] = useState('');
   const [aiTemperature, setAiTemperature] = useState(0.7);
@@ -64,6 +68,7 @@ const Settings: React.FC = () => {
         setDeckName(savedAnki.card.deckName);
         setModelName(savedAnki.card.modelName);
         setFieldMapping(savedAnki.card.fieldMapping || {});
+        setDeckByLang(savedAnki.card.deckByLang || {});
       }
       ankiConnection.connect(savedAnki.url);
     }
@@ -93,7 +98,8 @@ const Settings: React.FC = () => {
     const d = patch.deckName ?? deckName;
     const m = patch.modelName ?? modelName;
     const map = patch.fieldMapping ?? fieldMapping;
-    return { url, card: d && m ? { deckName: d, modelName: m, fieldMapping: map } : null };
+    const byLang = patch.deckByLang ?? deckByLang;
+    return { url, card: d && m ? { deckName: d, modelName: m, fieldMapping: map, deckByLang: byLang } : null };
   };
 
   const saveAnki = (patch: AnkiPatch = {}) => {
@@ -247,6 +253,12 @@ const Settings: React.FC = () => {
           fetchModelFields={ankiConnection.fetchModelFields}
           saveAnki={saveAnki}
           createLinguaClip={createLinguaClip}
+          deckByLang={deckByLang}
+          setDeckByLang={(v) => {
+            setDeckByLang(v);
+            saveAnki({ deckByLang: v });
+          }}
+          refreshDecks={() => ankiConnection.connect()}
         />
       )}
 

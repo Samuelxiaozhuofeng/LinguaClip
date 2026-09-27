@@ -71,7 +71,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   }, [toast]);
 
   const { savedIds, savedItems, toggleSave } = useSavedLines({ videoId: record.id, fullSubtitles: lines, videoFileName: record.videoFileName });
-  const { ankiConfig, ankiStatus, handleAddToAnki, handleWordToAnki } = useAnkiIntegration({ videoRef, videoFileName: record.videoFileName });
+  const { ankiConfig, ankiStatus, handleAddToAnki, handleWordToAnki } = useAnkiIntegration({ videoRef, videoFileName: record.videoFileName, videoId: record.id });
   const recording = ankiStatus === 'recording';
   // An Anki clip (a line's, or a word's from the definition card) seeks and plays the video
   // itself: nothing may pause, seek, save the position or end the watch meanwhile.

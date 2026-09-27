@@ -12,6 +12,7 @@ import DictationLine from './DictationLine';
 import DefinitionPanel from './DefinitionPanel';
 import { useLookup } from '../hooks/useLookup';
 import { detectLang } from '../utils/dictionary';
+import type { DeckLang } from '../utils/deckLang';
 import { useT } from '../utils/i18n';
 import { countLine, usePracticeClock } from '../utils/today';
 import { hasKana, jaReady, useJaVersion } from '../utils/japanese';
@@ -99,7 +100,9 @@ const clean = (html: string): string => {
 const Html: React.FC<{ html?: string; className?: string }> = ({ html, className }) =>
   html ? <div className={className} dangerouslySetInnerHTML={{ __html: clean(html) }} /> : null;
 
-const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void }> = ({ cards, onClose }) => {
+// `langOf` (from a library page): each card's language deck. Then lookups use the card's
+// own language, and "more" after the round stays in the deck the round came from.
+const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf?: (c: ReviewCard) => DeckLang; lang?: DeckLang | 'all' }> = ({ cards, onClose, langOf, lang = 'all' }) => {
   const t = useT();
   const [queue, setQueue] = useState(cards);
   const [round, setRound] = useState(0);
@@ -143,7 +146,10 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void }> = ({
   );
 
   // Words in the answer can be looked up, and kept, as on the practice page (no Anki: that records off the practice video).
-  const dictLang = useMemo(() => detectLang(queue.map(c => c.text)), [queue]);
+  const dictLang = useMemo(() => {
+    const l = card && langOf ? langOf(card) : undefined;
+    return l ? (l === 'other' ? null : l) : detectLang(queue.map(c => c.text));
+  }, [queue, card, langOf]);
   const { def, lookup, explain, closeDef } = useLookup(dictLang, card?.text ?? '');
   useEffect(closeDef, [card]); // eslint-disable-line react-hooks/exhaustive-deps
   const keepWord = (word: string, definition: string, example: string) => {
@@ -181,7 +187,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void }> = ({
     setMore(null);
     Promise.allSettled(writes.current)
       .then(() => getAllCards())
-      .then(all => { if (!cancelled) setMore(dueQueue(all, queue[0].deck)); })
+      .then(all => { if (!cancelled) setMore(dueQueue(lang === 'all' || !langOf ? all : all.filter(c => langOf(c) === lang), queue[0].deck)); })
       .catch(e => { console.error(e); if (!cancelled) setMore([]); });
     return () => { cancelled = true; };
   }, [done, queue]);

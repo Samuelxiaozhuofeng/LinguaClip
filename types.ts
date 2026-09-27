@@ -74,6 +74,7 @@ export interface AnkiCardTemplateConfig {
   deckName: string;
   modelName: string;
   fieldMapping: Record<string, string>; // Anki Field Name -> App Data Key
+  deckByLang?: Partial<Record<import('./utils/dictionary').DictLang, string>>; // a language's own deck; unset = deckName
 }
 
 export interface AnkiConfig {
@@ -137,6 +138,7 @@ export interface VideoRecord {
   totalPracticeTime: number;            // Total practice time in seconds
   learningMode?: LearningMode;          // Last-used practice mode
   blurPlaybackMode?: BlurPlaybackMode;  // Last-used blur playback variant
+  lang?: import('./utils/dictionary').DictLang; // set by hand in the video's menu; unset = guessed from the subtitles (utils/deckLang.ts)
 
   // Present while a YouTube/local import is generating subtitles (or failed).
   // Cleared once videoPath / subtitleText / totalSubtitles are filled in.

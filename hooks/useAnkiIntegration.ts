@@ -4,13 +4,26 @@ import * as Anki from '../utils/anki';
 import * as Storage from '../utils/storage';
 import { dialog } from '../components/Dialog';
 import { t } from '../utils/i18n';
+import { getVideoFromDB } from '../utils/fileSystemAccess';
+import { videoLang } from '../utils/deckLang';
 
 export type AnkiStatus = 'idle' | 'recording' | 'adding' | 'success' | 'error';
 
 export interface UseAnkiIntegrationParams {
   videoRef: React.RefObject<HTMLVideoElement>;
   videoFileName: string | null;
+  videoId?: string | null; // picks the language's own Anki deck, if one is set
 }
+
+// The card goes to its video's language deck when Settings → Anki names one; otherwise
+// (or if the record can't be read) to the target deck.
+const withLangDeck = async (template: AnkiCardTemplateConfig, videoId?: string | null): Promise<AnkiCardTemplateConfig> => {
+  if (!template.deckByLang || !videoId) return template;
+  const record = await getVideoFromDB(videoId).catch(() => null);
+  const lang = record ? videoLang(record) : 'other';
+  const deck = lang === 'other' ? '' : template.deckByLang[lang];
+  return deck ? { ...template, deckName: deck } : template;
+};
 
 export interface UseAnkiIntegrationReturn {
   // State
@@ -63,7 +76,7 @@ const alertAudioFailed = (e: AudioCaptureError) =>
   dialog.alert(t('anki.audioFailedTitle'), `${t('anki.audioFailedBody')}\n\n${e.message}`);
 
 export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiIntegrationReturn {
-  const { videoRef, videoFileName } = params;
+  const { videoRef, videoFileName, videoId } = params;
 
   const [ankiConfig, setAnkiConfig] = useState<AnkiConfig | null>(Anki.getAnkiConfig());
   const [ankiStatus, setAnkiStatus] = useState<AnkiStatus>('idle');
@@ -245,7 +258,7 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
 
     setAnkiStatus('adding');
     try {
-        await Anki.addNote(ankiConfig.url, template, {
+        await Anki.addNote(ankiConfig.url, await withLangDeck(template, videoId), {
             sentence: subtitle.text,
             videoName: videoFileName || 'Unknown',
             timestamp: Storage.formatTimeCode(subtitle.startTime),
@@ -261,7 +274,7 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
         dialog.alert(t('anki.refusedTitle'), e.message);
         setTimeout(() => setAnkiStatus('idle'), 3000);
     }
-  }, [ankiConfig, ankiStatus, captureMedia, videoFileName]);
+  }, [ankiConfig, ankiStatus, captureMedia, videoFileName, videoId]);
 
   // Add word with definition to Anki
   const handleWordToAnki = useCallback(async (word: string, definition: string, subtitle: Subtitle, example?: string) => {
@@ -287,7 +300,7 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
       const { screenshotBase64, audioBase64, audioExt } = media;
 
       try {
-          await Anki.addNote(ankiConfig.url, template, {
+          await Anki.addNote(ankiConfig.url, await withLangDeck(template, videoId), {
               sentence: subtitle.text,
               videoName: videoFileName || 'Unknown',
               timestamp: Storage.formatTimeCode(subtitle.startTime),
@@ -302,7 +315,7 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
           dialog.alert(t('anki.refusedTitle'), e?.message ?? String(e));
           throw e;
       }
-  }, [ankiConfig, captureMedia, videoFileName]);
+  }, [ankiConfig, captureMedia, videoFileName, videoId]);
 
   // Moving to another line clears the badge, but never one still recording or
   // adding: that card isn't done, and its own finish sets the badge.
