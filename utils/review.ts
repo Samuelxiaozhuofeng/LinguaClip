@@ -14,6 +14,8 @@ import { getAllVideosFromDB, getVideoFromDB } from './fileSystemAccess';
 import type { SavedLine } from '../types';
 
 export type Deck = 'line' | 'word';
+// Files in <own dir>/clips; `from` = where the file starts in the source video, in seconds.
+export interface Clip { kind: 'video' | 'audio'; file: string; image?: string; from: number }
 export type Reason = 'wrong' | 'peek' | 'breakdown' | 'blur' | 'saved' | 'lookup';
 
 type Stored<T> = { [K in keyof T]: T[K] extends Date ? number : T[K] extends Date | undefined ? number | undefined : T[K] };
@@ -32,6 +34,7 @@ export interface ReviewCard {
   example?: string;
   reasons: Reason[];
   saved: boolean;        // bookmarked by hand
+  clip?: Clip;           // its own copy of the line (utils/clips.ts), so it plays after the video is deleted
   fsrs: Stored<Card>;
   createdAt: number;
 }
@@ -247,17 +250,35 @@ export const recordOutcome = (card: ReviewCard, o: Outcome) =>
 export const countForVideo = async (videoId: string) => (await getAllCards()).filter(c => c.videoId === videoId).length;
 
 // Deleting a video takes its cards along. Read and delete in one transaction, so
-// a card written meanwhile is either seen here or written after.
-export const deleteVideoCards = async (videoId: string) => {
+// a card written meanwhile is either seen here or written after. `keep`: the cards
+// stay (they have their own clips); returns their ids.
+export const deleteVideoCards = async (videoId: string, keep = false): Promise<string[]> => {
   await migrateSavedLines().catch(console.error);
   const t = (await db()).transaction([STORE, META], 'readwrite');
   const s = t.objectStore(STORE);
   const r = s.getAll();
+  let kept: string[] = [];
   r.onsuccess = () => {
-    const ids = (r.result as ReviewCard[]).filter(c => c.videoId === videoId).map(c => c.id);
+    const mine = (r.result as ReviewCard[]).filter(c => c.videoId === videoId);
+    const ids = keep ? [] : mine.map(c => c.id);
+    kept = keep ? mine.map(c => c.id) : [];
     ids.forEach(id => s.delete(id));
     forget(t, ids);
   };
+  await finished(t);
+  changed();
+  return kept;
+};
+
+// Give these cards their clip; a card deleted meanwhile stays deleted, one that got a clip meanwhile keeps it.
+export const setClip = async (ids: string[], clip: Clip) => {
+  await migrateSavedLines().catch(console.error);
+  const t = (await db()).transaction(STORE, 'readwrite');
+  const s = t.objectStore(STORE);
+  for (const id of ids) {
+    const r = s.get(id);
+    r.onsuccess = () => { const c = r.result as ReviewCard | undefined; if (c && !c.clip) s.put({ ...c, clip }); };
+  }
   await finished(t);
   changed();
 };

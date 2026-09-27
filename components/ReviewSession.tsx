@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PracticeMode } from '../types';
 import { ReviewCard, Outcome, recordOutcome, repointVideo, getAllCards, dueQueue, wordBoxes, addWord } from '../utils/review';
-import { getVideoRecord, patchVideoRecord } from '../utils/videoStorage';
+import { patchVideoRecord } from '../utils/videoStorage';
 import { getAudioPaddingConfig } from '../utils/storage';
-import { videoSrcFromPath, pathExists, pickVideoPath } from '../utils/desktop';
+import { videoSrcFromPath, pickVideoPath } from '../utils/desktop';
+import { findSource, type Source } from '../utils/clips';
 import { tokenizeText, getWordTokens } from '../utils/textTokenizer';
 import { Play, RotateCcw, X } from 'lucide-react';
 import { Btn } from './ui';
@@ -21,13 +22,6 @@ import { playSpan, useTimedWords } from '../utils/wordTimes';
 
 // A review round: one card at a time over the whole window (clip on top, a white
 // sheet below, like the practice page), graded by how the dictation went. Also opened on top of the practice page, so it owns its keys.
-
-// The video's current path (the record's wins over the card's snapshot), or null if the file is gone.
-export const findVideo = async (c: ReviewCard): Promise<string | null> => {
-  const rec = c.videoId ? await getVideoRecord(c.videoId).catch(() => null) : null;
-  const path = rec?.videoPath ?? c.videoPath;
-  return path && await pathExists(path) ? path : null;
-};
 
 // The line's audio with the user's lead-in / tail padding.
 export const clipOf = (c: ReviewCard): [number, number] => {
@@ -57,7 +51,10 @@ export const useClip = () => {
       if (v.currentTime >= s.end || v.ended) { stop(); s.then?.(); } else watch();
     });
   };
-  const play = (path: string, from: number, to: number, then?: () => void) => {
+  // `from` / `to` are times in the source video; a card's own clip starts `offset` seconds in.
+  const play = ({ path, offset }: Source, from: number, to: number, then?: () => void) => {
+    from = Math.max(0, from - offset);
+    to -= offset;
     stop();
     const go = () => {
       const v = ref.current;
@@ -108,7 +105,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
   const [round, setRound] = useState(0);
   const [idx, setIdx] = useState(0);
   const [mode, setMode] = useState<PracticeMode>(PracticeMode.INPUT);
-  const [found, setFound] = useState<{ id: string; path: string | null } | null>(null);
+  const [found, setFound] = useState<{ id: string; source: Source | null } | null>(null);
   const [more, setMore] = useState<ReviewCard[] | null>(null);
   const relinked = useRef(new Map<string, string>());
   const writes = useRef<Promise<unknown>[]>([]);
@@ -118,7 +115,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
   usePracticeClock();
   const card = queue[idx] as ReviewCard | undefined;
   const done = idx >= queue.length;
-  const path = card && found?.id === card.id ? found.path : undefined; // undefined = still looking
+  const source = card && found?.id === card.id ? found.source : undefined; // undefined = still looking
+  const path = source && source.path;
   const isWord = card?.deck === 'word';
   // Japanese cards split as on the practice page: the dictionary plus each video's AI check.
   // A card keeps the split it opened with. A Japanese queue shows no boxes until
@@ -159,11 +157,11 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
   };
 
   const playCard = (then?: () => void, fromRatio?: number, toRatio?: number) => {
-    if (!card || !path) return;
+    if (!card || !source) return;
     const [from, to] = clipOf(card);
-    if (fromRatio === undefined) return clip.play(path, from, to, then);
+    if (fromRatio === undefined) return clip.play(source, from, to, then);
     const [a, b] = playSpan(card.start, card.end, fromRatio, toRatio);
-    clip.play(path, a, toRatio === undefined ? to : b, then);
+    clip.play(source, a, toRatio === undefined ? to : b, then);
   };
 
   const timedWords = useTimedWords(card?.videoId, card?.start ?? 0, card?.end ?? 0);
@@ -175,7 +173,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
     if (!card) return;
     let cancelled = false;
     const override = relinked.current.get(card.videoId);
-    (override ? Promise.resolve(override) : findVideo(card).catch(() => null)).then(p => { if (!cancelled) setFound({ id: card.id, path: p }); });
+    findSource(card, override).then(src => { if (!cancelled) setFound({ id: card.id, source: src }); }, () => { if (!cancelled) setFound({ id: card.id, source: null }); });
     return () => { cancelled = true; };
   }, [card]);
   useEffect(() => { if (path) playCard(); }, [found]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -219,7 +217,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
     relinked.current.set(card.videoId, p);
     await patchVideoRecord(card.videoId, { videoPath: p }).catch(console.error); // the record may be gone; the cards still move
     await repointVideo(card.videoId, p).catch(console.error);
-    setFound({ id: card.id, path: p });
+    setFound({ id: card.id, source: { path: p, offset: 0 } });
   };
 
   const again = () => {
@@ -256,6 +254,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
       {/* Same room as practice: the clip on top, a white sheet from below. */}
       <div className="relative min-h-0 flex items-center justify-center" style={{ flex: '60 1 0' }}>
         {clip.video(`block w-full h-full object-contain ${hidden ? 'invisible' : ''}`)}
+        {/* A sound-only clip: its still stands in for the picture. */}
+        {!hidden && source?.image && <img src={videoSrcFromPath(source.image)} alt="" className="absolute inset-0 w-full h-full object-contain" />}
         <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 lg:pr-6 flex items-center justify-between gap-3 text-[13px]`} data-tauri-drag-region="deep">
           <button type="button" onClick={onClose} className="press h-[42px] pl-3.5 pr-4 rounded-full bg-page border border-line text-ink flex items-center gap-1.5"><X size={15} /> {t('session.quit')}</button>
           {!done && <span className="h-[42px] px-4 rounded-full bg-page border border-line text-ink flex items-center tabular-nums">{t('session.progress', { current: idx + 1, total: queue.length })}</span>}

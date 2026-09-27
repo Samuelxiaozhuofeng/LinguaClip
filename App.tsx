@@ -24,6 +24,7 @@ import { markInterruptedJobs, startImportListener } from './utils/importJob';
 import { matches } from './utils/shortcuts';
 import { countLine } from './utils/today';
 import { deleteCards, keepOrphans, orphanCards } from './utils/review';
+import { startClips } from './utils/clips';
 import { CustomConfig, CustomPick } from './utils/customPick';
 import { setCustomPos } from './utils/storage';
 
@@ -49,6 +50,9 @@ export default function App() {
 
   // Cards left by videos deleted in older versions: ask once whether they go too.
   useEffect(() => { askAboutOrphans().catch(console.error); }, []);
+
+  // Cards' own clips: fill in what's missing, now and after card changes (utils/clips.ts).
+  useEffect(() => startClips(), []);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;

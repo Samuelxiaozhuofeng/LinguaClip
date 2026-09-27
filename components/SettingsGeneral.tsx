@@ -1,6 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import { FolderOpen, Loader2 } from 'lucide-react';
 import { AudioPaddingConfig } from '../types';
-import { Field, Seg } from './ui';
+import { Btn, Field, Seg } from './ui';
+import { clipsInfo, revealInFolder } from '../utils/desktop';
+import { getClipProgress, retryClips, subscribeClips } from '../utils/clips';
+import { downloadConvertTool, loadConvertTool } from '../utils/convertTool';
 import { useT, Lang } from '../utils/i18n';
 import { getPracticeConfig, savePracticeConfig } from '../utils/storage';
 import { DICT_OPTIONS, DictLang, getDictChoice, saveDictChoice } from '../utils/dictionary';
@@ -33,6 +37,47 @@ const DictionaryPicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
             />
           </div>
         ))}
+      </div>
+    </Field>
+  );
+};
+
+// Cards keep their own clip of the line (utils/clips.ts): on / off, which kind, and how far along.
+const ClipsRow: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
+  const t = useT();
+  const [on, setOn] = useState(() => getPracticeConfig().saveClips ?? false);
+  const [kind, setKind] = useState(() => getPracticeConfig().clipKind ?? 'video');
+  const p = useSyncExternalStore(subscribeClips, getClipProgress);
+  const [info, setInfo] = useState<{ dir: string; bytes: number } | null>(null);
+  useEffect(() => { clipsInfo().then(setInfo).catch(() => setInfo(null)); }, [p.saved, p.running]);
+  const save = (next: { saveClips?: boolean; clipKind?: 'video' | 'audio' }) => {
+    savePracticeConfig({ ...getPracticeConfig(), ...next });
+    onSaved();
+    if (!(next.saveClips ?? on)) return;
+    // Get the converter first when it's missing, so its download shows in its own row below.
+    loadConvertTool().then(st => st && !st.path ? downloadConvertTool() : true).finally(() => { retryClips(); });
+  };
+  const mb = (b: number) => b < 1e9 ? `${Math.round(b / 1e6)} MB` : `${(b / 1e9).toFixed(1)} GB`;
+  return (
+    <Field label={t('settingsGeneral.clips')} hint={t('settingsGeneral.clipsHint')}
+      right={on && info && <Btn type="button" size="sm" flat onClick={() => revealInFolder(info.dir).catch(console.error)}><FolderOpen size={14} /> {t('settingsGeneral.clipsShow')}</Btn>}>
+      <div className="space-y-2.5 text-sm">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={on} onChange={e => { setOn(e.target.checked); save({ saveClips: e.target.checked }); }} />
+          {t('settingsGeneral.clipsLabel')}
+        </label>
+        {on && <>
+          <Seg size="sm" value={kind} onChange={v => { setKind(v); save({ clipKind: v }); }} options={[
+            { value: 'video' as const, label: t('settingsGeneral.clipVideo') },
+            { value: 'audio' as const, label: t('settingsGeneral.clipAudio') },
+          ]} />
+          <p className="text-mute flex items-center gap-2">
+            {p.running && <Loader2 size={14} className="animate-spin" />}
+            {p.running ? `${t('settingsGeneral.clipsSaving')} ` : ''}{t('settingsGeneral.clipsStatus', { saved: p.saved, total: p.total, size: info ? mb(info.bytes) : '…' })}
+          </p>
+          {p.noVideo > 0 && <p className="text-mute">{t('settingsGeneral.clipsNoVideo', { n: p.noVideo })}</p>}
+          {p.error && <p className="text-mute">{t('settingsGeneral.clipsFailed')}<span className="text-xs break-all">{p.error}</span></p>}
+        </>}
       </div>
     </Field>
   );
@@ -92,6 +137,7 @@ const SettingsGeneral: React.FC<SettingsGeneralProps> = ({
         </label>
       </Field>
 
+      <ClipsRow onSaved={onSaved} />
       <DictionaryPicker onSaved={onSaved} />
       <JaDictRow />
       <ConvertToolRow />

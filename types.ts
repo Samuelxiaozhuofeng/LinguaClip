@@ -56,6 +56,8 @@ export interface PracticeConfig {
   blurPlaybackMode?: BlurPlaybackMode; // Default playback mode for blur mode
   clozeLevel?: ClozeLevel; // Dictation blank density; default 'full'
   autoAddReview?: boolean; // stuck lines go into the sentence deck on their own; default false
+  saveClips?: boolean; // review cards keep their own clip of the line (utils/clips.ts); default false
+  clipKind?: 'video' | 'audio'; // what a new clip is: a small video, or sound + a still; default video
   videoShare?: number; // % of the practice page's width given to the video; default 60
   custom?: import('./utils/customPick').CustomConfig; // the start-of-practice panel's last choice
 }

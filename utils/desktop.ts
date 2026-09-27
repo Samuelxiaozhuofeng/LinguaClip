@@ -71,6 +71,13 @@ export const convertToolStatus = () => invoke<ConvertToolStatus>('convert_tool_s
 export const installConvertTool = () => invoke<void>('install_convert_tool');
 export const onConvertToolProgress = (fn: (pct: number) => void) => listen<number>('convert-tool-progress', e => fn(e.payload));
 // index: among the subtitle tracks only. text: false for picture subtitles (unreadable).
+// Review cards' own clips (src-tauri/src/clips.rs), in <own dir>/clips.
+export const cutClip = (src: string, from: number, to: number, name: string, kind: 'video' | 'audio') =>
+  invoke<{ file: string; image: string | null }>('cut_clip', { src, from, to, name, kind });
+export const sweepClips = (keep: string[]) => invoke<number>('sweep_clips', { keep });
+export const clipsInfo = () => invoke<{ dir: string; bytes: number }>('clips_info');
+export const clipPath = async (file: string) => join(await ownDir(), 'clips', file);
+
 export type SubTrack = { index: number; lang: string | null; title: string | null; codec: string; text: boolean };
 export type VideoProbe = { duration: number | null; video: string | null; audio: string | null; subtitles: SubTrack[] };
 export const probeVideo = (path: string) => invoke<VideoProbe>('probe_video', { path });

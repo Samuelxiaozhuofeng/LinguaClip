@@ -19,7 +19,8 @@ import { cancelPrep, getPrepJob, prepStatus, prepareBreakdowns, subscribePrep } 
 import { cancelLevels } from '../utils/levelPrep';
 import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribeCloze } from '../utils/clozePrep';
 import { cancelSegments, getSegJob, subscribeSeg } from '../utils/jaSegments';
-import { countForVideo, deckCounts, deleteVideoCards, getAllCards, subscribeCards } from '../utils/review';
+import { deckCounts, deleteVideoCards, getAllCards, keepOrphans, subscribeCards } from '../utils/review';
+import { fillClips } from '../utils/clips';
 import { getToday } from '../utils/today';
 
 // Home does two things: pick up the video you were on, and add a new one (the top
@@ -186,10 +187,22 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   };
 
   const handleDelete = async (v: VideoRecord) => {
-    const n = await countForVideo(v.id).catch(() => -1); // unreadable: still warn, the cards go either way
-    const cardsNote = n > 0 ? ' ' + t('home.deleteHasCards', { n }) : n < 0 ? ' ' + t('home.deleteCardsUnknown') : '';
+    // Cards made just now may not have their clip yet: cut them while the video is still here.
+    if (getPracticeConfig().saveClips) await fillClips();
+    const mine = await getAllCards().then(cs => cs.filter(c => c.videoId === v.id)).catch(() => null); // unreadable: still warn, the cards go either way
+    const n = mine ? mine.length : -1;
+    const clipped = mine ? mine.filter(c => c.clip).length : 0;
+    // Cards with their own clip get their own question next, so don't say here that they all go.
+    const cardsNote = clipped ? '' : n > 0 ? ' ' + t('home.deleteHasCards', { n }) : n < 0 ? ' ' + t('home.deleteCardsUnknown') : '';
     const ok = await dialog.confirm(t('home.deleteTitle'), t('home.deleteBody', { name: v.displayName }) + cardsNote, { ok: t('home.deleteOk'), danger: true });
     if (!ok) return;
+    // Cards that saved a clip still play without the video: keep them? Dismissed = nothing is deleted.
+    const keepCards = clipped > 0 && await dialog.confirm(
+      t('home.keepCardsTitle'),
+      t(clipped === n ? 'home.keepCardsBodyAll' : 'home.keepCardsBody', { n, rest: n - clipped }),
+      { ok: t('home.keepCardsOk'), cancel: t('home.keepCardsNo') },
+    );
+    if (keepCards === null) return;
     const trash = !!v.videoPath && await dialog.confirm(
       t('home.deleteFileTitle'),
       t('home.deleteFileBody', { file: fileNameFromPath(v.videoPath) }),
@@ -209,7 +222,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
       return;
     }
     // A failure here leaves orphan cards; the next launch offers to clear them.
-    await deleteVideoCards(v.id).catch(console.error);
+    // Kept cards have no video record any more: don't ask about them as leftovers at launch.
+    await deleteVideoCards(v.id, keepCards).then(keepOrphans).catch(console.error);
     try {
       if (trash) {
         const paths = [v.videoPath!, ...await relatedFilePaths(v.id, v.videoPath!, v.subtitleFileName)];

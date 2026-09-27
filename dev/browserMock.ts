@@ -34,6 +34,7 @@ const mock = {
   tools: { whisper: false, youtube: false },
   jaDict: false,
   convertTool: false,
+  clipFail: null as string | null, // set to make cut_clip fail with this message
   probe: { duration: 19, video: 'h264', audio: 'ac3', subtitles: [] as unknown[] },
   emit,
 };
@@ -83,6 +84,14 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
     case 'probe_video':
       if (!mock.convertTool) throw 'missing:ffmpeg';
       return mock.probe;
+    // Nothing is cut here: files named like the real ones can be made by hand in ~/Movies/LinguaClip/clips.
+    case 'cut_clip':
+      if (mock.clipFail) throw mock.clipFail;
+      return args.kind === 'video' ? { file: `${args.name}.mp4`, image: null } : { file: `${args.name}.m4a`, image: `${args.name}.jpg` };
+    case 'sweep_clips':
+      return 0;
+    case 'clips_info':
+      return { dir: `${__DEV_HOME__}/Movies/LinguaClip/clips`, bytes: 1_234_567 };
     case 'remove_ja_dict':
       mock.jaDict = false;
       return null;

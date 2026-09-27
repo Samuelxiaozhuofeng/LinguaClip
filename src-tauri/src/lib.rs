@@ -1,6 +1,7 @@
 mod anki;
 mod bailian;
 mod cache;
+mod clips;
 mod cloud_asr;
 mod convert;
 #[cfg(test)]
@@ -45,6 +46,9 @@ pub fn run() {
       convert::convert_tool_status,
       convert::install_convert_tool,
       convert::probe_video,
+      clips::cut_clip,
+      clips::sweep_clips,
+      clips::clips_info,
       trash_file
     ])
     .run(tauri::generate_context!())

@@ -4,7 +4,8 @@ import { ReviewCard, Deck, deleteCards, hasAudio, isDue, wordIndexIn } from '../
 import { hasKana } from '../utils/japanese';
 import { Btn, Seg, inputCls } from './ui';
 import { dialog } from './Dialog';
-import { findVideo, clipOf, useClip } from './ReviewSession';
+import { clipOf, useClip } from './ReviewSession';
+import { findSource } from '../utils/clips';
 import { DAY, startOfDay, fmt } from './ReviewPage';
 import { useT } from '../utils/i18n';
 
@@ -39,9 +40,9 @@ const CardsPage: React.FC<{ deck: Deck; cards: ReviewCard[] | null }> = ({ deck,
   };
 
   const listen = async (c: ReviewCard) => {
-    const path = await findVideo(c);
-    if (!path) return dialog.alert(t('session.missingTitle'));
-    clip.play(path, ...clipOf(c));
+    const src = await findSource(c);
+    if (!src) return dialog.alert(t('session.missingTitle'));
+    clip.play(src, ...clipOf(c));
   };
 
   const remove = async (c: ReviewCard) => {
