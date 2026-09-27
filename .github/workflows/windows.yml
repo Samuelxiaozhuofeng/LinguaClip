@@ -25,7 +25,7 @@ jobs:
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Download parts and transcribe a clip (network)
-        run: cargo test --manifest-path src-tauri/Cargo.toml -- --ignored fetch_vad fetch_whisper transcribes_speech
+        run: cargo test --manifest-path src-tauri/Cargo.toml -- --ignored fetch_vad fetch_whisper transcribes_speech downloads_ffmpeg
       # No AI keys exist in CI, so nothing of the author's can end up in the build.
       - run: npx tauri build --bundles nsis
       - uses: actions/upload-artifact@v4

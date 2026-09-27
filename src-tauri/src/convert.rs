@@ -418,7 +418,8 @@ At least one output file must be specified";
   }
 
   // Real network: downloads this platform's ffmpeg into a temp folder, checks its
-  // sha256, unpacks it and runs it.
+  // sha256, unpacks it, then converts a clip it makes itself (mpeg4 + AC-3 in mkv,
+  // so both picture and sound get re-encoded).
   // cargo test --manifest-path src-tauri/Cargo.toml -- --ignored downloads_ffmpeg --nocapture
   #[test]
   #[ignore]
@@ -430,6 +431,16 @@ At least one output file must be specified";
     assert!(out.status.success());
     let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
     assert_eq!(left.len(), 1, "only ffmpeg stays: {left:?}");
+    let clip = dir.join("clip.mkv");
+    let made = crate::paths::command(&exe)
+      .args(["-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=d=2:s=320x240", "-f", "lavfi", "-i", "sine=d=2", "-c:v", "mpeg4", "-c:a", "ac3"])
+      .arg(&clip)
+      .status()
+      .unwrap();
+    assert!(made.success());
+    let (mp4, _) = convert(&exe, &clip, &dir, None, |_| {}).unwrap();
+    let back = probe_with(&exe, &mp4).unwrap();
+    assert_eq!((back.video.as_deref(), back.audio.as_deref()), (Some("h264"), Some("aac")));
     let _ = std::fs::remove_dir_all(&dir);
   }
 
