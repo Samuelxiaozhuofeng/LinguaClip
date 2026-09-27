@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bookmark, Loader2, MoreHorizontal, Pause, Play, PlusCircle, RotateCcw, SkipBack, SkipForward, Check, X, Mic } from 'lucide-react';
+import { ArrowLeft, Bookmark, Loader2, Maximize2, Minimize2, MoreHorizontal, Pause, Play, PlusCircle, RotateCcw, SkipBack, SkipForward, Check, X, Mic } from 'lucide-react';
 import { Subtitle, VideoRecord } from '../types';
 import { Btn, Menu, Seg, Stamp } from './ui';
 import WatchLine from './WatchLine';
@@ -10,7 +10,7 @@ import { useLookup } from '../hooks/useLookup';
 import { useSavedLines } from '../hooks/useSavedLines';
 import { useAnkiIntegration } from '../hooks/useAnkiIntegration';
 import { lineAt, parseSRT } from '../utils/srtParser';
-import { videoSrcFromPath } from '../utils/desktop';
+import { isFullscreen, setFullscreen, videoSrcFromPath } from '../utils/desktop';
 import { detectLang } from '../utils/dictionary';
 import { addWord, getAllCards, hasAudio, ReviewCard } from '../utils/review';
 import { formatTimeCode, getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos, WatchPrefs, WatchSubs } from '../utils/storage';
@@ -26,7 +26,9 @@ import { DictKey, useT } from '../utils/i18n';
 const SPEEDS = [0.75, 0.9, 1, 1.25];
 const SUBS: WatchSubs[] = ['show', 'blur', 'hide'];
 const SEEK = 5; // ← / → seconds
-const IDLE_MS = 2500; // controls fade after this long without the mouse moving
+const IDLE_MS = 2500; // the pointer hides after this long still; both bars show this long on entry
+const TOP_ZONE = 88; // px from the top edge that bring the back button up
+const BOTTOM_ZONE = 140; // px from the bottom edge that bring the controls up
 
 const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ record, onExit }) => {
   const t = useT();
@@ -47,6 +49,9 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   const [drill, setDrill] = useState<ReviewCard[] | null>(null);
   const [looked, setLooked] = useState<Looked[]>([]);
   const [awake, setAwake] = useState(true);
+  const [intro, setIntro] = useState(true);
+  const [near, setNear] = useState({ top: false, bottom: false });
+  const [full, setFull] = useState(false);
   // Saves / lookups since the summary last showed: leaving with none skips it.
   const activity = useRef(0);
   const shownAt = useRef(0);
@@ -236,6 +241,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     if (e.key === 'Escape') {
       if (def.word !== null) closeLookup();
       else if (summary) setSummary(null);
+      else if (full) toggleFull();
       return;
     }
     if (summary || recording) return;
@@ -251,6 +257,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     else if (plain && e.code === 'KeyS') act = save;
     else if (plain && e.code === 'KeyP') act = toggleAutoPause;
     else if (plain && e.code === 'KeyC') act = cycleSubs;
+    else if (plain && e.code === 'KeyF') act = toggleFull;
     else if (matches(e, 'anki') && ankiReady) act = toAnki;
     if (!act) return;
     e.preventDefault();
@@ -262,15 +269,53 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Controls show on mouse movement and while paused; they fade after a still moment.
+  // The back button shows only with the pointer near the top, the controls only near the
+  // bottom (or on them, menus included); both show for a moment on entry so they can be found.
+  // The controls hold still while the pointer is on the subtitle band or a definition is open:
+  // they move the subtitle, and a subtitle that jumps away from the pointer can't be clicked.
+  // The pointer itself hides after a still moment while playing.
   const idle = useRef(0);
-  const wake = () => {
+  const onMove = (e: React.MouseEvent) => {
+    const el = e.target as Element;
+    const top = e.clientY < TOP_ZONE || !!el.closest?.('header');
+    const hold = def.word !== null || !!el.closest?.('[data-watch-line]');
+    setNear(n => {
+      const bottom = hold ? n.bottom : e.clientY > window.innerHeight - BOTTOM_ZONE || !!el.closest?.('footer');
+      return n.top === top && n.bottom === bottom ? n : { top, bottom };
+    });
     setAwake(true);
     window.clearTimeout(idle.current);
     idle.current = window.setTimeout(() => setAwake(false), IDLE_MS);
   };
-  useEffect(() => { wake(); return () => window.clearTimeout(idle.current); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const chrome = awake || !playing || recording || def.word !== null;
+  useEffect(() => {
+    const id = window.setTimeout(() => setIntro(false), IDLE_MS);
+    return () => { window.clearTimeout(id); window.clearTimeout(idle.current); };
+  }, []);
+  const showTop = intro || near.top;
+  const showBottom = intro || near.bottom;
+  const hideCursor = !awake && playing && !near.top && !near.bottom;
+
+  // Fullscreen is the window's; the green button can change it too, so read it back on every resize.
+  const fullRef = useRef(false);
+  fullRef.current = full;
+  useEffect(() => {
+    const sync = () => { isFullscreen().then(setFull).catch(() => {}); };
+    sync();
+    window.addEventListener('resize', sync);
+    return () => {
+      window.removeEventListener('resize', sync);
+      if (fullRef.current) setFullscreen(false).catch(console.error); // leaving the page leaves fullscreen
+    };
+  }, []);
+  // Set the wanted state at once: the Mac's fullscreen animation takes ~0.5 s, and asking
+  // right after the call can still say "not fullscreen". Resizes read the real state back.
+  const toggleFull = () => {
+    const next = !fullRef.current;
+    fullRef.current = next;
+    setFull(next);
+    setFullscreen(next).catch(console.error);
+    window.setTimeout(() => { isFullscreen().then(setFull).catch(() => {}); }, 1200); // after the animation
+  };
 
   const scrub = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.type === 'pointermove' && !e.buttons) return;
@@ -299,11 +344,12 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     ['S', t('watch.keySave')],
     ['P', t('watch.autoPause')],
     ['C', t('watch.keySubs')],
+    ['F', t('watch.fullscreen')],
     ...(ankiReady ? [[formatCombo(combos.anki), t('keys.anki')] as [string, string]] : []),
   ];
 
   return (
-    <div className={`fixed inset-0 bg-black select-none ${chrome ? '' : 'cursor-none'}`} onMouseMove={wake}>
+    <div className={`fixed inset-0 bg-black select-none ${hideCursor ? 'cursor-none' : ''}`} onMouseMove={onMove} onMouseLeave={() => setNear(n => ({ top: false, bottom: def.word !== null && n.bottom }))}>
       <video ref={videoRef} crossOrigin="anonymous" src={videoSrcFromPath(record.videoPath!)} className="absolute inset-0 w-full h-full object-contain"
         onLoadedMetadata={onLoaded} onTimeUpdate={onTime} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={onEnded}
         onError={() => setFailed(true)} onClick={togglePlay} />
@@ -317,7 +363,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
       )}
 
       {/* Back, on the traffic lights' centre line like the practice page */}
-      <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 flex items-center transition-opacity ${chrome ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} data-tauri-drag-region="deep">
+      <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 flex items-center transition-opacity ${showTop ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} data-tauri-drag-region="deep">
         <button type="button" onClick={leave} disabled={recording} title={t('studio.backToVideos')} aria-label={t('studio.backToVideos')}
           className="h-10 pl-3 pr-4 flex items-center gap-1.5 min-w-0 max-w-[60%] rounded-full bg-page border border-line text-ink text-[13px] hover:bg-shade disabled:opacity-60">
           <ArrowLeft size={16} className="shrink-0" /><span className="truncate">{record.displayName}</span>
@@ -337,14 +383,14 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
 
       {/* The subtitle rides above the controls while they show */}
       {shown && (
-        <div className="absolute inset-x-0 px-6 flex justify-center text-center transition-[bottom] duration-200" style={{ bottom: chrome ? 132 : 44 }}>
+        <div data-watch-line className="absolute inset-x-0 px-6 flex justify-center text-center transition-[bottom] duration-200" style={{ bottom: showBottom ? 132 : 44 }}>
           <WatchLine key={shown.id} text={shown.text} subs={prefs.subs} revealed={revealed === shown.id}
             onReveal={() => setRevealed(shown.id)} onWord={w => onWord(w, shown)} />
         </div>
       )}
 
       {/* Controls */}
-      <footer className={`absolute inset-x-4 lg:inset-x-6 bottom-4 lg:bottom-6 px-4 pt-2.5 pb-2 rounded-2xl bg-page shadow-card transition-opacity ${chrome ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      <footer className={`absolute inset-x-4 lg:inset-x-6 bottom-4 lg:bottom-6 px-4 pt-2.5 pb-2 rounded-2xl bg-page shadow-card transition-opacity ${showBottom ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="h-4 flex items-center cursor-pointer" onPointerDown={scrub} onPointerMove={scrub} role="slider" aria-label={t('transport.seek')}
           aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(time)}>
           <div className="relative w-full h-1 rounded-full bg-line">
@@ -376,6 +422,9 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
             <Seg size="sm" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey), title: withKey(t('watch.keySubs'), 'C') }))} />
             <Btn size="sm" tone={prefs.autoPause ? 'accent-soft' : 'white'} onClick={toggleAutoPause} title={withKey(t('watch.autoPauseTitle'), 'P')} aria-pressed={prefs.autoPause} className="hidden md:inline-flex">
               {t('watch.autoPause')}
+            </Btn>
+            <Btn square size="sm" flat onClick={toggleFull} title={withKey(full ? t('watch.exitFullscreen') : t('watch.fullscreen'), 'F')} aria-label={full ? t('watch.exitFullscreen') : t('watch.fullscreen')}>
+              {full ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
             </Btn>
             <Menu up items={[]} className="w-[280px]" trigger={(open, toggle) => (
               <Btn square size="sm" flat onClick={toggle} title={t('home.more')} aria-label={t('home.more')} className={open ? '!bg-shade !text-ink' : ''}><MoreHorizontal size={18} /></Btn>

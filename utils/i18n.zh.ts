@@ -538,4 +538,6 @@ export const zh: Record<keyof typeof en, string> = {
   'watch.keySeek': '后退 / 前进 5 秒',
   'watch.keySave': '收藏这句',
   'watch.keySubs': '字幕显示切换',
+  'watch.fullscreen': '全屏',
+  'watch.exitFullscreen': '退出全屏',
 };

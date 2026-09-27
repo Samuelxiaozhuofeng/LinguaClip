@@ -537,4 +537,6 @@ export const en = {
   'watch.keySeek': 'Back / forward 5 s',
   'watch.keySave': 'Save this line',
   'watch.keySubs': 'Switch subtitle display',
+  'watch.fullscreen': 'Full screen',
+  'watch.exitFullscreen': 'Exit full screen',
 } as const;

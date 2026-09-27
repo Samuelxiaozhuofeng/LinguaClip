@@ -4,6 +4,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { homeDir, join } from '@tauri-apps/api/path';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
@@ -159,3 +160,7 @@ export async function revealInFolder(path: string): Promise<void> {
 export async function transcribeLocation(model: string): Promise<{ dir: string; model: string | null }> {
   return invoke('transcribe_location', { model });
 }
+
+// Window fullscreen (watch mode). The window's own, not the page's: Esc stays with the page.
+export const isFullscreen = (): Promise<boolean> => getCurrentWindow().isFullscreen();
+export const setFullscreen = (on: boolean): Promise<void> => getCurrentWindow().setFullscreen(on);

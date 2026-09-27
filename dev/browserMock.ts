@@ -104,6 +104,12 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
     }
     case 'import_tools':
       return mock.tools;
+    case 'plugin:window|is_fullscreen':
+      return !!document.fullscreenElement;
+    case 'plugin:window|set_fullscreen':
+      // Headless browsers refuse page fullscreen; the call is still in __MOCK__.calls.
+      await (args.value ? document.documentElement.requestFullscreen() : document.exitFullscreen()).catch(() => {});
+      return null;
     case 'probe_import_sizes':
       return { '1080': null, '720': null, '480': null };
     default:

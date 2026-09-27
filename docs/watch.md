@@ -25,10 +25,12 @@
 - `busy()` = 句子 Anki 录音（`ankiStatus === 'recording'`）或释义里单词 Anki 录音（`wordRecording`）。busy 时：不句尾暂停、不 seek / 播放切换、不存位置、`onEnded` 不清零不弹小结、返回键禁用、书签禁用。录音会自己 seek + play 视频。
 - 查词：播放中点词先暂停并记 `resumeAfter`；关释义时若 `resumeAfter` 且无小结则恢复播放；期间手动播放 / 暂停清掉 `resumeAfter`。`lookup(word, line)` 第二参覆盖上下文（小结里再查用）。
 - 切换字幕显示方式清 `revealed`（在模糊里点开的句子切到隐藏要重新藏）。
+- 两条栏按鼠标位置显示：顶部返回按钮 = 鼠标 y < 88 或在 `header` 上；底部控制条 = 距底 < 140 或在 `footer` 上（「…」菜单是 footer 的子元素，鼠标进菜单不收起）；进页面两条都先亮 2.5 秒；暂停不强制显示；鼠标离开窗口两条都收。**鼠标在字幕带（`[data-watch-line]`）上或释义开着时，底部栏状态冻结**——它会把字幕顶上去 / 放下来，不冻结字幕就躲鼠标（`bounce` 实测）。隐藏时 `pointer-events-none`。字幕 `bottom` 跟底部栏：132 / 44。鼠标静止 2.5 秒且在播放、不在两条栏区域 → 隐藏指针。
+- 全屏 = Tauri 窗口全屏（`utils/desktop.ts` 的 `isFullscreen` / `setFullscreen`，capabilities 里 `core:window:allow-is-fullscreen` / `allow-set-fullscreen`）。切换时先记目标状态（Mac 全屏动画约 0.5 秒，立刻回读会读到旧值），之后每次 `resize` 和切换后 1.2 秒回读实际状态（绿色按钮也会改它）；离开页面若在全屏则退出。黑边保持居中（用户拍板，不裁切、不贴顶）。
 
 ## 快捷键（`WatchPage` keys）
 
-空格 播放/暂停 · `replay`（默认 ⇧空格）重听当前句 · ⌘← 或 `prev` 上一句（在句内 → 前一句；在空档 → 刚说完那句）· ⌘→ 或 `next` 下一句 · ←/→ ±5 秒 · S 收藏切换 · P 句尾暂停 · C 字幕 show→blur→hide · `anki`（默认 ⌘⇧N）· Esc 只关释义 / 小结，**不退出页面**。
+空格 播放/暂停 · `replay`（默认 ⇧空格）重听当前句 · ⌘← 或 `prev` 上一句（在句内 → 前一句；在空档 → 刚说完那句）· ⌘→ 或 `next` 下一句 · ←/→ ±5 秒 · S 收藏切换 · P 句尾暂停 · C 字幕 show→blur→hide · F 全屏切换 · `anki`（默认 ⌘⇧N）· Esc 依次：关释义 → 关小结 → 退全屏，**从不退出页面**。
 小结、听写（`ReviewSession`）开着时只认 Esc；输入法组字中不处理。字母键要求无修饰键。
 
 ## 小结
@@ -41,4 +43,4 @@
 ## 验证
 
 - `node test-watch.mjs`；浏览器实测见 CLAUDE.md（面板 `radio`「看剧」→「开始看剧」；样片第 2、3 句首尾相接，可测句尾暂停停在第 2 句内）。
-- 浏览器验不到：Anki 录音成卡、Mac 全屏、真实视频解码。
+- 浏览器验不到：Anki 录音成卡、Mac 原生全屏（mock 用页面全屏代替，无头浏览器可能拒绝）、真实视频解码。
