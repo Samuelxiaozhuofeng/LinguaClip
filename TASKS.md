@@ -9,7 +9,7 @@
 - [x] 浏览器实测（弹窗、进度卡、移原文件、同文件两次导入、自带字幕重试、转换后重试、设置页下载）
 - [x] 三路审码：Opus / 6-sol / Gemini 共 7 条核实已修（记进错题本）
 - [x] npm run release
-- [ ] Windows：gh workflow run windows.yml 真链路（需用户点头）
+- [x] Windows：windows.yml 真链路通过（run 36322999830，含下载 ffmpeg + 转一段视频）
 - [ ] 用户真机验收
 
 # 看剧模式（产品文档：https://claude.ai/code/artifact/ff7ab143-727c-499e-8ebd-3ba7f1b2fe5b）
