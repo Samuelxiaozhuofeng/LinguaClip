@@ -1,16 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PracticeMode } from '../types';
-import { ReviewCard, Outcome, recordOutcome, repointVideo, getAllCards, dueQueue, wordBoxes, addWord } from '../utils/review';
+import { Rating, type Grade } from 'ts-fsrs';
+import { ReviewCard, recordOutcome, repointVideo, getAllCards, dueQueue, addWord, gradeOf, previewDue, schedule } from '../utils/review';
 import { patchVideoRecord } from '../utils/videoStorage';
-import { getAudioPaddingConfig } from '../utils/storage';
+import { getAudioPaddingConfig, getWordFront } from '../utils/storage';
 import { videoSrcFromPath, pickVideoPath } from '../utils/desktop';
 import { findSource, type Source } from '../utils/clips';
-import { tokenizeText, getWordTokens } from '../utils/textTokenizer';
 import { Play, RotateCcw, X } from 'lucide-react';
 import { Btn } from './ui';
 import { IS_WINDOWS } from '../utils/platform';
 import DictationLine from './DictationLine';
 import DefinitionPanel from './DefinitionPanel';
+import { WordFace, GradeBar } from './WordReview';
+import { matches } from '../utils/shortcuts';
 import { useLookup } from '../hooks/useLookup';
 import { detectLang } from '../utils/dictionary';
 import type { DeckLang } from '../utils/deckLang';
@@ -21,7 +23,9 @@ import { settleSplits } from '../utils/jaSegments';
 import { playSpan, useTimedWords } from '../utils/wordTimes';
 
 // A review round: one card at a time over the whole window (clip on top, a white
-// sheet below, like the practice page), graded by how the dictation went. Also opened on top of the practice page, so it owns its keys.
+// sheet below, like the practice page). A sentence card is dictated, a word card is
+// thought about then turned; either ends on the four FSRS buttons, and "Again" comes
+// back at the end of the round. Also opened on top of the practice page, so it owns its keys.
 
 // The line's audio with the user's lead-in / tail padding.
 export const clipOf = (c: ReviewCard): [number, number] => {
@@ -77,26 +81,6 @@ export const useClip = () => {
   return { play, stop, video };
 };
 
-// A kept meaning is HTML (dictionary text we escaped, but also raw AI text and
-// glyph images from dictionary pages), so only <b> <i> <br> and http(s) <img>
-// get through; everything else is flattened to its text.
-const clean = (html: string): string => {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const walk = (n: Node): string => [...n.childNodes].map(c => {
-    if (c.nodeType === Node.TEXT_NODE) return (c.textContent ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    if (!(c instanceof Element)) return '';
-    const tag = c.tagName.toLowerCase();
-    if (tag === 'br') return '<br/>';
-    if (tag === 'script' || tag === 'style') return '';
-    if (tag === 'img') { const src = c.getAttribute('src') ?? ''; return /^https?:\/\//.test(src) ? `<img src="${src.replace(/"/g, '&quot;')}">` : ''; }
-    return tag === 'b' || tag === 'i' ? `<${tag}>${walk(c)}</${tag}>` : walk(c);
-  }).join('');
-  return walk(doc.body);
-};
-
-const Html: React.FC<{ html?: string; className?: string }> = ({ html, className }) =>
-  html ? <div className={className} dangerouslySetInnerHTML={{ __html: clean(html) }} /> : null;
-
 // `langOf` (from a library page): each card's language deck. Then lookups use the card's
 // own language, and "more" after the round stays in the deck the round came from.
 const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf?: (c: ReviewCard) => DeckLang; lang?: DeckLang | 'all' }> = ({ cards, onClose, langOf, lang = 'all' }) => {
@@ -107,6 +91,11 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
   const [mode, setMode] = useState<PracticeMode>(PracticeMode.INPUT);
   const [found, setFound] = useState<{ id: string; source: Source | null } | null>(null);
   const [more, setMore] = useState<ReviewCard[] | null>(null);
+  const [turned, setTurned] = useState(false); // word card: answer showing
+  const [suggest, setSuggest] = useState<Grade | undefined>(); // sentence card: what the dictation says
+  const [at, setAt] = useState(0); // when the buttons came up: shown days and kept days share it
+  const front = useMemo(getWordFront, []);
+  const repeats = useRef(new Set<string>()); // cards already graded "Again" this round
   const relinked = useRef(new Map<string, string>());
   const writes = useRef<Promise<unknown>[]>([]);
   const clip = useClip();
@@ -138,10 +127,6 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
   }, [queue, hasJa, jaOn]);
   const splitsReady = !hasJa || settled?.queue === queue;
   const splitVersion = useMemo(() => jaVersion, [card?.id, settled]); // eslint-disable-line react-hooks/exhaustive-deps
-  const blanks = useMemo(
-    () => card?.deck === 'word' ? wordBoxes(getWordTokens(tokenizeText(card.text)).map(w => w.value), card.word!) : undefined,
-    [card, splitVersion], // eslint-disable-line react-hooks/exhaustive-deps
-  );
 
   // Words in the answer can be looked up, and kept, as on the practice page (no Anki: that records off the practice video).
   const dictLang = useMemo(() => {
@@ -166,7 +151,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
 
   const timedWords = useTimedWords(card?.videoId, card?.start ?? 0, card?.end ?? 0);
 
-  const next = () => { clip.stop(); setMode(PracticeMode.INPUT); setIdx(i => i + 1); };
+  const next = () => { clip.stop(); setMode(PracticeMode.INPUT); setTurned(false); setSuggest(undefined); setAt(0); setIdx(i => i + 1); };
 
   // Find this card's file, then play it once.
   useEffect(() => {
@@ -176,7 +161,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
     findSource(card, override).then(src => { if (!cancelled) setFound({ id: card.id, source: src }); }, () => { if (!cancelled) setFound({ id: card.id, source: null }); });
     return () => { cancelled = true; };
   }, [card]);
-  useEffect(() => { if (path) playCard(); }, [found]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A word card stays silent until it is turned: the sound would give the answer away.
+  useEffect(() => { if (path && !isWord) playCard(); }, [found]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Round over: anything still due in this deck? Waits for the grades to land first.
   useEffect(() => {
@@ -190,24 +176,29 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
     return () => { cancelled = true; };
   }, [done, queue]);
 
-  const result = (o: Outcome) => {
-    if (!card) return;
-    if (!isWord) countLine();
+  const grading = !!card && !!path && splitsReady && !done && (isWord ? turned : mode === PracticeMode.FEEDBACK);
+  useEffect(() => { if (grading) setAt(Date.now()); }, [grading, card]);
+  // A card the scheduler can't read still gets its buttons, just without the days.
+  const due = useMemo(() => { try { return card && at ? previewDue(card, at) : null; } catch (e) { console.error(e); return null; } }, [card, at]);
+
+  const turn = () => { setTurned(true); playCard(); };
+  const complete = () => { if (mode === PracticeMode.INPUT) setMode(PracticeMode.FEEDBACK); };
+  const replay = (_auto?: boolean, fromRatio?: number, toRatio?: number) => playCard(undefined, fromRatio, toRatio);
+
+  // Recorded with the moment the buttons came up, so the days kept are the days shown.
+  const grade = (g: Grade) => {
+    if (!card || !at) return;
     const videoPath = relinked.current.get(card.videoId) ?? card.videoPath;
-    writes.current.push(recordOutcome({ ...card, videoPath }, o).catch(console.error));
-  };
-
-  const complete = (correct: boolean) => {
-    if (mode === PracticeMode.FEEDBACK) next();
-    else if (correct && !isWord) next();
-    else setMode(PracticeMode.FEEDBACK);
-  };
-
-  const replay = (auto?: boolean, fromRatio?: number, toRatio?: number) => {
-    if (!auto) return playCard(undefined, fromRatio, toRatio);
-    // All right: hear it once more, then the next line (a word card stops on its meaning).
-    if (isWord) { setMode(PracticeMode.FEEDBACK); playCard(); }
-    else playCard(next);
+    writes.current.push(recordOutcome({ ...card, videoPath }, g, at).catch(console.error));
+    if (!isWord && !repeats.current.has(card.id)) countLine();
+    if (g === Rating.Again) {
+      repeats.current.add(card.id);
+      try {
+        const again = { ...card, videoPath, fsrs: schedule(card, g, at).fsrs };
+        setQueue(q => [...q, again]);
+      } catch (e) { console.error(e); } // unreadable schedule: no second pass, but the round goes on
+    }
+    next();
   };
 
   const relink = async () => {
@@ -227,12 +218,18 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
     setRound(r => r + 1);
     setIdx(0);
     setMode(PracticeMode.INPUT);
+    setTurned(false);
+    setSuggest(undefined);
+    setAt(0);
+    repeats.current.clear();
   };
 
-  // Own keys only: Esc closes the definition, else quits; Enter moves on from feedback; nothing reaches the page underneath.
+  // Own keys only: Esc closes the definition, else quits; Space turns a word card; 1–4 grade,
+  // Enter takes the suggested grade; nothing reaches the page underneath.
   const defOpen = def.word !== null;
-  const keys = useRef({ onClose, next, mode, done, defOpen, closeDef });
-  keys.current = { onClose, next, mode, done, defOpen, closeDef };
+  const front0 = isWord && !turned && !!path && splitsReady && !done;
+  const keys = useRef({ onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard });
+  keys.current = { onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return; // Esc / Enter inside a Japanese input method
@@ -240,34 +237,42 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
       const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
       const k = keys.current;
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (k.defOpen) k.closeDef(); else k.onClose(); return; }
-      if (e.key === 'Enter' && !typing && !k.done && !k.defOpen && k.mode === PracticeMode.FEEDBACK) { e.preventDefault(); e.stopPropagation(); k.next(); return; }
+      const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
+      if (!typing && !k.done && !k.defOpen) {
+        const hit = (run: () => void) => { e.preventDefault(); e.stopPropagation(); run(); };
+        if (k.front0 && plain && e.code === 'Space') return hit(k.turn);
+        if (k.grading && plain && /^[1-4]$/.test(e.key)) return hit(() => k.grade(+e.key as Grade));
+        if (k.grading && plain && e.key === 'Enter' && k.suggest) return hit(() => k.grade(k.suggest!));
+        if (k.grading && matches(e, 'replay')) return hit(() => k.playCard());
+      }
       if (!inside) e.stopPropagation();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
-  const hidden = done || path === null;
+  const hidden = done || path === null || front0;
 
   return (
     <div ref={rootRef} onKeyDown={e => e.stopPropagation()} className="fixed inset-0 z-50 bg-black flex flex-col fade-in">
       {/* Same room as practice: the clip on top, a white sheet from below. */}
-      <div className="relative min-h-0 flex items-center justify-center" style={{ flex: '60 1 0' }}>
+      <div className="relative min-h-0 flex items-center justify-center" style={{ flex: isWord && turned ? '45 1 0' : '60 1 0' }}>
         {clip.video(`block w-full h-full object-contain ${hidden ? 'invisible' : ''}`)}
         {/* A sound-only clip: its still stands in for the picture. */}
         {!hidden && source?.image && <img src={videoSrcFromPath(source.image)} alt="" className="absolute inset-0 w-full h-full object-contain" />}
+        {front0 && <p className="absolute text-[13px] text-mute">{t('review.hidden')}</p>}
         <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 lg:pr-6 flex items-center justify-between gap-3 text-[13px]`} data-tauri-drag-region="deep">
           <button type="button" onClick={onClose} className="press h-[42px] pl-3.5 pr-4 rounded-full bg-page border border-line text-ink flex items-center gap-1.5"><X size={15} /> {t('session.quit')}</button>
           {!done && <span className="h-[42px] px-4 rounded-full bg-page border border-line text-ink flex items-center tabular-nums">{t('session.progress', { current: idx + 1, total: queue.length })}</span>}
         </header>
       </div>
 
-      <section className="relative -mt-6 min-h-[340px] bg-page rounded-t-3xl flex flex-col" style={{ flex: '40 1 0' }}>
+      <section className="relative -mt-6 min-h-[340px] bg-page rounded-t-3xl flex flex-col" style={{ flex: isWord && turned ? '55 1 0' : '40 1 0' }}>
         {!done && (
           <div className="px-6 lg:px-24 pt-6">
             {queue.length <= 60 ? (
               <div className="flex gap-[5px]">
-                {queue.map((c, i) => <span key={c.id} className={`flex-1 h-1 rounded-full ${i < idx ? 'bg-ink' : i === idx ? 'bg-accent' : 'bg-line'}`} />)}
+                {queue.map((c, i) => <span key={i} className={`flex-1 h-1 rounded-full ${i < idx ? 'bg-ink' : i === idx ? 'bg-accent' : 'bg-line'}`} />)}
               </div>
             ) : (
               <div className="h-1 rounded-full bg-line"><div className="h-full rounded-full bg-ink" style={{ width: `${(idx / queue.length) * 100}%` }} /></div>
@@ -281,7 +286,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
             {done ? (
               <div className="flex flex-col items-center gap-3 fade-in">
                 <h2 className="text-[34px] font-semibold tracking-[-0.02em] leading-tight">{t('session.doneTitle')}</h2>
-                <p className="text-sm text-mute leading-relaxed max-w-md">{t('session.doneBody', { n: queue.length })}</p>
+                <p className="text-sm text-mute leading-relaxed max-w-md">{t('session.doneBody', { n: new Set(queue.map(c => c.id)).size })}</p>
                 <div className="pt-4 flex gap-2.5">
                   {!!more?.length && <Btn onClick={again}>{t('session.doneMore', { n: more.length })}</Btn>}
                   <Btn tone="accent" onClick={onClose} autoFocus>{t('session.back')}</Btn>
@@ -297,34 +302,40 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
                 </div>
               </div>
             ) : path && card && splitsReady ? (
-              <>
+              isWord ? (
+                <WordFace key={`${round}-${idx}`} card={card} front={front} turned={turned} onLookup={lookup} onReplay={() => playCard()} />
+              ) : (
                 <DictationLine
-                  key={`${round}-${card.id}`}
+                  key={`${round}-${idx}`}
                   targetText={card.text}
                   mode={mode}
-                  blanks={blanks}
                   splitVersion={splitVersion}
-                  nextLabel={isWord ? t('session.next') : undefined}
+                  hideNext
                   onComplete={complete}
                   onReplay={replay}
                   timedWords={timedWords}
                   onLookup={lookup}
-                  onResult={result}
+                  onResult={o => setSuggest(gradeOf(o))}
                 />
-                {isWord && mode === PracticeMode.FEEDBACK && (
-                  <section className="w-full max-w-2xl px-5 py-4 rounded-2xl bg-shade text-left space-y-2 fade-in">
-                    <h3 className="text-xs text-mute">{t('session.meaning')}</h3>
-                    <p className="font-serif text-2xl">{card.word}</p>
-                    <Html html={card.definition} className="text-[15px] leading-relaxed" />
-                    <Html html={card.example} className="text-[15px] leading-relaxed text-mute" />
-                  </section>
-                )}
-              </>
+              )
             ) : null}
           </div>
         </div>
 
-        {!hidden && path && (
+        {front0 ? (
+          <footer className="shrink-0 h-[96px] flex items-center justify-center gap-3">
+            <button type="button" onClick={e => { e.currentTarget.blur(); turn(); }}
+              className="press h-[52px] px-7 rounded-full bg-accent text-white text-[15px] font-semibold flex items-center gap-2.5">
+              {t('review.show')}<span className="text-xs font-medium px-2 py-0.5 rounded-md bg-white/20">{t('review.space')}</span>
+            </button>
+            <Btn size="sm" flat onClick={next}>{t('session.skip')}</Btn>
+          </footer>
+        ) : grading && at ? (
+          <footer className="shrink-0 h-[96px] flex items-center justify-center gap-3 text-ink">
+            {!isWord && <Btn square flat onClick={() => playCard()} title={t('transport.replayLine')} aria-label={t('transport.replayLine')} className="!text-ink"><RotateCcw size={18} /></Btn>}
+            <GradeBar due={due} now={at} suggest={isWord ? undefined : suggest} onGrade={grade} />
+          </footer>
+        ) : !hidden && path && (
           <footer className="shrink-0 h-[76px] flex items-center justify-center gap-2 text-ink">
             <Btn square flat onClick={() => playCard()} title={t('transport.replayLine')} aria-label={t('transport.replayLine')} className="!text-ink"><RotateCcw size={18} /></Btn>
             <button type="button" onClick={e => { e.currentTarget.blur(); playCard(); }} aria-label={t('transport.playSpace')}

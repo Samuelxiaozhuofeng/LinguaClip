@@ -1,4 +1,4 @@
-import { Subtitle, PracticeConfig, AudioPaddingConfig, ClozeLevel } from '../types';
+import { Subtitle, PracticeConfig, AudioPaddingConfig, ClozeLevel, WordFront } from '../types';
 import { CustomConfig, parseCustomConfig } from './customPick';
 
 const STORAGE_KEY_PRACTICE = 'linguaclip_practice_config';
@@ -40,6 +40,8 @@ export const getPracticeConfig = (): PracticeConfig => {
 export const savePracticeConfig = (config: PracticeConfig) => {
   localStorage.setItem(STORAGE_KEY_PRACTICE, JSON.stringify(config));
 };
+
+export const getWordFront = (): WordFront => getPracticeConfig().wordFront === 'sentence' ? 'sentence' : 'word';
 
 // --- Audio Padding Config Storage ---
 

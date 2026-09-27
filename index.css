@@ -19,6 +19,8 @@
 
 * { box-sizing: border-box; }
 html, body { background: var(--paper); color: var(--ink); font-variant-numeric: tabular-nums; }
+/* Furigana: small grey kana, never serif. */
+rt { font-family: "PingFang SC", system-ui, sans-serif; font-size: 0.42em; font-weight: 400; color: var(--mute); letter-spacing: 0.04em; }
 ::selection { background: rgba(232,73,43,.18); color: var(--ink); }
 
 /* A raised surface: dialogs, drawers, menus. No card-in-card: rows inside use hairlines. */

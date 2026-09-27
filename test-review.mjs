@@ -42,6 +42,17 @@ const lapsed = R.schedule(c, { correct: false, helped: false }, t);
 assert.ok(lapsed.fsrs.due - t < gaps[3], 'a miss should come back sooner');
 assert.equal(lapsed.fsrs.lapses, 1);
 
+// The four buttons: the day shown under each is the day kept, fuzz and all.
+for (const card of [fresh, c, lapsed]) {
+  const at = t + 12345;
+  const shown = R.previewDue(card, at);
+  for (const g of [1, 2, 3, 4]) assert.equal(R.schedule(card, g, at).fsrs.due, shown[g], `grade ${g} kept a different day than shown`);
+  assert.ok(shown[1] <= shown[2] && shown[2] <= shown[3] && shown[3] <= shown[4], 'harder buttons come back sooner');
+}
+// "Again", then seen once more in the same round: still a whole day off, never "due now".
+const redo = R.schedule(R.schedule(c, 1, t), 3, t + 60000);
+assert.ok(redo.fsrs.due >= t + DAY * 0.9 && redo.fsrs.reps === c.fsrs.reps + 2);
+
 // Stored form round-trips as plain numbers (IndexedDB-safe, no Date objects).
 assert.equal(typeof lapsed.fsrs.due, 'number');
 assert.ok(lapsed.fsrs.last_review === undefined || typeof lapsed.fsrs.last_review === 'number');

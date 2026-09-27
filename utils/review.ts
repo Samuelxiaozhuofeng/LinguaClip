@@ -6,7 +6,8 @@
  * carries its own copy of the line, its times and the video path. Deleting a
  * video deletes its cards too (deleteVideoCards).
  *
- * Grading is automatic, from how the dictation went: nobody rates themselves.
+ * The learner grades each card with FSRS's four buttons; a sentence card's
+ * dictation only suggests one (gradeOf).
  */
 import { createEmptyCard, fsrs, Rating, State, type Card, type Grade } from 'ts-fsrs';
 import { parseSRT } from './srtParser';
@@ -75,10 +76,17 @@ export const withReason = (card: ReviewCard, reason: Reason): ReviewCard => ({
   saved: card.saved || reason === 'saved',
 });
 
-export const schedule = (card: ReviewCard, o: Outcome, now = Date.now()): ReviewCard => ({
+export const schedule = (card: ReviewCard, o: Outcome | Grade, now = Date.now()): ReviewCard => ({
   ...card,
-  fsrs: toStored(scheduler.next(fromStored(card.fsrs), new Date(now), gradeOf(o)).card),
+  fsrs: toStored(scheduler.next(fromStored(card.fsrs), new Date(now), typeof o === 'number' ? o : gradeOf(o)).card),
 });
+
+// When each button would bring the card back. Fuzz is seeded from `now`, so the
+// grade must be recorded with the same `now` for the days shown to be the days kept.
+export const previewDue = (card: ReviewCard, now: number): Record<Grade, number> => {
+  const r = scheduler.repeat(fromStored(card.fsrs), new Date(now));
+  return { [Rating.Again]: +r[Rating.Again].card.due, [Rating.Hard]: +r[Rating.Hard].card.due, [Rating.Good]: +r[Rating.Good].card.due, [Rating.Easy]: +r[Rating.Easy].card.due } as Record<Grade, number>;
+};
 
 export const isDue = (c: ReviewCard, now = Date.now()) => hasAudio(c) && c.fsrs.due <= now;
 
@@ -244,8 +252,8 @@ export const savedStarts = async (videoId: string): Promise<Set<string>> =>
 
 // Schedules from the stored card (not the round's snapshot) and only touches the schedule
 // and path; a card deleted meanwhile stays deleted.
-export const recordOutcome = (card: ReviewCard, o: Outcome) =>
-  update(card.id, old => old ? { ...old, videoPath: card.videoPath ?? old.videoPath, fsrs: schedule(old, o).fsrs } : undefined);
+export const recordOutcome = (card: ReviewCard, o: Outcome | Grade, now = Date.now()) =>
+  update(card.id, old => old ? { ...old, videoPath: card.videoPath ?? old.videoPath, fsrs: schedule(old, o, now).fsrs } : undefined);
 
 export const countForVideo = async (videoId: string) => (await getAllCards()).filter(c => c.videoId === videoId).length;
 

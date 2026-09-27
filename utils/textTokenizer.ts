@@ -2,7 +2,7 @@
  * Text Tokenizer Utility
  * Separates text into words and punctuation tokens for practice input
  */
-import { hasKana, jaGroups, kanaFold } from './japanese';
+import { hasKana, jaGroups, jaLemma, kanaFold, furigana, type Ruby } from './japanese';
 
 export enum TokenType {
   WORD = 'WORD',
@@ -207,3 +207,51 @@ export const compareWords = (tokens: Token[], wordInputs: string[]): WordCompari
   return results;
 };
 
+
+// Which word tokens are `word` in the line, to mark it: the same word ignoring case
+// and punctuation; else (Japanese) every group the word overlaps; else the group
+// looked up as it (諦めた → 諦める). Not in the line: none, so nothing is marked wrongly.
+export const targetWords = (words: string[], word: string): number[] => {
+  const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}'’-]/gu, '');
+  const i = words.findIndex(w => norm(w) === norm(word));
+  if (i >= 0 || !word.trim()) return i >= 0 ? [i] : [];
+  if (!hasKana(word + words.join(''))) return [];
+  const at = words.join('').indexOf(word);
+  if (at < 0) {
+    const k = words.findIndex(w => jaLemma(w) === word);
+    return k >= 0 ? [k] : [];
+  }
+  let start = 0;
+  return words.flatMap((w, k) => {
+    const hit = start < at + word.length && start + w.length > at;
+    start += w.length;
+    return hit ? [k] : [];
+  });
+};
+
+// A line laid out for a word card: its words (clickable to look up) in pieces, each
+// piece with its furigana (Japanese, dictionary loaded) and whether it is the kept word.
+// Found as written, exactly those letters are marked; else the whole word targetWords picks.
+export type Piece = Ruby & { target: boolean };
+export type Group = { word?: string; pieces: Piece[] };
+export const sentenceParts = (text: string, word = ''): Group[] => {
+  const tokens = tokenizeText(text);
+  const at = word && hasKana(text) ? text.indexOf(word) : -1;
+  const [a, b] = at >= 0 ? [at, at + word.length] : [-1, -1];
+  const picked = at >= 0 ? new Set<number>() : new Set(targetWords(getWordTokens(tokens).map(w => w.value), word));
+  let offset = 0, ord = 0;
+  return tokens.map(tk => {
+    if (tk.type !== TokenType.WORD) { offset += tk.value.length; return { pieces: [{ s: tk.value, target: false }] }; }
+    const whole = picked.has(ord++);
+    const pieces = furigana(tk.value, tk.reading).flatMap((p): Piece[] => {
+      const from = offset;
+      offset += p.s.length;
+      if (at < 0) return [{ ...p, target: whole }];
+      if (p.rt) return [{ ...p, target: from < b && offset > a }];
+      // Kana cut at the word's edges: 諦める|しか.
+      const cuts = [0, Math.min(Math.max(a - from, 0), p.s.length), Math.min(Math.max(b - from, 0), p.s.length), p.s.length];
+      return [0, 1, 2].map(k => ({ s: p.s.slice(cuts[k], cuts[k + 1]), target: k === 1 })).filter(x => x.s);
+    });
+    return { word: tk.value, pieces };
+  });
+};

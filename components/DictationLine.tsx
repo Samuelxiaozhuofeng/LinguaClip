@@ -23,6 +23,7 @@ interface Props {
   onLookup: (word: string) => void;
   blanks?: number[]; // word indices the user types; omit = every word
   nextLabel?: string; // feedback's forward button; defaults to "next line"
+  hideNext?: boolean; // no forward button: the caller moves on (review's grade buttons)
   // Once per attempt, when the line is done (all right, or submitted): did it
   // come out right, and was help used (peek, or playing from a word).
   onResult?: (o: { correct: boolean; helped: boolean }) => void;
@@ -49,7 +50,7 @@ export const slotEm = (word: string) =>
 // Typing and the answer share one setting, so submitting changes colours, not positions.
 export const LINE = 'flex flex-wrap justify-center items-baseline gap-x-[0.3em] font-serif text-[38px] leading-[54px]';
 
-const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay, onLookup, blanks, nextLabel, onResult, extra, splitVersion, timedWords }) => {
+const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay, onLookup, blanks, nextLabel, hideNext, onResult, extra, splitVersion, timedWords }) => {
   const t = useT();
   // A Japanese line is re-split when its dictionary or AI cut points arrive, but
   // never under the user's fingers: once something is typed the split holds.
@@ -250,10 +251,12 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
 
         <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
           <span className="text-[13px] text-mute">{inputs.some((w, i) => isBlank(i) && w.trim()) ? t('dictation.score', { right: typed - wrong.size, total: typed }) : t('dictation.revealed')}</span>
-          <div className="flex gap-2.5">
-            <Btn tone="accent" onClick={() => onComplete(true)}>{nextLabel ?? t('common.nextLine')} <ArrowRight size={15} /></Btn>
-            {extra}
-          </div>
+          {!hideNext && (
+            <div className="flex gap-2.5">
+              <Btn tone="accent" onClick={() => onComplete(true)}>{nextLabel ?? t('common.nextLine')} <ArrowRight size={15} /></Btn>
+              {extra}
+            </div>
+          )}
         </div>
       </div>
     );

@@ -1,5 +1,8 @@
 import { ankiRequest } from './desktop';
-import { AnkiConfig, AnkiCardTemplateConfig } from '../types';
+import { AnkiConfig, AnkiCardTemplateConfig, WordFront } from '../types';
+import { getWordFront } from './storage';
+import { sentenceParts } from './textTokenizer';
+import { furigana, readingOf, type Ruby } from './japanese';
 
 const STORAGE_KEY_ANKI = 'linguaclip_anki_config';
 const DEFAULT_URL = 'http://127.0.0.1:8765';
@@ -87,7 +90,12 @@ export const addNote = async (
   }
 ) => {
   const fields: Record<string, string> = {};
-  const sentence = data.word ? boldWord(data.sentence, data.word) : data.sentence;
+  // Our own note type gets furigana as <ruby> (its CSS decides when it shows) and is
+  // brought up to the current template first; anyone else's gets plain bold text.
+  const own = template.modelName === LINGUACLIP_NAME;
+  if (own) await syncLinguaClipTemplate(url).catch(console.error);
+  const sentence = own ? rubySentence(data.sentence, data.word) : data.word ? boldWord(data.sentence, data.word) : data.sentence;
+  const word = own && data.word ? rubyHtml(furigana(data.word, readingOf(data.word))) : data.word;
   const picture: any[] = [];
   const audio: any[] = [];
 
@@ -98,7 +106,7 @@ export const addNote = async (
     if (appKey === 'sentence') fields[ankiField] = sentence;
     else if (appKey === 'videoName') fields[ankiField] = data.videoName;
     else if (appKey === 'timestamp') fields[ankiField] = data.timestamp;
-    else if (appKey === 'word') fields[ankiField] = data.word || '';
+    else if (appKey === 'word') fields[ankiField] = word || '';
     else if (appKey === 'definition') fields[ankiField] = data.definition || '';
     else if (appKey === 'example') fields[ankiField] = data.example || '';
     else if (appKey === 'context') fields[ankiField] = sentence; // Context is usually the full sentence
@@ -145,6 +153,13 @@ export const boldWord = (sentence: string, word: string): string => {
   return sentence.replace(re, (m) => `<b>${m}</b>`);
 };
 
+const rubyHtml = (parts: Ruby[]) => parts.map(p => p.rt ? `<ruby>${p.s}<rt>${p.rt}</rt></ruby>` : p.s).join('');
+
+// The line for a LinguaClip note: kanji with their kana (Japanese, dictionary loaded),
+// the kept word in <b>. Plain text otherwise, as before.
+export const rubySentence = (sentence: string, word?: string): string =>
+  sentenceParts(sentence, word).flatMap(g => g.pieces).map(p => p.target ? `<b>${rubyHtml([p])}</b>` : rubyHtml([p])).join('').replace(/<\/b><b>/g, '');
+
 // --- One-click LinguaClip card: a deck + note type made for this app ---
 
 export const LINGUACLIP_NAME = 'LinguaClip';
@@ -162,30 +177,56 @@ export const LINGUACLIP_FIELDS: Record<string, string> = {
   Time: 'timestamp',
 };
 
-const LINGUACLIP_FRONT = `{{Audio}}
-<div class="shot">{{Image}}</div>
-{{#Word}}<div class="word">{{Word}}</div>{{/Word}}`;
+// Sentence notes (no Word): sound + picture, answer the line. Word notes: think from the
+// word (or its line, per Settings), then the sound, picture, kana and meaning.
+export const linguaClipFront = (front: WordFront) => `{{#Word}}<div class="front">${front === 'word' ? '<div class="word">{{Word}}</div>' : '<div class="sentence">{{Sentence}}</div>'}</div>{{/Word}}
+{{^Word}}{{Audio}}
+<div class="shot">{{Image}}</div>{{/Word}}`;
 
-const LINGUACLIP_BACK = `{{FrontSide}}
+const LINGUACLIP_BACK = `{{#Word}}{{Audio}}
+<div class="shot">{{Image}}</div>
+<div class="word">{{Word}}</div>{{/Word}}
+{{^Word}}{{FrontSide}}{{/Word}}
 <hr id="answer">
 <div class="sentence">{{Sentence}}</div>
 {{#Definition}}<div class="def">{{Definition}}</div>{{/Definition}}
 {{#Example}}<div class="ex">{{Example}}</div>{{/Example}}
 <div class="src">{{Video}}{{#Time}} · {{Time}}{{/Time}}</div>`;
 
+// Furigana: over the kept word once the card is turned; over other words on hover (the front too, as in the app).
 const LINGUACLIP_CSS = `.card { font-family: -apple-system, "PingFang SC", sans-serif; font-size: 20px; line-height: 1.5; text-align: center; color: #1f2328; background: #fff; }
 .nightMode.card, .night_mode .card { color: #e6e1d6; background: #16202a; }
 .shot img { max-width: 100%; max-height: 50vh; border-radius: 6px; }
 .word { margin-top: 12px; font-size: 30px; font-weight: 600; }
-.sentence { font-size: 22px; }
+.front .word { font-size: 44px; }
+.sentence { font-size: 22px; line-height: 2; }
 .sentence b { color: #d9a441; }
+rt { font-size: .45em; opacity: .65; }
+.sentence ruby rt { visibility: hidden; }
+.sentence ruby:hover rt, .sentence b rt { visibility: visible; }
+.front .word rt, .front b rt { visibility: hidden !important; }
 .def, .ex { margin-top: 12px; font-size: 16px; text-align: left; }
 .ex { opacity: .75; }
 .src { margin-top: 16px; font-size: 12px; opacity: .5; }`;
 
-// Create the LinguaClip deck and note type if missing (an existing note type
-// is used as-is, so edits the user made in Anki survive), then return the card
-// config pointing at them.
+// Bump when the template or CSS above changes: each machine rewrites the note type once per version and front.
+const TEMPLATE_VERSION = 2;
+const TEMPLATE_KEY = 'linguaclip_anki_tpl';
+
+// Rewrite the LinguaClip note type's card to the current one (the user chose this over
+// keeping their own edits). Only its template and CSS: fields and notes stay as they are.
+export const syncLinguaClipTemplate = async (url: string, force = false) => {
+  const front = getWordFront();
+  const mark = `${TEMPLATE_VERSION}:${front}`;
+  if (!force) { try { if (localStorage.getItem(TEMPLATE_KEY) === mark) return; } catch { /* storage off: rewrite again */ } }
+  // CSS first: stopped halfway, the old card under the new CSS still hides the kana on the front.
+  await invokeAnki('updateModelStyling', { model: { name: LINGUACLIP_NAME, css: LINGUACLIP_CSS } }, url);
+  await invokeAnki('updateModelTemplates', { model: { name: LINGUACLIP_NAME, templates: { [LINGUACLIP_NAME]: { Front: linguaClipFront(front), Back: LINGUACLIP_BACK } } } }, url);
+  try { localStorage.setItem(TEMPLATE_KEY, mark); } catch { /* asked again next time */ }
+};
+
+// Create the LinguaClip deck and note type if missing (an existing one gets the
+// current card and CSS; its fields stay), then return the card config pointing at them.
 export const setupLinguaClipCard = async (url: string): Promise<AnkiCardTemplateConfig> => {
   await invokeAnki('createDeck', { deck: LINGUACLIP_NAME }, url);
   const models: string[] = await getModelNames(url);
@@ -195,9 +236,10 @@ export const setupLinguaClipCard = async (url: string): Promise<AnkiCardTemplate
       inOrderFields: Object.keys(LINGUACLIP_FIELDS),
       css: LINGUACLIP_CSS,
       isCloze: false,
-      cardTemplates: [{ Name: LINGUACLIP_NAME, Front: LINGUACLIP_FRONT, Back: LINGUACLIP_BACK }],
+      cardTemplates: [{ Name: LINGUACLIP_NAME, Front: linguaClipFront(getWordFront()), Back: LINGUACLIP_BACK }],
     }, url);
   }
+  await syncLinguaClipTemplate(url, true).catch(console.error);
   const fields: string[] = await getModelFieldNames(LINGUACLIP_NAME, url);
   const fieldMapping: Record<string, string> = {};
   fields.forEach((f) => { if (LINGUACLIP_FIELDS[f]) fieldMapping[f] = LINGUACLIP_FIELDS[f]; });

@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 const out = join(tmpdir(), `japanese-${process.pid}.mjs`);
 await build({
-  stdin: { contents: "export * from './utils/textTokenizer.ts'; export * from './utils/japanese.ts'; export * from './utils/jaSegments.ts'; export * from './utils/jaLookup.ts';", resolveDir: process.cwd(), loader: 'ts' },
+  stdin: { contents: "export * from './utils/textTokenizer.ts'; export * from './utils/japanese.ts'; export * from './utils/jaSegments.ts'; export * from './utils/jaLookup.ts'; export { rubySentence } from './utils/anki.ts';", resolveDir: process.cwd(), loader: 'ts' },
   bundle: true,
   format: 'esm',
   platform: 'node',
@@ -28,7 +28,7 @@ await build({
           export const installJaDict = async () => {}; export const removeJaDict = async () => {};
           export const onJaDictProgress = async () => () => {};
           export const readCacheText = async () => null; export const writeCacheText = async () => {};
-          export const fetch = globalThis.fetch;`,
+          export const fetch = globalThis.fetch; export const ankiRequest = async () => '';`,
         resolveDir: process.cwd(),
       }));
     },
@@ -120,5 +120,40 @@ assert.ok(isInputCorrectFlexibleCase("don't", 'don’t'));
 assert.ok(isInputCorrectFlexibleCase('Don’t', 'don’t'));
 assert.ok(!isInputCorrectFlexibleCase('dont', 'don’t'));
 assert.deepEqual(words('the students’ books'), ['the', 'students', 'books'], 'a closing ’ stays punctuation');
+
+// Furigana: kana over the kanji only; odd fits fall back to the whole word.
+const rb = (w, r) => ja.furigana(w, r ?? ja.readingOf(w)).map(p => p.rt ? `${p.s}(${p.rt})` : p.s).join('');
+assert.equal(ja.readingOf('諦める'), 'あきらめる');
+assert.equal(rb('諦める'), '諦(あきら)める');
+assert.equal(rb('今日は'), '今日(きょう)は');
+assert.equal(rb('取り消す'), '取(と)り消(け)す');
+assert.equal(rb('行き来', 'いきき'), '行(い)き来(き)', 'kana that repeats inside the reading');
+assert.equal(rb('聞き手', 'ききて'), '聞(き)き手(て)');
+assert.equal(rb('見てきました'), '見(み)てきました');
+assert.equal(rb('お茶を'), 'お茶(ちゃ)を');
+assert.equal(rb('スマホ'), 'スマホ', 'no kanji, no ruby');
+assert.equal(rb('三ヶ月', 'さんかげつ'), '三ヶ月(さんかげつ)');
+assert.equal(rb('大人しい', 'おとなしい'), '大人(おとな)しい');
+assert.equal(rb('変な', 'ぜんぜん'), '変な(ぜんぜん)', 'no fit: whole word');
+assert.equal(rb('漢字'), '漢字(かんじ)');
+assert.deepEqual(ja.furigana('諦める'), [{ s: '諦める' }], 'no reading, no ruby');
+
+// Marking the kept word in its line.
+const mark = (line, w) => ja.targetWords(words(line), w).map(i => words(line)[i]);
+assert.deepEqual(mark('もう諦めるしかないのかな。', '諦める'), ['諦めるしか']);
+assert.deepEqual(mark('もう諦めたよ', '諦める'), ['諦めたよ'], 'kept in dictionary form, said in another');
+assert.deepEqual(mark('今日はいい天気ですね', '散歩'), [], 'not in the line: nothing marked');
+assert.deepEqual(mark('I gave up on it.', 'Gave'), ['gave']);
+assert.deepEqual(mark('I gave up on it.', 'surrender'), []);
+
+const show = (line, w) => ja.sentenceParts(line, w).map(g => g.pieces.map(p => (p.target ? '<' : '') + p.s + (p.rt ? `(${p.rt})` : '') + (p.target ? '>' : '')).join('')).join('|');
+assert.equal(show('もう諦めるしかないのかな。', '諦める'), 'もう|<諦(あきら)><める>しか|ないのかな|。');
+assert.equal(show('もう諦めたよ', '諦める'), 'もう|<諦(あきら)><めたよ>');
+assert.equal(show('今日は晴れ', '散歩'), '今日(きょう)は|晴(は)れ', 'not in the line: nothing marked');
+assert.equal(show('I gave up.', 'gave'), 'I| |<gave>| |up|.');
+assert.equal(ja.sentenceParts('天気ですね', '天気').map(g => g.word ?? '').join(','), '天気ですね', 'groups keep the word to look up');
+
+// The Anki field: kana as <ruby>, the kept word bold; brackets in the line stay text.
+assert.equal(ja.rubySentence('[音楽]もう諦める', '諦める'), '[<ruby>音楽<rt>おんがく</rt></ruby>]もう<b><ruby>諦<rt>あきら</rt></ruby>める</b>');
 
 console.log('test-japanese: all checks passed');

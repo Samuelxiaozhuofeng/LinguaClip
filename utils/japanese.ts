@@ -222,3 +222,32 @@ export function jaLemma(text: string): string {
   const lemma = head.slice(0, -1).map(m => m.s).join('') + (last.s.startsWith('くださ') ? '下さる' : last.base);
   return JA_SPELLING[lemma] ?? lemma;
 }
+
+// --- Furigana: which kana sit over which kanji ---
+
+export type Ruby = { s: string; rt?: string };
+const KANJI = /[\p{Script=Han}々〆ヶ]/u;
+export const hasKanji = (s: string) => KANJI.test(s);
+const toHira = (s: string) => s.replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+
+// 諦める + あきらめる → 諦(あきら) める: kana in the word are matched literally, each
+// kanji run takes what is between. No clean fit: the whole word carries the reading.
+export function furigana(surface: string, reading?: string): Ruby[] {
+  if (!reading || !hasKanji(surface)) return [{ s: surface }];
+  const runs = surface.match(/[\p{Script=Han}々〆ヶ]+|[^\p{Script=Han}々〆ヶ]+/gu) ?? [surface];
+  const esc = (s: string) => toHira(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(`^${runs.map(r => hasKanji(r) ? '(.+?)' : esc(r)).join('')}$`, 'u').exec(toHira(reading));
+  if (!m) return toHira(reading) === toHira(surface) ? [{ s: surface }] : [{ s: surface, rt: toHira(reading) }];
+  let k = 1;
+  return runs.map(r => {
+    if (!hasKanji(r)) return { s: r };
+    const rt = m[k++];
+    return rt === r ? { s: r } : { s: r, rt };
+  });
+}
+
+// A word's reading in hiragana, or undefined without the dictionary.
+export const readingOf = (text: string): string | undefined => {
+  const ms = jaMorphs(text);
+  return ms ? toHira(ms.map(m => m.reading ?? m.s).join('')) : undefined;
+};

@@ -50,6 +50,8 @@ export interface SavedLine {
 export type ClozeLevel = 'easy' | 'medium' | 'full';
 
 // Practice Configuration
+export type WordFront = 'word' | 'sentence';
+
 export interface PracticeConfig {
   sectionLength: number; // in minutes. 0 means "Full Video" (no sections)
   learningMode?: LearningMode; // Default learning mode for new videos
@@ -59,6 +61,7 @@ export interface PracticeConfig {
   saveClips?: boolean; // review cards keep their own clip of the line (utils/clips.ts); default false
   clipKind?: 'video' | 'audio'; // what a new clip is: a small video, or sound + a still; default video
   videoShare?: number; // % of the practice page's width given to the video; default 60
+  wordFront?: WordFront; // what a word card shows before it is turned (review and Anki); default 'word'
   custom?: import('./utils/customPick').CustomConfig; // the start-of-practice panel's last choice
 }
 

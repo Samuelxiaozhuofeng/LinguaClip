@@ -14,7 +14,7 @@ const out = join(tmpdir(), `anki-${process.pid}.mjs`);
 await build({ entryPoints: ['utils/anki.ts'], bundle: true, format: 'esm', outfile: out, logLevel: 'error' });
 const store = {};
 globalThis.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); } };
-const { getAnkiConfig, saveAnkiConfig, boldWord, LINGUACLIP_FIELDS } = await import(out);
+const { getAnkiConfig, saveAnkiConfig, boldWord, LINGUACLIP_FIELDS, rubySentence, linguaClipFront } = await import(out);
 
 const KEY = 'linguaclip_anki_config';
 const word = { deckName: 'W', modelName: 'Basic', fieldMapping: { Front: 'word' } };
@@ -46,5 +46,20 @@ assert.equal(boldWord('Hello.', '  '), 'Hello.');
 // --- LinguaClip note type: first field is the sentence (Anki rejects an empty first field) ---
 assert.equal(Object.values(LINGUACLIP_FIELDS)[0], 'sentence');
 assert.ok(Object.values(LINGUACLIP_FIELDS).includes('audio'));
+
+
+// --- LinguaClip notes: the kept word in <b>; no dictionary here, so no kana ---
+assert.equal(rubySentence('I want a coffee.', 'a'), 'I want <b>a</b> coffee.');
+assert.equal(rubySentence('Hello there.', 'bye'), 'Hello there.', 'not in the line → unchanged');
+assert.equal(rubySentence('明日あなたと話したいです', '話したい'), '明日あなたと<b>話したい</b>です');
+assert.equal(rubySentence('何か[笑]', undefined), '何か[笑]', 'brackets stay text: no Anki furigana syntax');
+// --- the card: a word note keeps its sound and picture for the back ---
+for (const f of ['word', 'sentence']) {
+  const wordPart = linguaClipFront(f).split('{{/Word}}')[0];
+  assert.ok(!wordPart.includes('{{Audio}}') && !wordPart.includes('{{Image}}'), `${f}: word front gives nothing away`);
+  assert.ok(linguaClipFront(f).includes('{{^Word}}{{Audio}}'), `${f}: sentence notes keep sound on the front (else Anki refuses them)`);
+}
+assert.ok(linguaClipFront('word').includes('{{Word}}') && !linguaClipFront('word').split('{{/Word}}')[0].includes('{{Sentence}}'));
+assert.ok(linguaClipFront('sentence').split('{{/Word}}')[0].includes('{{Sentence}}'));
 
 console.log('test-anki: all passed');
