@@ -270,14 +270,15 @@ export const deleteVideoCards = async (videoId: string, keep = false): Promise<s
   return kept;
 };
 
-// Give these cards their clip; a card deleted meanwhile stays deleted, one that got a clip meanwhile keeps it.
-export const setClip = async (ids: string[], clip: Clip) => {
+// Give these cards their clip; a card deleted meanwhile stays deleted, one that got a clip
+// meanwhile keeps it — unless `replace` (its file was gone and this is the new cut).
+export const setClip = async (ids: string[], clip: Clip, replace = false) => {
   await migrateSavedLines().catch(console.error);
   const t = (await db()).transaction(STORE, 'readwrite');
   const s = t.objectStore(STORE);
   for (const id of ids) {
     const r = s.get(id);
-    r.onsuccess = () => { const c = r.result as ReviewCard | undefined; if (c && !c.clip) s.put({ ...c, clip }); };
+    r.onsuccess = () => { const c = r.result as ReviewCard | undefined; if (c && (replace || !c.clip)) s.put({ ...c, clip }); };
   }
   await finished(t);
   changed();

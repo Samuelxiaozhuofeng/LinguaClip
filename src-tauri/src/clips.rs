@@ -51,7 +51,10 @@ fn cut(ffmpeg: &Path, kind: &str, src: &Path, from: f64, to: f64, out: &Path) ->
   if out.is_file() {
     return Ok(());
   }
-  let part = out.with_extension(format!("{}.part", out.extension().and_then(|e| e.to_str()).unwrap_or("")));
+  // Its own .part name: the background queue and a pre-delete cut may cut the same line at once.
+  static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+  let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+  let part = out.with_extension(format!("{}.{n}.part", out.extension().and_then(|e| e.to_str()).unwrap_or("")));
   let res = crate::paths::command(ffmpeg).args(args(kind, src, from, to, &part)).output().map_err(|e| format!("ffmpeg:{e}"))?;
   if !res.status.success() || !part.is_file() {
     let _ = std::fs::remove_file(&part);

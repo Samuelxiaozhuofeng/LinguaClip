@@ -20,7 +20,7 @@ import { cancelLevels } from '../utils/levelPrep';
 import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribeCloze } from '../utils/clozePrep';
 import { cancelSegments, getSegJob, subscribeSeg } from '../utils/jaSegments';
 import { deckCounts, deleteVideoCards, getAllCards, keepOrphans, subscribeCards } from '../utils/review';
-import { fillClips } from '../utils/clips';
+import { clipVideoNow } from '../utils/clips';
 import { getToday } from '../utils/today';
 
 // Home does two things: pick up the video you were on, and add a new one (the top
@@ -187,11 +187,13 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   };
 
   const handleDelete = async (v: VideoRecord) => {
-    // Cards made just now may not have their clip yet: cut them while the video is still here.
-    if (getPracticeConfig().saveClips) await fillClips();
+    // Cards made just now may not have their clip yet: cut this video's while it is still here,
+    // and count only clips that are really on disk.
+    setDeletingId(v.id);
+    const clipped = await clipVideoNow(v.id).catch(() => 0);
+    setDeletingId(null);
     const mine = await getAllCards().then(cs => cs.filter(c => c.videoId === v.id)).catch(() => null); // unreadable: still warn, the cards go either way
     const n = mine ? mine.length : -1;
-    const clipped = mine ? mine.filter(c => c.clip).length : 0;
     // Cards with their own clip get their own question next, so don't say here that they all go.
     const cardsNote = clipped ? '' : n > 0 ? ' ' + t('home.deleteHasCards', { n }) : n < 0 ? ' ' + t('home.deleteCardsUnknown') : '';
     const ok = await dialog.confirm(t('home.deleteTitle'), t('home.deleteBody', { name: v.displayName }) + cardsNote, { ok: t('home.deleteOk'), danger: true });

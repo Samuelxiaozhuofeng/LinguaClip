@@ -58,6 +58,31 @@ export const subscribeClips = (fn: () => void) => { listeners.add(fn); return ()
 const failed = new Set<string>(); // keys that failed this session; tried again next launch
 let again = false;
 
+// One line's cards: lend a clip one of them has, else cut one while the video is here (setting on).
+// `verify`: also re-cut when the file a card points at is gone (someone emptied the folder).
+// Returns 'noVideo' when there was something to cut but no video to cut it from, 'stop' when
+// the cutting tool itself can't be had (offline, download failed): no point trying line after line.
+const settleLine = async (key: string, line: ReviewCard[], kind: 'video' | 'audio', verify = false): Promise<'noVideo' | 'stop' | void> => {
+  let lent = line.find(c => c.clip)?.clip;
+  if (lent && verify && !await pathExists(await clipPath(lent.file)).catch(() => false)) lent = undefined;
+  const group = lent ? line.filter(c => !c.clip) : line.filter(c => !c.clip || verify);
+  if (group.length === 0) return;
+  if (lent) { await setClip(group.map(c => c.id), lent).catch(console.error); return; }
+  if (!getPracticeConfig().saveClips || failed.has(key)) return; // off (maybe turned off meanwhile), or failed this session
+  const src = await findVideo(group[0]).catch(() => null);
+  if (!src) return 'noVideo';
+  const [from, to] = clipSpan(group[0]);
+  try {
+    const r = await cutClip(src, from, to, key, kind);
+    await setClip(group.map(c => c.id), { kind, file: r.file, image: r.image ?? undefined, from }, verify);
+    set({ error: null });
+  } catch (e) {
+    set({ error: String(e) });
+    if (!/^(ffmpeg|clip|missing):/.test(String(e))) return 'stop'; // not this line's fault
+    failed.add(key);
+  }
+};
+
 const fillOnce = async () => {
   const cards = await getAllCards(); // unreadable: throws, so nothing below (the sweep above all) runs
   const { saveClips, clipKind = 'video' } = getPracticeConfig();
@@ -69,22 +94,10 @@ const fillOnce = async () => {
   let noVideo = 0;
   if (saveClips) set({ running: true, ...counts(cards), noVideo: 0 });
   for (const [key, line] of lines) {
-    const group = line.filter(c => !c.clip);
-    const lent = line.find(c => c.clip)?.clip;
-    if (group.length === 0) continue;
-    if (lent) { await setClip(group.map(c => c.id), lent).catch(console.error); continue; }
-    if (!getPracticeConfig().saveClips || failed.has(key)) continue; // off (maybe turned off meanwhile), or failed this session
-    const src = await findVideo(group[0]).catch(() => null);
-    if (!src) { noVideo += group.length; set({ noVideo }); continue; }
-    const [from, to] = clipSpan(group[0]);
-    try {
-      const r = await cutClip(src, from, to, key, clipKind);
-      await setClip(group.map(c => c.id), { kind: clipKind, file: r.file, image: r.image ?? undefined, from });
-      set({ saved: getClipProgress().saved + group.length, error: null });
-    } catch (e) {
-      failed.add(key);
-      set({ error: String(e) });
-    }
+    if (line.every(c => c.clip)) continue;
+    const n = await settleLine(key, line, clipKind);
+    if (n === 'stop') break;
+    if (n === 'noVideo') { noVideo += line.filter(c => !c.clip).length; set({ noVideo }); }
   }
   // Read again: the files the cards use right now are the ones to keep.
   const now = await getAllCards();
@@ -106,6 +119,20 @@ export const fillClips = (): Promise<void> => {
       set({ running: false });
     }
   })();
+};
+
+// Before a video is deleted: its cards get their clips now (just this video, not the whole
+// queue), and a clip whose file went missing is cut again. Returns how many of its cards
+// really have a clip on disk — what the "keep the cards?" question can promise.
+export const clipVideoNow = async (videoId: string): Promise<number> => {
+  const { clipKind = 'video' } = getPracticeConfig();
+  const mine = (await getAllCards()).filter(c => c.videoId === videoId && hasAudio(c));
+  const lines = new Map<string, ReviewCard[]>();
+  for (const c of mine) lines.set(clipKey(c), [...(lines.get(clipKey(c)) ?? []), c]);
+  for (const [key, line] of lines) if (await settleLine(key, line, clipKind, true) === 'stop') break;
+  const after = (await getAllCards()).filter(c => c.videoId === videoId && c.clip);
+  const onDisk = await Promise.all(after.map(async c => pathExists(await clipPath(c.clip!.file)).catch(() => false)));
+  return onDisk.filter(Boolean).length;
 };
 
 // Settings turned it on or changed the kind: failures from earlier get another go.
