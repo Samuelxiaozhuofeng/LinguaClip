@@ -141,7 +141,7 @@ export interface VideoRecord {
   // Present while a YouTube/local import is generating subtitles (or failed).
   // Cleared once videoPath / subtitleText / totalSubtitles are filled in.
   importJob?: {
-    stage: 'setup' | 'download' | 'extract' | 'transcribe' | 'cloud' | 'segment';
+    stage: 'setup' | 'download' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'segment';
     percent?: number;
     error?: string;
     source: string;
@@ -150,6 +150,15 @@ export interface VideoRecord {
     // before retry existed; the retry then uses those same defaults.
     lang?: string;
     quality?: number;
+    // Convert to mp4 even though the file name says it plays ("convert and retry").
+    convert?: boolean;
+    // Subtitles the user brought, so nothing is transcribed: their own .srt (already
+    // in subtitleText) or track N inside the video.
+    subs?: 'own' | number;
+    // Move `source` to the Trash once the whole import has succeeded.
+    trashOriginal?: boolean;
+    // The mp4 a conversion made; a retry starts from it instead of converting again.
+    converted?: string;
   };
 }
 

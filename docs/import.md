@@ -13,6 +13,17 @@
 
 逐词时间：转录完成时 `import.rs` 把每个词的起止毫秒存成 `~/Movies/LinguaClip/<记录id>.words.json`（只有「只有视频」这条路有，自带 .srt 的没有）。前端 `utils/wordTimes.ts` 读它，按字母把每个空格对到那串词上，给听写的 ⌘K（只播这个词）和 ⌘J（从这个词播）定位；没有或对不上就按字母数估。
 
+## 转 mp4（convert.rs）
+
+- 添加视频认 `utils/desktop.ts` 的 `VIDEO_EXTS`；不在 `PLAYABLE`（mp4/mov/m4v）里的，导入第一步用 ffmpeg 转成 `~/Movies/LinguaClip/<原名>.mp4`（名字被占就 `<原名> (2).mp4`，同名 .srt 也算占用）。先写 `.mp4.part`，成功才改名。h264 8bit → 直接拷；HEVC → Mac 拷（打 hvc1 标签）、Windows 重编；其余 → libx264 veryfast crf20。声音 aac 拷，其余转 aac 192k。只取正片视频流（跳过封面）+ 第一条声音。
+- ffmpeg 不进安装包：第一次需要时下载到 `<app support>/com.linguaclip.app/convert/`（复用 whisper_setup::fetch 续传 + sha256）。Mac arm64 / x86_64 用 ffmpeg.martin-riedl.de 9.0.2（只链系统框架，28 / 34MB），Windows 用 gyan.dev 8.0.1 essentials zip（106MB，只留 ffmpeg.exe）。找不到自己的就用 Homebrew / PATH 里的。设置 → 通用「视频转换组件」可提前下、看位置。抽音频失败时的 ffmpeg 退路也用它。
+- 添加视频弹窗：选中要转的文件 → 没组件就当场下载 → `probe_video`（解析 `ffmpeg -i` 的 stderr）列内嵌字幕轨；文字轨可选、图片轨（PGS/VobSub）列出但灰掉；语言和「字幕语言」对上的轨预选。勾「导入成功后把原文件移到废纸篓」（localStorage `import_trash_original`，默认不勾、记住上次）。
+- `start_import` 多带 `convert`（强制转，「转换后重试」用）和 `subs`（`own` = 自带 srt 已在记录里 / 数字 = 内嵌轨）。有 subs 就不下转录组件、不转录、不查云端密钥；内嵌轨在转换同一趟里 `-map 0:s:N -c:s srt` 读出，空轨报 `convert:nosubs`。
+- 进度阶段 `convertSetup`（下 ffmpeg）→ `convert`；转完那条 `convert` 事件带 `videoPath`，前端存成 `importJob.converted`，之后重试直接从它开始（要读内嵌轨的除外）。
+- 移原文件：只在 done 且记录写好后，由前端 `trashOriginal` 做；任何别的记录的 `videoPath` / `importJob.source` / `importJob.converted` 指向它就不动；读记录失败也不动；移不进废纸篓就弹窗说原文件还在。`trash_file` 在 Windows 上只对本地固定盘生效（U 盘 / 网络盘没有回收站，会被永久删）。
+- 声音读不出（`extract:` 报错）且没转过的本地 mp4/mov/m4v：卡片多一个「转换后重试」。
+- 真跑：`cargo test --manifest-path src-tauri/Cargo.toml -- --ignored downloads_ffmpeg --nocapture`；`LC_CONVERT_SAMPLE=/path/x.mkv cargo test … -- --ignored converts_sample --nocapture`。
+
 ## 转录组件（whisper_setup.rs）
 
 - 查找顺序：我们下载的目录 → whisper-cli 回落到 Homebrew（`find_bin`），模型回落到 `~/.cache/whisper.cpp`（完整版和 q5_0 都认）。作者本机的老安装不用重下。

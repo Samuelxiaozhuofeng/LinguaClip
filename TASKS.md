@@ -1,3 +1,17 @@
+# 导入时自动转 mp4（2026-09-27 用户拍板）
+
+用户拍板：mkv/avi/webm 等导入时自动转 mp4；可勾「导入成功后把原文件移到废纸篓」（默认不勾、记住上次）；ffmpeg 第一次用时下载、设置里也能下并看位置；内嵌字幕由用户选（按字幕语言预选）；声音读不出的 mp4 给「转换后重试」；转好的放 LinguaClip 文件夹。
+
+- [x] 产品门 + 设计门（重试保留字段、trash 前查所有引用、.part 不撞名）
+- [x] Rust convert.rs：下载 ffmpeg、probe、转换、读内嵌字幕；run_import 接入；Windows 回收站只对固定盘
+- [x] 前端：选文件 / 拖入认新格式、弹窗字幕轨 + 勾选、卡片新阶段、转换后重试、设置行、文案
+- [x] cargo test + tsc + node test-*.mjs + 真实转换（mkv 带字幕 / webm / avi）+ 真实下载 ffmpeg（Mac arm64）
+- [x] 浏览器实测（弹窗、进度卡、移原文件、同文件两次导入、自带字幕重试、转换后重试、设置页下载）
+- [x] 三路审码：Opus / 6-sol / Gemini 共 7 条核实已修（记进错题本）
+- [ ] npm run release
+- [ ] Windows：gh workflow run windows.yml 真链路（需用户点头）
+- [ ] 用户真机验收
+
 # 看剧模式（产品文档：https://claude.ai/code/artifact/ff7ab143-727c-499e-8ebd-3ba7f1b2fe5b）
 
 - [x] 面板第三种练法「看剧」+ 记住上次选择

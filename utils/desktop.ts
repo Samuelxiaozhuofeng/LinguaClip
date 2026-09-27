@@ -11,7 +11,13 @@ import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { exists, readFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { IS_WINDOWS } from './platform';
 
-const VIDEO_FILTER = { name: 'Video', extensions: ['mp4', 'mov', 'm4v'] };
+// What the player opens as is; the rest of VIDEO_EXTS gets converted to mp4 on
+// import (src-tauri/src/convert.rs `plays_natively` must agree on the first list).
+const PLAYABLE = ['mp4', 'mov', 'm4v'];
+export const VIDEO_EXTS = [...PLAYABLE, 'mkv', 'avi', 'webm', 'wmv', 'flv', 'rmvb', 'rm', 'ts', 'mts', 'm2ts', 'mpg', 'mpeg', 'vob', '3gp', 'ogv'];
+const extOf = (path: string) => (/\.([^./\\]+)$/.exec(path)?.[1] ?? '').toLowerCase();
+export const isVideoFile = (path: string) => VIDEO_EXTS.includes(extOf(path));
+export const needsConvert = (path: string) => isVideoFile(path) && !PLAYABLE.includes(extOf(path));
 const SUBTITLE_FILTER = { name: 'Subtitles', extensions: ['srt'] }; // parseSRT reads nothing else
 
 export function fileNameFromPath(path: string): string {
@@ -23,8 +29,10 @@ export function videoSrcFromPath(path: string): string {
   return convertFileSrc(path);
 }
 
-export async function pickVideoPath(): Promise<string | null> {
-  const selected = await open({ multiple: false, filters: [VIDEO_FILTER] });
+// `any`: also the formats an import converts. Re-linking a record's video takes
+// only what plays as is, since nothing converts it there.
+export async function pickVideoPath(any = false): Promise<string | null> {
+  const selected = await open({ multiple: false, filters: [{ name: 'Video', extensions: any ? VIDEO_EXTS : PLAYABLE }] });
   return typeof selected === 'string' ? selected : null;
 }
 
@@ -56,6 +64,16 @@ export const jaDictStatus = () => invoke<JaDictStatus>('ja_dict_status');
 export const installJaDict = () => invoke<void>('install_ja_dict');
 export const removeJaDict = () => invoke<void>('remove_ja_dict');
 export const onJaDictProgress = (fn: (pct: number) => void) => listen<number>('ja-dict-progress', e => fn(e.payload));
+
+// The video converter (ffmpeg): path = the one in use, null = not downloaded yet.
+export type ConvertToolStatus = { path: string | null; dir: string; bytes: number };
+export const convertToolStatus = () => invoke<ConvertToolStatus>('convert_tool_status');
+export const installConvertTool = () => invoke<void>('install_convert_tool');
+export const onConvertToolProgress = (fn: (pct: number) => void) => listen<number>('convert-tool-progress', e => fn(e.payload));
+// index: among the subtitle tracks only. text: false for picture subtitles (unreadable).
+export type SubTrack = { index: number; lang: string | null; title: string | null; codec: string; text: boolean };
+export type VideoProbe = { duration: number | null; video: string | null; audio: string | null; subtitles: SubTrack[] };
+export const probeVideo = (path: string) => invoke<VideoProbe>('probe_video', { path });
 
 export type DragDropHandler = {
   onHover?: () => void;

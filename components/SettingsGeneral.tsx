@@ -5,6 +5,7 @@ import { useT, Lang } from '../utils/i18n';
 import { getPracticeConfig, savePracticeConfig } from '../utils/storage';
 import { DICT_OPTIONS, DictLang, getDictChoice, saveDictChoice } from '../utils/dictionary';
 import { JaDictRow } from './JaSetup';
+import ConvertToolRow from './ConvertToolRow';
 
 interface SettingsGeneralProps {
   lang: Lang;
@@ -93,6 +94,7 @@ const SettingsGeneral: React.FC<SettingsGeneralProps> = ({
 
       <DictionaryPicker onSaved={onSaved} />
       <JaDictRow />
+      <ConvertToolRow />
 
       <Field
         label={t('settingsGeneral.startPadding')}

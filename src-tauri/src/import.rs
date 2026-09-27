@@ -55,7 +55,7 @@ fn emit(app: &AppHandle, payload: ImportProgress) {
   }
 }
 
-fn tail_chars(s: &str, max: usize) -> String {
+pub(crate) fn tail_chars(s: &str, max: usize) -> String {
   let count = s.chars().count();
   if count <= max {
     return s.to_string();
@@ -297,7 +297,7 @@ fn parse_quality_sizes(json: &serde_json::Value) -> QualitySizes {
   }
 }
 
-fn run_streaming(mut cmd: Command, mut on_line: impl FnMut(&str)) -> Result<(i32, String), String> {
+pub(crate) fn run_streaming(mut cmd: Command, mut on_line: impl FnMut(&str)) -> Result<(i32, String), String> {
   cmd.stdout(Stdio::piped());
   cmd.stderr(Stdio::piped());
   let mut child = cmd.spawn().map_err(|e| e.to_string())?;
@@ -414,12 +414,12 @@ fn download_video(
 
 // Needs no ffmpeg: macOS's own afconvert, or our built-in decoder elsewhere,
 // reads the audio of every video we accept (mp4/mov/m4v). ffmpeg, when
-// installed, covers the odd codec those refuse.
+// downloaded or installed, covers the odd codec those refuse.
 pub(crate) fn extract_wav(video: &Path, wav: &Path) -> Result<(), String> {
   let video_s = video.to_str().ok_or_else(|| "extract:bad path".to_string())?;
   let wav_s = wav.to_str().ok_or_else(|| "extract:bad path".to_string())?;
   if let Err(first) = native_extract(video_s, wav_s) {
-    let Ok(ffmpeg) = find_bin("ffmpeg") else {
+    let Some(ffmpeg) = crate::convert::find() else {
       return Err(format!("extract:{}", tail_chars(&first, 300)));
     };
     let output = command(ffmpeg)
@@ -614,13 +614,37 @@ pub(crate) enum Engine {
   Cloud { provider: crate::cloud_asr::Provider, api_key: String },
 }
 
-fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32, engine: &Engine) -> Result<(), String> {
+// Subtitles the user brought: then nothing is transcribed.
+pub(crate) enum Subs {
+  // Their own .srt; the front end already holds its text.
+  Own,
+  // A text track inside the video (ffmpeg's 0:s:N), read out while converting.
+  Track(u32),
+}
+
+fn done(app: &AppHandle, id: &str, video: &Path, subtitle_text: Option<String>, words: Option<Vec<Word>>) {
+  emit(
+    app,
+    ImportProgress {
+      id: id.to_string(),
+      stage: "done".into(),
+      percent: Some(100),
+      error: None,
+      video_path: Some(video.to_string_lossy().into_owned()),
+      subtitle_text,
+      words,
+    },
+  );
+}
+
+fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32, engine: &Engine, convert: bool, subs: Option<Subs>) -> Result<(), String> {
   let dir = movies_dir()?;
   std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
   // First import on a new Mac: fetch the transcription parts before anything
   // else, so a failure here never leaves a half-downloaded video behind.
   let parts = match engine {
+    _ if subs.is_some() => None,
     Engine::Local(tier, gpu) => Some((
       crate::whisper_setup::ensure(*tier, *gpu, |pct| {
         emit(app, ImportProgress::stage(id, "setup", Some(pct)));
@@ -644,6 +668,32 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
     }
     p
   };
+
+  // What the player cannot open becomes an mp4 in our folder first. Its path
+  // goes out with the last progress event, so a retry can skip this step.
+  let mut track_text = None;
+  let video = if convert || !crate::convert::plays_natively(&video) {
+    let ffmpeg = crate::convert::ensure(|pct| emit(app, ImportProgress::stage(id, "convertSetup", Some(pct))))?;
+    emit(app, ImportProgress::stage(id, "convert", Some(0)));
+    let track = match subs {
+      Some(Subs::Track(n)) => Some(n),
+      _ => None,
+    };
+    let (mp4, text) = crate::convert::convert(&ffmpeg, &video, &dir, track, |pct| {
+      emit(app, ImportProgress::stage(id, "convert", Some(pct)));
+    })?;
+    let mut converted = ImportProgress::stage(id, "convert", Some(100));
+    converted.video_path = Some(mp4.to_string_lossy().into_owned());
+    emit(app, converted);
+    track_text = text;
+    mp4
+  } else {
+    video
+  };
+  if subs.is_some() {
+    done(app, id, &video, track_text, None);
+    return Ok(());
+  }
 
   // Work files always land in our own folder, never beside a user-picked video
   // (it may already have a hand-made lesson.srt next to it).
@@ -687,7 +737,7 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
       // Writes <work>.srt like whisper-cli; the words come back directly.
       crate::cloud_asr::transcribe(on_pct, *provider, api_key, lang, &wav, &work).map(Some)
     }
-    (None, Engine::Local(..)) => unreachable!("local engine always has parts"),
+    (None, Engine::Local(..)) => unreachable!("local engine without subtitles always has parts"),
   }
   .and_then(|words| {
     std::fs::rename(work.with_extension("srt"), &srt).map_err(|e| format!("transcribe:{e}"))?;
@@ -724,19 +774,7 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
       log::error!("write words cache for {id}: {e}");
     }
   }
-  let video_path = video.to_string_lossy().into_owned();
-  emit(
-    app,
-    ImportProgress {
-      id: id.to_string(),
-      stage: "done".into(),
-      percent: Some(100),
-      error: None,
-      video_path: Some(video_path),
-      subtitle_text: Some(subtitle_text),
-      words,
-    },
-  );
+  done(app, id, &video, Some(subtitle_text), words);
   Ok(())
 }
 
@@ -751,6 +789,8 @@ pub fn start_import(
   model: Option<String>,
   gpu: Option<bool>,
   api_key: Option<String>,
+  convert: Option<bool>,
+  subs: Option<String>,
 ) -> Result<(), String> {
   if id.trim().is_empty() || source.trim().is_empty() {
     return Err("missing id or source".into());
@@ -766,8 +806,16 @@ pub fn start_import(
   if !matches!(quality, 1080 | 720 | 480) {
     return Err("bad-quality".into());
   }
-  // Older front ends send no engine: that is the local standard model.
+  // Older front ends send neither: convert only what the player cannot open, transcribe.
+  let subs = match subs.as_deref() {
+    None | Some("") => None,
+    Some("own") => Some(Subs::Own),
+    Some(n) => Some(Subs::Track(n.parse().map_err(|_| "bad-subs".to_string())?)),
+  };
+  // Older front ends send no engine: that is the local standard model. With
+  // subtitles nothing is transcribed, so a missing cloud key does not matter.
   let engine = match engine.as_deref().unwrap_or("local") {
+    _ if subs.is_some() => Engine::Local(crate::whisper_setup::Tier::Standard, false),
     "local" => Engine::Local(crate::whisper_setup::Tier::parse(model.as_deref().unwrap_or("standard"))?, gpu.unwrap_or(false)),
     cloud @ ("groq" | "bailian") => {
       let key = api_key.unwrap_or_default().trim().to_string();
@@ -779,8 +827,9 @@ pub fn start_import(
     }
     _ => return Err("bad-engine".into()),
   };
+  let convert = convert.unwrap_or(false);
   thread::spawn(move || {
-    if let Err(e) = run_import(&app, &id, &source, &lang, quality, &engine) {
+    if let Err(e) = run_import(&app, &id, &source, &lang, quality, &engine, convert, subs) {
       emit(
         &app,
         ImportProgress {

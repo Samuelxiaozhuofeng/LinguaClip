@@ -5,6 +5,8 @@
  * - Local files are served by vite's /@fs route (allow-list in vite.config.ts).
  * - File dialogs return `window.__MOCK__.pick` if set, else a fixture clip.
  * - `window.__MOCK__.tools` sets what import_tools reports (both false by default).
+ * - `window.__MOCK__.convertTool`: is the video converter "downloaded" (false by
+ *   default); `window.__MOCK__.probe` = what probe_video reports for any file.
  * - `window.__MOCK__.jaDict`: is the Japanese dictionary "downloaded" (false by
  *   default); its files are served from node_modules/kuromoji/dict.
  * - Rust commands are logged to `window.__MOCK__.calls`; fake import progress
@@ -31,6 +33,8 @@ const mock = {
   // what import_tools reports; default = a stranger's Mac with nothing installed
   tools: { whisper: false, youtube: false },
   jaDict: false,
+  convertTool: false,
+  probe: { duration: 19, video: 'h264', audio: 'ac3', subtitles: [] as unknown[] },
   emit,
 };
 (window as any).__MOCK__ = mock;
@@ -65,6 +69,20 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
       }
       mock.jaDict = true;
       return null;
+    case 'convert_tool_status': {
+      const dir = `${__DEV_HOME__}/Library/Application Support/com.linguaclip.app/convert`;
+      return { path: mock.convertTool ? `${dir}/ffmpeg` : null, dir, bytes: 28_395_699 };
+    }
+    case 'install_convert_tool':
+      for (let pct = 0; pct < 100; pct += 20) {
+        await emit('convert-tool-progress', pct);
+        await new Promise(r => setTimeout(r, 300));
+      }
+      mock.convertTool = true;
+      return null;
+    case 'probe_video':
+      if (!mock.convertTool) throw 'missing:ffmpeg';
+      return mock.probe;
     case 'remove_ja_dict':
       mock.jaDict = false;
       return null;

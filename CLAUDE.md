@@ -63,7 +63,7 @@ node test-watch.mjs       # 看剧：某一秒屏幕上是哪一句（lineAt）
 - **练习状态**：`App.tsx` 是页面状态机 + 全局快捷键表；练习期的状态在 `hooks/usePracticeContext.tsx` 及同族 hooks 里，组件只渲染。
 - **导入任务的监听挂在 `App.tsx`，不是首页**：用户在练习页时首页已卸载，挂错地方会漏进度事件。
 - **文案两份都要改**：`utils/i18n.zh.ts` 和 `utils/i18n.en.ts`。
-- **视频扩展名有两处**：`components/Home.tsx` 的 `VIDEO_EXT` 和 `utils/desktop.ts` 的 `VIDEO_FILTER`，必须一致。
+- **视频扩展名收口在 `utils/desktop.ts`**：`PLAYABLE`（播放器直接能开的 mp4/mov/m4v，和 `src-tauri/src/convert.rs` 的 `plays_natively` 必须一致）+ `VIDEO_EXTS`（再加导入时自动转 mp4 的格式）。添加视频的选文件 / 拖入认全部；「重新选视频」只认 PLAYABLE。
 - **UI 原语全在 `components/ui.tsx`**，风格是影院浮层（浅灰底 + 白面板、一个朱红主色 + 灰阶，别加第二种颜色；设计稿 https://claude.ai/artifact/14B5VBpJi7UJHrzwHeiMHB），新界面用这些原语，不要另起一套。
 
 ## 碰数据前

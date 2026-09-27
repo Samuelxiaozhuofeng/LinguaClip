@@ -3,7 +3,7 @@
 ## 运行时事实
 
 - 页面 origin 是 `tauri://localhost`，本地视频经 asset 协议是 `asset://localhost/<encoded path>`，两者跨源。asset 协议会回 `Access-Control-Allow-Origin`，所以 `<video crossOrigin="anonymous">` 必须带上，否则截图 canvas 被污染、Web Audio 出静音。
-- WKWebView 没有：`showOpenFilePicker`、`FileSystemFileHandle`、`HTMLMediaElement.captureStream()`。Mac 内核放不了 mkv / avi / 多数 webm，所以文件过滤只列 mp4 / mov / m4v（`components/Home.tsx` VIDEO_EXT 与 `utils/desktop.ts` VIDEO_FILTER 两处要一致）。
+- WKWebView 没有：`showOpenFilePicker`、`FileSystemFileHandle`、`HTMLMediaElement.captureStream()`。Mac 内核放不了 mkv / avi / 多数 webm，所以播放只认 mp4 / mov / m4v；别的格式在导入时转成 mp4（见 docs/import.md「转 mp4」），扩展名清单收口在 `utils/desktop.ts`。
 - Tauri 默认接管窗口拖放（`dragDropEnabled` 未关），HTML5 `onDrop` 拿不到文件；用 `getCurrentWebview().onDragDropEvent`，payload 是绝对路径数组。
 - 系统标题栏隐藏（`titleBarStyle: Overlay` + `hiddenTitle`），红绿灯悬浮在页面左上；`Shell.tsx` / `Studio.tsx` 顶栏 `pl-[80px]` 留位，`data-tauri-drag-region` 让顶栏可拖窗。
 - 外链用 `@tauri-apps/plugin-opener` 的 `openUrl`，`target="_blank"` 在壳子里没反应。

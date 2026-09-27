@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { VideoRecord } from '../types';
-import { fileNameFromPath } from './desktop';
+import { dialog } from '../components/Dialog';
+import { fileNameFromPath, needsConvert, pathExists, trashFile } from './desktop';
 import { getLang, t } from './i18n';
 import { getAIConfig } from './aiConfig';
 import { canCloze } from './aiDrills';
@@ -13,10 +14,11 @@ import { parseSRT } from './srtParser';
 import { resegment, Word } from './resegment';
 import { engineArgs, getTranscribeConfig } from './transcribeConfig';
 import * as VideoStorage from './videoStorage';
+import { getAllVideosFromDB } from './fileSystemAccess';
 
 type ImportProgressPayload = {
   id: string;
-  stage: 'setup' | 'download' | 'extract' | 'transcribe' | 'cloud' | 'done' | 'error';
+  stage: 'setup' | 'download' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'done' | 'error';
   percent?: number;
   error?: string;
   videoPath?: string;
@@ -82,6 +84,8 @@ export function formatImportError(raw: string): string {
   // Codecs our Windows decoder lacks (Opus, AC-3…): the raw text is jargon.
   if (/^extract:.*unsupported codec/.test(raw)) return t('import.extractCodec');
   if (raw === 'extract:no audio track') return t('import.extractNoAudio');
+  if (raw === 'convert:nosubs') return t('import.convertNoSubs');
+  if (raw.startsWith('convert:')) return t('import.failedConvert', { detail: raw.slice('convert:'.length) });
   if (raw.startsWith('extract:')) {
     return t('import.failedExtract', { detail: raw.slice('extract:'.length) });
   }
@@ -98,24 +102,33 @@ export function formatImportError(raw: string): string {
   return raw;
 }
 
+// A local import's extras (all optional; none = convert only what will not play, transcribe).
+export type LocalImportOptions = {
+  // Subtitles the user brought: track N inside the video, or their own .srt.
+  subs?: number | { text: string; fileName: string; count: number };
+  trashOriginal?: boolean;
+};
+
 function pendingRecord(
   id: string,
   source: string,
   fromUrl: boolean,
   lang: string,
   quality: ImportQuality,
+  opts: LocalImportOptions = {},
 ): VideoRecord {
   const now = Date.now();
   const label = fromUrl ? source : fileNameFromPath(source);
+  const own = typeof opts.subs === 'object' ? opts.subs : null;
   return {
     id,
     displayName: label,
     videoFileName: label,
-    subtitleFileName: '',
-    subtitleText: '',
+    subtitleFileName: own?.fileName ?? '',
+    subtitleText: own?.text ?? '',
     currentSubtitleIndex: 0,
     currentSectionIndex: 0,
-    totalSubtitles: 0,
+    totalSubtitles: own?.count ?? 0,
     completionRate: 0,
     dateAdded: now,
     lastPracticed: now,
@@ -126,22 +139,31 @@ function pendingRecord(
       source,
       lang,
       quality,
+      ...(opts.subs !== undefined && { subs: own ? 'own' as const : opts.subs as number }),
+      ...(opts.trashOriginal && { trashOriginal: true }),
     },
   };
 }
+
+// start_import's arguments for a job's own choices.
+const jobArgs = (job: NonNullable<VideoRecord['importJob']>) => ({
+  convert: !!job.convert,
+  subs: job.subs === undefined ? null : String(job.subs),
+});
 
 async function startImport(
   source: string,
   lang: string,
   fromUrl: boolean,
   quality: ImportQuality,
+  opts: LocalImportOptions = {},
 ): Promise<void> {
   const id = crypto.randomUUID();
-  const record = pendingRecord(id, source, fromUrl, lang, quality);
+  const record = pendingRecord(id, source, fromUrl, lang, quality, opts);
   await VideoStorage.updateVideoRecord(record);
   notify();
   try {
-    await invoke('start_import', { id, source, lang, quality, ...engineArgs() });
+    await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...jobArgs(record.importJob!) });
   } catch (err) {
     const rec = await VideoStorage.getVideoRecord(id);
     if (!rec?.importJob) return;
@@ -158,8 +180,15 @@ export function startUrlImport(url: string, lang: string, quality: ImportQuality
   return startImport(url.trim(), lang, true, quality);
 }
 
-export function startLocalImport(path: string, lang: string): Promise<void> {
-  return startImport(path, lang, false, 1080);
+export function startLocalImport(path: string, lang: string, opts: LocalImportOptions = {}): Promise<void> {
+  return startImport(path, lang, false, 1080, opts);
+}
+
+// A local video whose sound could not be read: converting it to a plain mp4
+// usually fixes that. Not offered when it was converted already.
+export function canConvertRetry(job: NonNullable<VideoRecord['importJob']>): boolean {
+  return !!job.error?.startsWith('extract:') && job.error !== 'extract:video not found'
+    && !job.convert && !isYouTubeUrl(job.source) && !needsConvert(job.source);
 }
 
 // Retry a failed import on the same record: no second card in the history, and the
@@ -168,7 +197,8 @@ export function startLocalImport(path: string, lang: string): Promise<void> {
 // click is ignored while its retry is in flight.
 const retrying = new Set<string>();
 
-export async function retryImport(id: string): Promise<void> {
+// `convert`: the "convert and retry" button, for a video whose sound could not be read.
+export async function retryImport(id: string, convert = false): Promise<void> {
   if (retrying.has(id)) return;
   const rec = await VideoStorage.getVideoRecord(id);
   const job = rec?.importJob;
@@ -177,13 +207,22 @@ export async function retryImport(id: string): Promise<void> {
   const lang = job.lang ?? 'en';
   const quality = (job.quality ?? 1080) as ImportQuality;
   const stage = isYouTubeUrl(job.source) ? 'download' as const : 'extract' as const;
-  const next = { stage, percent: 0, source: job.source, lang, quality };
+  // Everything the user chose at the start (own subtitles, conversion, trashing
+  // the original) carries over; only the progress starts again.
+  const next = { ...job, stage, percent: 0, error: undefined, lang, quality, ...(convert && { convert: true }) };
+  delete next.error;
+  // Already converted: start from that mp4. Not when a subtitle track is still to
+  // be read out of the original.
+  const reuse = !!next.converted && typeof next.subs !== 'number' && await pathExists(next.converted);
+  if (!reuse) delete next.converted;
+  const source = reuse ? next.converted! : job.source;
+  const args = reuse ? { convert: false, subs: jobArgs(next).subs } : jobArgs(next);
   await VideoStorage.updateVideoRecord({ ...rec, importJob: next });
   notify();
   try {
     // Uses the engine picked in Settings now, not the one this card started
     // with: switching to the cloud after a failed download is a way out.
-    await invoke('start_import', { id, source: job.source, lang, quality, ...engineArgs() });
+    await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...args });
   } catch (err) {
     const fresh = await VideoStorage.getVideoRecord(id);
     if (!fresh?.importJob) return;
@@ -237,7 +276,9 @@ async function applyProgress(payload: ImportProgressPayload): Promise<void> {
     const recut = payload.words ? await resegment(payload.words) : null;
     // The re-cut can take a minute; a record deleted meanwhile must stay deleted.
     if (!(await VideoStorage.getVideoRecord(rec.id))) return;
-    const subtitleText = recut ?? payload.subtitleText ?? '';
+    // Their own .srt came with the record and stays as it is.
+    const own = rec.importJob.subs === 'own';
+    const subtitleText = own ? rec.subtitleText : recut ?? payload.subtitleText ?? '';
     const name = fileNameFromPath(videoPath);
     const rest = { ...rec };
     delete rest.importJob;
@@ -247,10 +288,11 @@ async function applyProgress(payload: ImportProgressPayload): Promise<void> {
       videoFileName: name,
       videoPath,
       subtitleText,
-      subtitleFileName: srtNameFromVideo(videoPath),
+      subtitleFileName: own ? rec.subtitleFileName : srtNameFromVideo(videoPath),
       totalSubtitles: parseSRT(subtitleText).length,
       lastPracticed: Date.now(),
     });
+    if (rec.importJob.trashOriginal) await trashOriginal(rec.id, rec.importJob.source, videoPath);
     // Opted-in AI prep starts in the background; the shelf shows its progress.
     const ai = getAIConfig();
     if (ai.autoBreakdown && canCloze()) prepareBreakdowns(rec.id, subtitleText, getLang()).catch(err => console.error(err));
@@ -279,8 +321,27 @@ async function applyProgress(payload: ImportProgressPayload): Promise<void> {
       ...rec.importJob,
       stage: payload.stage,
       percent: payload.percent ?? rec.importJob.percent,
+      // The last conversion event carries the new mp4.
+      ...(payload.stage === 'convert' && payload.videoPath && { converted: payload.videoPath }),
     },
   });
+}
+
+// Only once the whole import has succeeded, and never while any other record
+// (finished or still importing) uses the same file.
+async function trashOriginal(id: string, source: string, videoPath: string): Promise<void> {
+  if (!source || source === videoPath) return;
+  // The throwing read: an unreadable list must not pass for "no one else uses it".
+  const records = await getAllVideosFromDB().catch(err => { console.error(err); return null; });
+  if (!records) return;
+  const inUse = records.some(r => r.id !== id && (r.videoPath === source || r.importJob?.source === source || r.importJob?.converted === source));
+  if (inUse) return;
+  try {
+    await trashFile(source);
+  } catch (err) {
+    console.error(err);
+    dialog.alert(t('import.trashFailTitle'), t('import.trashFailBody', { name: fileNameFromPath(source) }));
+  }
 }
 
 function enqueueProgress(payload: ImportProgressPayload): void {

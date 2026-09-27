@@ -2,6 +2,7 @@ mod anki;
 mod bailian;
 mod cache;
 mod cloud_asr;
+mod convert;
 #[cfg(test)]
 mod cloud_live_tests;
 mod decode;
@@ -41,6 +42,9 @@ pub fn run() {
       ja_dict::ja_dict_status,
       ja_dict::install_ja_dict,
       ja_dict::remove_ja_dict,
+      convert::convert_tool_status,
+      convert::install_convert_tool,
+      convert::probe_video,
       trash_file
     ])
     .run(tauri::generate_context!())
@@ -55,14 +59,16 @@ fn trash_file(path: String) -> Result<(), String> {
   }
   #[cfg(not(windows))]
   let out = paths::command("/usr/bin/trash").arg(&path).output();
-  // The path travels in an env var, never spliced into the script.
+  // The path travels in an env var, never spliced into the script. USB sticks and
+  // network shares have no Recycle Bin: there DeleteFile would delete for good,
+  // so only a local fixed drive goes ahead (a network path throws, which fails too).
   #[cfg(windows)]
   let out = paths::command("powershell")
     .args([
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:LC_TRASH_PATH, 'OnlyErrorDialogs', 'SendToRecycleBin')",
+      "$d = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($env:LC_TRASH_PATH)); if ($d.DriveType -ne 'Fixed') { [Console]::Error.Write('no recycle bin on this drive'); exit 3 }; Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($env:LC_TRASH_PATH, 'OnlyErrorDialogs', 'SendToRecycleBin')",
     ])
     .env("LC_TRASH_PATH", &path)
     .output();

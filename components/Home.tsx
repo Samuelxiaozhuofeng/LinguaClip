@@ -5,8 +5,8 @@ import * as VideoStorage from '../utils/videoStorage';
 import { forgetCustomPos, forgetWatchPos, formatTimeCode, getCustomConfig, getCustomPos, getPracticeConfig } from '../utils/storage';
 import { parseSRT } from '../utils/srtParser';
 import { buildSections } from '../utils/sections';
-import { fileNameFromPath, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
-import { formatImportError, isCookieError, openYouTubeLogin, retryImport, subscribeImportJobs } from '../utils/importJob';
+import { fileNameFromPath, isVideoFile, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
+import { canConvertRetry, formatImportError, isCookieError, openYouTubeLogin, retryImport, subscribeImportJobs } from '../utils/importJob';
 import { Btn, Menu, MenuItem } from './ui';
 import VideoCover from './VideoCover';
 import { dialog } from './Dialog';
@@ -32,7 +32,6 @@ interface HomeProps {
   onAddHandled?: () => void;
 }
 
-const VIDEO_EXT = /\.(mp4|mov|m4v)$/i;
 type PrepInfo = { eligible: number; missing: number };
 const SRT_EXT = /\.srt$/i;
 
@@ -113,7 +112,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
       onLeave: () => setDragOver(false),
       onDrop: (paths) => {
         setDragOver(false);
-        const video = paths.find(p => VIDEO_EXT.test(fileNameFromPath(p)));
+        const video = paths.find(isVideoFile);
         const srt = paths.find(p => SRT_EXT.test(fileNameFromPath(p)));
         if (video || srt) setAdding(prev => ({ path: video ?? prev?.path ?? null, srt: srt ?? prev?.srt ?? null }));
       },
@@ -172,10 +171,10 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
     }
   };
 
-  const handleRetry = async (v: VideoRecord) => {
+  const handleRetry = async (v: VideoRecord, convert = false) => {
     setRetryingId(v.id);
     try {
-      await retryImport(v.id);
+      await retryImport(v.id, convert);
     } catch (e) {
       console.error(e);
       dialog.alert(t('home.retryFailTitle'), t('home.retryFailBody'));
@@ -228,6 +227,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   const jobLabel = (job: NonNullable<VideoRecord['importJob']>) => {
     const pct = job.percent ?? 0;
     if (job.stage === 'setup') return t('import.stageSetup', { pct });
+    if (job.stage === 'convertSetup') return t('import.stageConvertSetup', { pct });
+    if (job.stage === 'convert') return t('import.stageConvert', { pct });
     if (job.stage === 'download') return t('import.stageDownload', { pct });
     if (job.stage === 'transcribe') return t('import.stageTranscribe', { pct });
     if (job.stage === 'cloud') return t('import.stageCloud', { pct });
@@ -310,6 +311,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
       <p className="mt-1 text-xs text-mute">
         {formatImportError(job.error)}
         {isCookieError(job.error) && <><span className="mx-2 text-mute">·</span><button type="button" onClick={handleYouTubeLogin} className="text-ink hover:underline underline-offset-4">{t('home.ytLogin')}</button></>}
+        {canConvertRetry(job) && <><span className="mx-2 text-mute">·</span><button type="button" onClick={() => handleRetry(v, true)} disabled={retryingId === v.id} className="text-ink hover:underline underline-offset-4 disabled:opacity-40">{t('home.retryConvert')}</button></>}
         <span className="mx-2 text-mute">·</span><button type="button" onClick={() => handleRetry(v)} disabled={retryingId === v.id} className="text-ink hover:underline underline-offset-4 disabled:opacity-40">{t('home.retry')}</button>
       </p>
     );

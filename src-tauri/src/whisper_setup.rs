@@ -292,14 +292,22 @@ pub(crate) async fn fetch(asset: &Asset, dir: &Path, mut on_bytes: impl FnMut(u6
   Ok(())
 }
 
-// Windows 10+ ships bsdtar, which reads zip files.
+// Windows 10+ ships bsdtar, which reads zip files; macOS has ditto.
 fn unzip(zip: &Path, dir: &Path) -> Result<(), String> {
-  let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-  let out = crate::paths::command(root.join(r"System32\tar.exe"))
-    .arg("-xf")
-    .arg(zip)
-    .arg("-C")
-    .arg(dir)
+  #[cfg(windows)]
+  let mut cmd = {
+    let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let mut c = crate::paths::command(root.join(r"System32\tar.exe"));
+    c.arg("-xf").arg(zip).arg("-C").arg(dir);
+    c
+  };
+  #[cfg(not(windows))]
+  let mut cmd = {
+    let mut c = crate::paths::command("/usr/bin/ditto");
+    c.args(["-x", "-k"]).arg(zip).arg(dir);
+    c
+  };
+  let out = cmd
     .output()
     .map_err(|e| format!("setup:unzip {e}"))?;
   if !out.status.success() {
