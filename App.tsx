@@ -5,6 +5,7 @@ import Settings from './components/Settings';
 import Home from './components/Home';
 import Shell from './components/Shell';
 import Studio from './components/Studio';
+import WatchPage from './components/WatchPage';
 import CustomPanel, { PanelChoice, nextPick, paceOf } from './components/CustomPanel';
 import { DialogHost, dialog } from './components/Dialog';
 import { PracticeProvider } from './hooks/usePracticeContext';
@@ -83,6 +84,7 @@ export default function App() {
   const [panel, setPanel] = useState<{ record: VideoRecord; lm: LearningMode } | null>(null);
   type CustomSession = { record: VideoRecord; lm: LearningMode; cfg: CustomConfig; watch: Set<number>; end: number };
   const [custom, setCustom] = useState<CustomSession | null>(null);
+  const [watching, setWatching] = useState<VideoRecord | null>(null); // watch mode's video, its path checked
   const customRef = useRef<CustomSession | null>(null);
   // Every write of the record's section progress goes through here, so a custom
   // set can never move the shelf's "part 3 of 12" or where "continue" lands.
@@ -227,6 +229,19 @@ export default function App() {
         await VideoStorage.patchVideoRecord(record.id, { videoPath });
       }
 
+      if (choice.kind === 'watch') {
+        if (stale()) return;
+        if (parseSRT(record.subtitleText).length === 0) {
+          dialog.alert(t('app.noSubtitlesTitle'), t('app.noSubtitlesBody', { name: record.videoFileName }));
+          return;
+        }
+        // Watching moves the video up the shelf; its practice mode and progress stay.
+        VideoStorage.patchVideoRecord(record.id, { lastPracticed: Date.now() }).catch(console.error);
+        setWatching({ ...record, videoPath });
+        setAppState(AppState.WATCH);
+        return;
+      }
+
       if (record.learningMode !== lm) await VideoStorage.patchVideoRecord(record.id, { learningMode: lm });
       if (stale()) return;
       const bpm = record.blurPlaybackMode ?? BlurPlaybackMode.SENTENCE_BY_SENTENCE;
@@ -347,7 +362,9 @@ export default function App() {
 
   const currentSub = subtitles[currentSubtitleIndex];
 
-  const page = appState !== AppState.PRACTICE ? (
+  const page = appState === AppState.WATCH && watching ? (
+    <WatchPage key={watching.id} record={watching} onExit={() => { setWatching(null); setAppState(AppState.UPLOAD); }} />
+  ) : appState !== AppState.PRACTICE ? (
     <Shell active={appState} onNav={setAppState} hideAdd={appState === AppState.UPLOAD && homeEmpty} onAdd={() => { setAppState(AppState.UPLOAD); setAddAsked(true); }}>
       {appState === AppState.SETTINGS ? <Settings /> :
        appState === AppState.LIBRARY ? <ReviewPage key="line" deck="line" /> :

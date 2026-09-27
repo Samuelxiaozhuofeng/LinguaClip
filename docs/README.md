@@ -12,7 +12,7 @@
 
 | 位置 | 管什么 |
 |---|---|
-| `App.tsx` | 页面状态机（首页 / 练习 / 收藏 / 设置）、开始练习与续练、全局快捷键表 |
+| `App.tsx` | 页面状态机（首页 / 练习 / 看剧 / 收藏 / 设置）、开始练习与续练、全局快捷键表 |
 | `components/Home.tsx` + `VideoCover.tsx` | 拖入 / 选文件、历史记录货架（列表 / 卡片，卡片封面是现抓的视频一帧，不存盘） |
 | `components/Studio.tsx` + `Transport.tsx` + `DictationLine.tsx` / `BlurLine.tsx` | 练习页：视频、字幕条、遥控条 |
 | `components/Settings*.tsx` | 通用 / AI 查词 / Anki 设置 |
@@ -27,6 +27,7 @@
 | `utils/jaLookup.ts` + `jaPhrases.ts` | 日语点词查词：词组还原原形（`jaLemma`）后查有道日汉（`newjc`，走老接口 `jsonapi?le=jap`，新接口 `jsonapi_s` 会把「高い」「皆さん」认成英语）；有道查不到的词会拿别的词顶上，按读音 / 汉字筛掉，再按词性排（くる 先给「来る」）。`jaPhrases.ts` 两张表：寒暄语 / 固定句型（初めまして、かもしれない…，只收有道有词条的）切词时整体一格、查词查整条；有道缺的或同音词排前面的假名词改查汉字写法（やる→遣る）。桌面版请求有道必须去掉 plugin-http 默认加的 `Origin: tauri://localhost`（有道回 400）：`get()` 传空 Origin + Cargo 开 `unsafe-headers` |
 | `utils/breakdownPrep.ts` + `clozePrep.ts` | 拆句 / 挖空的后台任务（首页「…」、导入后自动做、练习页共用同一个任务），结果存 `~/Movies/LinguaClip/<id>.breakdown/cloze.json`；cloze.json 带 `n`（排名时每句格数），格数变了（日语切法变了）那句作废重问 |
 | `components/CustomPanel.tsx` + `utils/customPick.ts` + `utils/levelPrep.ts` | 开始练习前的面板（所有入口都走 `App.tsx` 的 `handleResume`）：「按段从头练」（旧行为）或「定制」（时长 + A1–C2 水平 + 其余句子照常播放 / 跳过）。AI 给每句一个等级或 `x`（不值得练），只回代码，存 `<id>.levels.json`（按字幕 hash 作废；失败的句子留 null 下次再问，挑句时按本机规则当可练）；挑句是纯函数 `pickCustom`，从 localStorage `linguaclip_custom_pos` 记的秒数往后挑够时长。定制会话是只有一段的 sections；「照常播放」的句子进 `watch`（`useVideoPlayer` 里播完不停、不进输入）。**定制练习不写记录的段进度**：`App.tsx` 里所有 `updateProgress` 都走 `saveProgress`，定制时静默 |
+| `components/WatchPage.tsx` + `WatchLine.tsx` + `WatchSummary.tsx` | 看剧模式：面板选「看剧」→ `AppState.WATCH`，独立页面，**不经 `usePracticeSession` / `PracticeProvider`**，所以不碰段进度和定制进度。全窗口视频 + 叠在画面上的字幕（原文 / 模糊 / 隐藏，点词查词，查词暂停、关掉恢复）；S 收藏（同一个复习库）、⌘⇧N Anki（录音期间句尾暂停和按键都停）、⌘←/⌘→ 上下句、P 句尾暂停、C 切字幕。看完或返回时（这次收藏 / 查过词才弹）出小结，勾选收藏句交给 `ReviewSession` 听写。「当前句」= 最后一个已开始的句子（`srtParser.ts` 的 `lineAt`，`test-watch.mjs`） |
 | `components/AddVideo.tsx`（添加视频弹窗）+ `utils/importJob.ts` + `src-tauri/src/import.rs` + `whisper_setup.rs` | 自带字幕 / 本地转录（首次自动下载转录组件）/ YouTube 下载，见 [import.md](import.md) |
 | `utils/i18n.*.ts` | 中 / 英文案，两份都要改 |
 | `src-tauri/src/paths.rs` + `utils/platform.ts` | Mac / Windows 差异：自有目录（~/Movies 或 ~/Videos 下的 LinguaClip）、起子进程不弹黑窗、快捷键和「废纸篓」文案 |
@@ -41,7 +42,7 @@
 
 - IndexedDB `linguaclip_db`：`videos` 表（VideoRecord，含 `videoPath`、字幕全文、进度）；`fileHandles` 表是网页时代遗留，已不读不写，**不要删表、不要动 DB_VERSION**
 - IndexedDB `linguaclip_review`（`utils/review.ts`）：复习卡片，和 `linguaclip_db` 分库——**别把它并进 `linguaclip_db`**（那要升 DB_VERSION，旧版 App 就打不开练习记录了）。`cards` 表一张卡 = 一句（`deck:'line'`，id `视频id|开始秒`）或一个词（`deck:'word'`，id 再加 `|w|单词`），卡里自带句子、时间、视频路径快照和 FSRS 排期（`ts-fsrs`，间隔按天、不走分钟步）；删视频记录连同它的卡一起删（`deleteVideoCards`），App 自己的 `<id>.{words,cloze,breakdown,segments,levels}.json` 缓存也进废纸篓；旧版删视频留下的卡（`orphanCards`），启动时弹窗问一次删不删，选保留的记在 localStorage `linguaclip_kept_orphans`；`meta` 表只有 `migrated` 一条，和旧收藏迁移的卡同一事务写入。评分全自动：交卷有错 Again、看提示 / ⌘J / ⌘K 过 Hard、一次全对 Good
-- localStorage：`linguaclip_custom_pos`（每个视频下次定制练习从第几秒挑起，删视频时清掉）/ `practice_config.custom`（开始练习面板上次的选择）/ `linguaclip_ai_config` / `linguaclip_anki_config` / `audio_padding` / `lang` / `practice_config` / `saved_lines`（**旧收藏，只读**：首次打开复习库时迁移进卡片，之后不再写，留作备份）/ `video_progress` / `import_lang`（添加视频弹窗记住的字幕语言）/ `linguaclip_today`（首页「今天练了几分钟 · 几句」，只存当天一条，`utils/today.ts`）/ `home_view`（首页列表 or 卡片）
+- localStorage：`linguaclip_custom_pos`（每个视频下次定制练习从第几秒挑起，删视频时清掉）/ `linguaclip_watch_pos`（每个视频看剧看到第几秒，看完归零，删视频时清掉）/ `linguaclip_watch_prefs`（看剧字幕显示、句尾暂停、面板上次是否选了看剧）/ `practice_config.custom`（开始练习面板上次的选择）/ `linguaclip_ai_config` / `linguaclip_anki_config` / `audio_padding` / `lang` / `practice_config` / `saved_lines`（**旧收藏，只读**：首次打开复习库时迁移进卡片，之后不再写，留作备份）/ `video_progress` / `import_lang`（添加视频弹窗记住的字幕语言）/ `linguaclip_today`（首页「今天练了几分钟 · 几句」，只存当天一条，`utils/today.ts`）/ `home_view`（首页列表 or 卡片）
 
 ## 根目录那些 *.md
 

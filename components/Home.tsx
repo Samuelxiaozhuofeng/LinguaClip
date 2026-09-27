@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, MoreHorizontal, Loader2, Play } from 'lucide-react';
 import { LearningMode, VideoRecord } from '../types';
 import * as VideoStorage from '../utils/videoStorage';
-import { forgetCustomPos, formatTimeCode, getCustomConfig, getCustomPos, getPracticeConfig } from '../utils/storage';
+import { forgetCustomPos, forgetWatchPos, formatTimeCode, getCustomConfig, getCustomPos, getPracticeConfig } from '../utils/storage';
 import { parseSRT } from '../utils/srtParser';
 import { buildSections } from '../utils/sections';
 import { fileNameFromPath, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
@@ -201,6 +201,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
       await VideoStorage.deleteVideoRecord(v.id);
       setVideos(prev => (prev ? prev.filter(x => x.id !== v.id) : prev));
       forgetCustomPos(v.id);
+      forgetWatchPos(v.id);
     } catch {
       dialog.alert(t('home.deleteFailTitle'), t('home.deleteFailBody'));
       setDeletingId(null);

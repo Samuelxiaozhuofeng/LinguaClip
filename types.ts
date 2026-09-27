@@ -11,6 +11,7 @@ export enum AppState {
   LIBRARY = 'LIBRARY',
   CARDS = 'CARDS',
   SETTINGS = 'SETTINGS',
+  WATCH = 'WATCH',       // watch mode: the whole window is the video (components/WatchPage.tsx)
 }
 
 export enum PracticeMode {

@@ -6,13 +6,14 @@ import { parseSRT } from '../utils/srtParser';
 import { canCloze } from '../utils/aiDrills';
 import { CustomConfig, CustomPick, LEVELS, Level, LineLabel, MINUTE_CHOICES, PaceMode, pickCustom } from '../utils/customPick';
 import { getLevelJob, prepareLevels, readLevels, subscribeLevels } from '../utils/levelPrep';
-import { formatTimeCode, getCustomConfig, getCustomPos, saveCustomConfig } from '../utils/storage';
+import { formatTimeCode, getCustomConfig, getCustomPos, getWatchPrefs, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
 
 // Asked before every practice session: section by section as before, or a
-// custom set — so many minutes, at a level, from where the last set stopped.
+// custom set — so many minutes, at a level, from where the last set stopped —
+// or just watching (components/WatchPage.tsx). The last way chosen comes back.
 // Esc / clicking outside cancels; it never counts as a choice.
 
-export type PanelChoice = { kind: 'all' } | { kind: 'custom'; cfg: CustomConfig; pick: CustomPick };
+export type PanelChoice = { kind: 'all' } | { kind: 'watch' } | { kind: 'custom'; cfg: CustomConfig; pick: CustomPick };
 
 export const paceOf = (lm: LearningMode, bpm?: BlurPlaybackMode): PaceMode =>
   lm === LearningMode.DICTATION ? 'dictation' : bpm === BlurPlaybackMode.CONTINUOUS ? 'flow' : 'step';
@@ -39,13 +40,14 @@ const CustomPanel: React.FC<{
     const c = getCustomConfig();
     return hasAi ? c : { ...c, level: null };
   });
+  const [watch, setWatch] = useState(() => getWatchPrefs().chosen);
   const subs = useMemo(() => parseSRT(record.subtitleText), [record.subtitleText]);
   const [labels, setLabels] = useState<LineLabel[] | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const [tries, setTries] = useState(0);
   const [waiting, setWaiting] = useState(false);
-  const want = cfg.on && needsLabels(cfg);
+  const want = !watch && cfg.on && needsLabels(cfg);
 
   useEffect(() => {
     setFailed(false);
@@ -65,10 +67,13 @@ const CustomPanel: React.FC<{
 
   const pickWith = (timeOnly: boolean) =>
     pickCustom(subs, timeOnly || !want ? null : labels, timeOnly ? { ...cfg, level: null } : cfg, getCustomPos(record.id), pace);
-  const preview = cfg.on && (!want || labels) ? pickWith(false) : null;
-  const empty = cfg.on && (!want || labels) && !preview;
+  const custom = !watch && cfg.on;
+  const preview = custom && (!want || labels) ? pickWith(false) : null;
+  const empty = custom && (!want || labels) && !preview;
 
   const start = (timeOnly = false) => {
+    saveWatchPrefs({ chosen: watch });
+    if (watch) { onStart({ kind: 'watch' }); return; }
     if (!cfg.on) { saveCustomConfig(cfg); onStart({ kind: 'all' }); return; }
     if (want && !labels && !timeOnly) { if (!failed) setWaiting(true); return; }
     const pick = pickWith(timeOnly);
@@ -97,7 +102,7 @@ const CustomPanel: React.FC<{
   const dim = (label: string) => <span className="opacity-40">{label}</span>;
 
   let status: React.ReactNode = null;
-  if (cfg.on) {
+  if (custom) {
     if (want && failed) {
       status = (
         <div className="flex flex-wrap items-center gap-2">
@@ -131,13 +136,14 @@ const CustomPanel: React.FC<{
           <p className="mt-1 text-sm text-mute truncate" title={record.displayName}>{record.displayName}</p>
         </div>
         <div className="px-6 py-4 flex flex-col gap-4">
-          <Row label={t('custom.way')} hint={cfg.on ? undefined : t('custom.allHint')}>
-            <Seg value={cfg.on ? 'custom' : 'all'} onChange={v => set({ on: v === 'custom' })} options={[
+          <Row label={t('custom.way')} hint={watch ? t('custom.watchHint') : cfg.on ? undefined : t('custom.allHint')}>
+            <Seg value={watch ? 'watch' : cfg.on ? 'custom' : 'all'} onChange={v => { setWaiting(false); setWatch(v === 'watch'); if (v !== 'watch') set({ on: v === 'custom' }); }} options={[
               { value: 'all', label: t('custom.all') },
               { value: 'custom', label: t('custom.custom') },
+              { value: 'watch', label: t('custom.watch') },
             ]} />
           </Row>
-          {cfg.on && <>
+          {custom && <>
             <Row label={t('custom.minutes')}>
               <Seg size="sm" value={cfg.minutes} onChange={minutes => set({ minutes })} options={
                 MINUTE_CHOICES.map(n => ({ value: n, label: t('custom.minutesN', { n }) }))
@@ -161,7 +167,7 @@ const CustomPanel: React.FC<{
         <div className="px-6 pt-2 pb-6 flex justify-end gap-3">
           <Btn onClick={onCancel}>{t('dialog.cancel')}</Btn>
           <Btn tone="accent" onClick={() => start()} disabled={!!empty || (want && failed) || waiting} autoFocus>
-            {waiting ? t('custom.waiting') : t('custom.start')}
+            {waiting ? t('custom.waiting') : watch ? t('custom.startWatch') : t('custom.start')}
           </Btn>
         </div>
       </Card>

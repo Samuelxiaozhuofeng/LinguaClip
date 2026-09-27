@@ -1,3 +1,15 @@
+# 看剧模式（产品文档：https://claude.ai/code/artifact/ff7ab143-727c-499e-8ebd-3ba7f1b2fe5b）
+
+- [x] 面板第三种练法「看剧」+ 记住上次选择
+- [x] 看剧页：全窗口视频、叠加字幕（原文 / 模糊 / 隐藏）、点词查词（暂停 → 关掉恢复）
+- [x] 快捷键：空格、⌘←/⌘→、⇧空格、←/→、S、P、C、⌘⇧N
+- [x] 本集小结：收藏句勾选去听写（ReviewSession）、查过的词
+- [x] 看剧位置单独存，不碰段进度 / 定制进度；删视频时清掉
+- [x] tsc + test-watch.mjs + 浏览器实测（含按段从头练 / 定制回归）
+- [x] Gemini 审码：4 条核实已修（句尾暂停停错句、录音期间误清进度 / 误收藏 / 单词录音被掐断）
+- [x] npm run release
+- [ ] 用户真机验收（Anki 录音成卡、Mac 全屏）
+
 # Windows 显卡加速（Vulkan，设置里的开关，默认关）
 
 - [x] 前端开关 + gpu 参数传到 start_import / import_tools（浏览器实测过）

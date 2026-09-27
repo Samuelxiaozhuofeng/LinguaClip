@@ -92,3 +92,52 @@ const writeCustomPos = (edit: (all: Record<string, number>) => void) => {
 
 export const setCustomPos = (videoId: string, sec: number) => writeCustomPos(all => { all[videoId] = sec; });
 export const forgetCustomPos = (videoId: string) => writeCustomPos(all => { delete all[videoId]; });
+
+// --- Watch mode (components/WatchPage.tsx) ---
+// Where each video's watching stopped, in seconds; its own map, so watching never
+// moves the section progress or the next custom set.
+const STORAGE_KEY_WATCH_POS = 'linguaclip_watch_pos';
+const STORAGE_KEY_WATCH_PREFS = 'linguaclip_watch_prefs';
+
+const readWatchPos = (): Record<string, number> => {
+  try {
+    const v = JSON.parse(localStorage.getItem(STORAGE_KEY_WATCH_POS) || '{}');
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
+};
+
+export const getWatchPos = (videoId: string): number => {
+  const n = readWatchPos()[videoId];
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0;
+};
+
+const writeWatchPos = (edit: (all: Record<string, number>) => void) => {
+  try {
+    const all = readWatchPos();
+    edit(all);
+    localStorage.setItem(STORAGE_KEY_WATCH_POS, JSON.stringify(all));
+  } catch { /* only costs where watching resumes */ }
+};
+
+export const setWatchPos = (videoId: string, sec: number) => writeWatchPos(all => { all[videoId] = sec; });
+export const forgetWatchPos = (videoId: string) => writeWatchPos(all => { delete all[videoId]; });
+
+// How subtitles show, whether each line pauses at its end, and whether the
+// start-of-practice panel last chose "watch".
+export type WatchSubs = 'show' | 'blur' | 'hide';
+export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean };
+
+export const getWatchPrefs = (): WatchPrefs => {
+  try {
+    const v = JSON.parse(localStorage.getItem(STORAGE_KEY_WATCH_PREFS) || '{}') ?? {};
+    return { subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen === true };
+  } catch {
+    return { subs: 'show', autoPause: false, chosen: false };
+  }
+};
+
+export const saveWatchPrefs = (patch: Partial<WatchPrefs>) => {
+  try { localStorage.setItem(STORAGE_KEY_WATCH_PREFS, JSON.stringify({ ...getWatchPrefs(), ...patch })); } catch { /* stays for this session only */ }
+};

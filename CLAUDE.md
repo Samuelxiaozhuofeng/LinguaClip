@@ -24,6 +24,7 @@ node test-anki.mjs        # Anki 旧配置合并成一种卡 + 单词加粗（�
 node test-japanese.mjs    # 日语切词组 + 假名判对 + AI 校对回答校验（读 node_modules/kuromoji/dict）
 node test-custom.mjs      # 定制练习：挑句（水平区间、时长、照常播放 / 跳过、从头再挑）+ AI 分级回答 / 缓存校验
 node test-wordtimes.mjs   # 逐词时间：空格对到 words.json 的哪一段 + ⌘K / ⌘J 实际播放区间
+node test-watch.mjs       # 看剧：某一秒屏幕上是哪一句（lineAt）
 ```
 
 前端没有测试框架，逻辑自检就是根目录那几个 `node` 脚本（`test-tokenizer.js` / `test-flexible-case.js` 是早期的复制逻辑版，参考价值有限）。
@@ -35,7 +36,7 @@ node test-wordtimes.mjs   # 逐词时间：空格对到 words.json 的哪一段 
 1. `npx tsc --noEmit` + 相关 `node test-*.mjs`（碰 Rust 再跑 `cargo test`）。
 2. **浏览器实测**：启 `npm run dev`（`.claude/launch.json` 的 `dev`），按用户会做的操作走一遍改动，外加改动碰过的原有操作；截图给用户当证据。**首选 Playwright**（后台无头跑、不占用户屏幕、脚本可重跑）；Chrome 插件（claude-in-chrome）只在要用用户已登录的账号、或用户想亲眼看着操作时用——实测它开在用户正在用的 Chrome 里、视频加载不出来、标签页会中途丢失。没有内置浏览器（`preview_start`）时也走 Playwright。
    - Playwright 不装进项目：在 scratchpad 里 `npm i playwright`，`chromium.launch({ channel: 'chrome' })` 用系统 Chrome（自带 H.264，样片 mp4 才能播），`newPage({ locale: 'zh-CN' })`。
-   - 按钮用 `getByRole('button', { name })` 找，名字照 `utils/i18n.zh.ts` 抄，别猜（如「添加视频」「选择本机视频」「选字幕文件」「开始练习」；开始练习后先弹「这次怎么练」面板，`getByRole('dialog', { name: '这次怎么练' })` 里点「开始练习」才进练习页）。
+   - 按钮用 `getByRole('button', { name })` 找，名字照 `utils/i18n.zh.ts` 抄，别猜（如「添加视频」「选择本机视频」「选字幕文件」「开始练习」；开始练习后先弹「这次怎么练」面板，`getByRole('dialog', { name: '这次怎么练' })` 里点「开始练习」才进练习页；练法选 `radio` 「看剧」再点「开始看剧」进看剧页，面板会记住上次选的练法）。
    - 进听写：先 `page.evaluate` 设 `window.__MOCK__`（`jaDict` / `pick`），添加视频 → 开始练习 → `video.play()`，等 `section input` 出现（先放完一遍听、再切到输入）；`fill` 各格后按 Enter 交卷，答案行 `section p button` 可点查词，释义弹窗是 `[role=dialog]`。
 3. `npm run release` 打正式包装进 /Applications，给用户验收路径（打开哪里 → 做什么 → 应该看到什么），并写明哪些是浏览器验不到、需要真机确认的。
 

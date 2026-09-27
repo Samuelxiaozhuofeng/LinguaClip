@@ -9,7 +9,7 @@ import { lookupJa } from '../utils/jaLookup';
 // Dictionary first. AI answers instead when the dictionary has nothing (or no
 // dictionary covers the language), and first when the UI is English, since
 // the dictionaries only give Chinese.
-export const useLookup = (dictLang: DictLang | null, context: string) => {
+export const useLookup = (dictLang: DictLang | null, currentContext: string) => {
   const t = useT();
   const [def, setDef] = useState<DefinitionState>(emptyDefinition);
   const seqRef = useRef(0);
@@ -26,7 +26,9 @@ export const useLookup = (dictLang: DictLang | null, context: string) => {
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, []);
 
-  const lookup = async (word: string) => {
+  // `line` overrides the hook's context: a word looked up again from a list, not from the line on screen.
+  const lookup = async (word: string, line?: string) => {
+    const context = line ?? currentContext;
     const seq = ++seqRef.current;
     const mine = () => seq === seqRef.current;
     const ai = AI.aiReady();
