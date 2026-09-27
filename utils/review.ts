@@ -296,7 +296,11 @@ const keptOrphans = (): string[] => {
 export const orphanCards = async () => {
   const live = new Set((await getAllVideosFromDB()).map((r: { id: string }) => r.id));
   const kept = new Set(keptOrphans());
-  return (await getAllCards()).filter(c => c.videoId && !live.has(c.videoId) && !kept.has(c.id));
+  const cards = await getAllCards();
+  // A kept video's later cards (a word kept while reviewing from its clip) are kept too, and
+  // so is any card with its own clip: it still plays, it isn't a leftover.
+  const keptVideos = new Set(cards.filter(c => kept.has(c.id)).map(c => c.videoId));
+  return cards.filter(c => c.videoId && !live.has(c.videoId) && !kept.has(c.id) && !keptVideos.has(c.videoId) && !c.clip);
 };
 export const keepOrphans = (ids: string[]) => {
   try { localStorage.setItem(KEPT, JSON.stringify([...keptOrphans(), ...ids])); } catch { /* storage off: asked again next launch */ }

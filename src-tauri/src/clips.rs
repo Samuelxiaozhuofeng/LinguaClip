@@ -31,10 +31,10 @@ fn args(kind: &str, src: &Path, from: f64, to: f64, out: &Path) -> Vec<String> {
   a.push("-i".into());
   a.push(src.to_string_lossy().into_owned());
   let tail: &[&str] = match kind {
-    "video" => &["-map", "0:v:0?", "-map", "0:a:0?", "-vf", "scale=-2:'min(480,ih)'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+    "video" => &["-map", "0:v:0?", "-map", "0:a:0?", "-vf", "scale=-2:'trunc(min(480,ih)/2)*2'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
       "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-ac", "2", "-movflags", "+faststart", "-f", "mp4"],
     "audio" => &["-vn", "-map", "0:a:0", "-c:a", "aac", "-b:a", "96k", "-ac", "2", "-f", "mp4"],
-    _ => &["-frames:v", "1", "-vf", "scale=-2:'min(480,ih)'", "-q:v", "5", "-f", "image2", "-c:v", "mjpeg"],
+    _ => &["-frames:v", "1", "-vf", "scale=-2:'trunc(min(480,ih)/2)*2'", "-q:v", "5", "-f", "image2", "-c:v", "mjpeg"],
   };
   if kind != "image" {
     a.push("-t".into());
