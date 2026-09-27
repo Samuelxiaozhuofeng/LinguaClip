@@ -589,5 +589,9 @@ export const zh: Record<keyof typeof en, string> = {
   'watch.keySave': '收藏这句',
   'watch.keySubs': '字幕显示切换',
   'watch.fullscreen': '全屏',
+  'watch.pin': '固定播放栏',
+  'watch.unpin': '取消固定（自动隐藏）',
+  'watch.list': '字幕列表',
+  'watch.listResize': '拖动调整宽度',
   'watch.exitFullscreen': '退出全屏',
 };

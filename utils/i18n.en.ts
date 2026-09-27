@@ -588,5 +588,9 @@ export const en = {
   'watch.keySave': 'Save this line',
   'watch.keySubs': 'Switch subtitle display',
   'watch.fullscreen': 'Full screen',
+  'watch.pin': 'Pin the controls',
+  'watch.unpin': 'Unpin (auto-hide)',
+  'watch.list': 'Subtitle list',
+  'watch.listResize': 'Drag to resize',
   'watch.exitFullscreen': 'Exit full screen',
 } as const;

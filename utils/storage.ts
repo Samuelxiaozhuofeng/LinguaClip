@@ -124,17 +124,20 @@ const writeWatchPos = (edit: (all: Record<string, number>) => void) => {
 export const setWatchPos = (videoId: string, sec: number) => writeWatchPos(all => { all[videoId] = sec; });
 export const forgetWatchPos = (videoId: string) => writeWatchPos(all => { delete all[videoId]; });
 
-// How subtitles show, whether each line pauses at its end, and whether the
-// start-of-practice panel last chose "watch".
+// How subtitles show, whether each line pauses at its end, whether the
+// start-of-practice panel last chose "watch", whether the controls are pinned,
+// and whether the subtitle list is open and how wide (% of the window).
 export type WatchSubs = 'show' | 'blur' | 'hide';
-export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean };
+export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean; pin: boolean; list: boolean; listPct: number };
+export const LIST_PCT = { min: 20, max: 50, def: 30 };
 
 export const getWatchPrefs = (): WatchPrefs => {
   try {
     const v = JSON.parse(localStorage.getItem(STORAGE_KEY_WATCH_PREFS) || '{}') ?? {};
-    return { subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen === true };
+    const pct = typeof v.listPct === 'number' && Number.isFinite(v.listPct) ? Math.min(LIST_PCT.max, Math.max(LIST_PCT.min, v.listPct)) : LIST_PCT.def;
+    return { subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen === true, pin: v.pin === true, list: v.list === true, listPct: pct };
   } catch {
-    return { subs: 'show', autoPause: false, chosen: false };
+    return { subs: 'show', autoPause: false, chosen: false, pin: false, list: false, listPct: LIST_PCT.def };
   }
 };
 

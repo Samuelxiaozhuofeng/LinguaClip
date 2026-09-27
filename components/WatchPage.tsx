@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bookmark, Loader2, Maximize2, Minimize2, MoreHorizontal, Pause, Play, PlusCircle, RotateCcw, SkipBack, SkipForward, Check, X, Mic } from 'lucide-react';
+import { ArrowLeft, Bookmark, Loader2, Maximize2, Minimize2, MoreHorizontal, Pause, Play, PlusCircle, RotateCcw, SkipBack, SkipForward, Check, X, Mic, Pin, PanelRight } from 'lucide-react';
 import { Subtitle, VideoRecord } from '../types';
 import { Btn, Menu, Seg, Stamp } from './ui';
 import WatchLine from './WatchLine';
+import WatchList from './WatchList';
 import WatchSummary, { Looked } from './WatchSummary';
 import DefinitionPanel from './DefinitionPanel';
 import ReviewSession from './ReviewSession';
@@ -28,7 +29,7 @@ const SUBS: WatchSubs[] = ['show', 'blur', 'hide'];
 const SEEK = 5; // ← / → seconds
 const IDLE_MS = 2500; // the pointer hides after this long still; both bars show this long on entry
 const TOP_ZONE = 88; // px from the top edge that bring the back button up
-const BOTTOM_ZONE = 140; // px from the bottom edge that bring the controls up
+const BOTTOM_ZONE = 44; // px from the bottom edge that bring the controls up: below the subtitle, so aiming at a word doesn't
 
 const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ record, onExit }) => {
   const t = useT();
@@ -58,6 +59,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
 
   const shown = cur.on ? lines[cur.at] : null;
   const target = cur.at >= 0 ? lines[cur.at] : null; // what S / Anki / replay act on
+  const [listPct, setListPct] = useState(prefs.listPct); // live while dragging; saved on release
   const setPrefs = (patch: Partial<WatchPrefs>) => {
     if (patch.subs) setRevealed(null); // a line opened in one display is covered again by the next
     setPrefsState(p => ({ ...p, ...patch }));
@@ -277,10 +279,11 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   const idle = useRef(0);
   const onMove = (e: React.MouseEvent) => {
     const el = e.target as Element;
-    const top = e.clientY < TOP_ZONE || !!el.closest?.('header');
+    const inList = !!el.closest?.('[data-watch-list]'); // the list is beside the picture, not on it
+    const top = !inList && (e.clientY < TOP_ZONE || !!el.closest?.('header'));
     const hold = def.word !== null || !!el.closest?.('[data-watch-line]');
     setNear(n => {
-      const bottom = hold ? n.bottom : e.clientY > window.innerHeight - BOTTOM_ZONE || !!el.closest?.('footer');
+      const bottom = hold ? n.bottom : !inList && (e.clientY > window.innerHeight - BOTTOM_ZONE || !!el.closest?.('footer'));
       return n.top === top && n.bottom === bottom ? n : { top, bottom };
     });
     setAwake(true);
@@ -292,14 +295,19 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     return () => { window.clearTimeout(id); window.clearTimeout(idle.current); };
   }, []);
   const showTop = intro || near.top;
-  const showBottom = intro || near.bottom;
+  const showBottom = intro || near.bottom || prefs.pin;
   const hideCursor = !awake && playing && !near.top && !near.bottom;
 
   // Fullscreen is the window's; the green button can change it too, so read it back on every resize.
+  const [winW, setWinW] = useState(window.innerWidth);
+  // The controls fit the picture's width, not the window's: with the list open, the less-used
+  // ones fold into "…" first (sentence pause, then the subtitle switch) so none overlap.
+  const stageW = prefs.list ? winW * (1 - listPct / 100) : winW;
+  const fold = { pause: stageW < 900, subs: stageW < 720 };
   const fullRef = useRef(false);
   fullRef.current = full;
   useEffect(() => {
-    const sync = () => { isFullscreen().then(setFull).catch(() => {}); };
+    const sync = () => { setWinW(window.innerWidth); isFullscreen().then(setFull).catch(() => {}); };
     sync();
     window.addEventListener('resize', sync);
     return () => {
@@ -350,6 +358,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
 
   return (
     <div className={`fixed inset-0 bg-black select-none ${hideCursor ? 'cursor-none' : ''}`} onMouseMove={onMove} onMouseLeave={() => setNear(n => ({ top: false, bottom: def.word !== null && n.bottom }))}>
+      <div className="absolute inset-y-0 left-0" style={{ right: prefs.list ? `${listPct}%` : 0 }}>
       <video ref={videoRef} crossOrigin="anonymous" src={videoSrcFromPath(record.videoPath!)} className="absolute inset-0 w-full h-full object-contain"
         onLoadedMetadata={onLoaded} onTimeUpdate={onTime} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={onEnded}
         onError={() => setFailed(true)} onClick={togglePlay} />
@@ -399,13 +408,13 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
         </div>
         <div className="mt-1 flex items-center gap-2 text-mute">
           <div className="flex-1 min-w-0 flex items-center gap-1">
-            <span className="text-xs tabular-nums pr-2">{formatTimeCode(time)} / {formatTimeCode(duration)}</span>
+            <span className="text-xs tabular-nums pr-2 whitespace-nowrap">{formatTimeCode(time)} / {formatTimeCode(duration)}</span>
             <Btn square size="sm" flat onClick={save} disabled={recording || !target} title={withKey(isSaved ? t('transport.unsaveLine') : t('transport.saveLine'), 'S')} className={isSaved ? '!text-accent' : ''}>
               <Bookmark size={17} fill={isSaved ? 'currentColor' : 'none'} />
             </Btn>
             {ankiReady && (
               <Btn size="sm" flat disabled={ankiStatus !== 'idle' || !target} onClick={toAnki} title={withKey(t('transport.sendToAnki'), formatCombo(combos.anki))} className={ankiStatus === 'idle' ? '' : '!opacity-100 !text-ink'}>
-                {af.icon} <span className="hidden sm:inline">{af.label}</span>
+                {af.icon} {!fold.subs && <span>{af.label}</span>}
               </Btn>
             )}
           </div>
@@ -419,9 +428,15 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
             <Btn square flat onClick={next} disabled={recording} title={withKey(t('transport.nextLine'), `${IS_WINDOWS ? 'Ctrl+' : '⌘'}→`)} className="!text-ink"><SkipForward size={18} /></Btn>
           </div>
           <div className="flex-1 min-w-0 flex items-center justify-end gap-2">
-            <Seg size="sm" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey), title: withKey(t('watch.keySubs'), 'C') }))} />
-            <Btn size="sm" tone={prefs.autoPause ? 'accent-soft' : 'white'} onClick={toggleAutoPause} title={withKey(t('watch.autoPauseTitle'), 'P')} aria-pressed={prefs.autoPause} className="hidden md:inline-flex">
+            {!fold.subs && <Seg size="sm" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey), title: withKey(t('watch.keySubs'), 'C') }))} />}
+            {!fold.pause && <Btn size="sm" tone={prefs.autoPause ? 'accent-soft' : 'white'} onClick={toggleAutoPause} title={withKey(t('watch.autoPauseTitle'), 'P')} aria-pressed={prefs.autoPause}>
               {t('watch.autoPause')}
+            </Btn>}
+            <Btn square size="sm" flat onClick={() => setPrefs({ list: !prefs.list })} title={t('watch.list')} aria-label={t('watch.list')} aria-pressed={prefs.list} className={prefs.list ? '!text-accent' : ''}>
+              <PanelRight size={17} />
+            </Btn>
+            <Btn square size="sm" flat onClick={() => setPrefs({ pin: !prefs.pin })} title={prefs.pin ? t('watch.unpin') : t('watch.pin')} aria-label={prefs.pin ? t('watch.unpin') : t('watch.pin')} aria-pressed={prefs.pin} className={prefs.pin ? '!text-accent' : ''}>
+              <Pin size={17} fill={prefs.pin ? 'currentColor' : 'none'} />
             </Btn>
             <Btn square size="sm" flat onClick={toggleFull} title={withKey(full ? t('watch.exitFullscreen') : t('watch.fullscreen'), 'F')} aria-label={full ? t('watch.exitFullscreen') : t('watch.fullscreen')}>
               {full ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
@@ -433,9 +448,14 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
                 <span className="text-xs text-mute">{t('transport.speed')}</span>
                 <Seg<number> size="sm" className="w-full [&>button]:flex-1" value={speed} onChange={setSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
               </div>
-              <div className="px-2.5 py-2 md:hidden">
+              {fold.subs && (
+                <div className="px-2.5 py-2">
+                  <Seg size="sm" className="w-full [&>button]:flex-1" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey) }))} />
+                </div>
+              )}
+              {fold.pause && <div className="px-2.5 py-2">
                 <Btn size="sm" tone={prefs.autoPause ? 'accent-soft' : 'white'} onClick={toggleAutoPause} className="w-full">{t('watch.autoPause')}</Btn>
-              </div>
+              </div>}
               <div className="mx-1 my-1 border-t border-line" />
               <div className="px-2.5 py-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
                 {legend.map(([k, label]) => (
@@ -446,6 +466,12 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
           </div>
         </div>
       </footer>
+      </div>
+
+      {prefs.list && (
+        <WatchList lines={lines} at={cur.at} pct={listPct} onPick={jump} onClose={() => setPrefs({ list: false })}
+          onResize={(pct, done) => { setListPct(pct); if (done) setPrefs({ listPct: pct }); }} />
+      )}
 
       {summary && (
         <WatchSummary saved={savedItems} looked={looked} ended={summary.ended}
