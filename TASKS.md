@@ -8,7 +8,7 @@
 - [x] cargo test + tsc + node test-*.mjs + 真实转换（mkv 带字幕 / webm / avi）+ 真实下载 ffmpeg（Mac arm64）
 - [x] 浏览器实测（弹窗、进度卡、移原文件、同文件两次导入、自带字幕重试、转换后重试、设置页下载）
 - [x] 三路审码：Opus / 6-sol / Gemini 共 7 条核实已修（记进错题本）
-- [ ] npm run release
+- [x] npm run release
 - [ ] Windows：gh workflow run windows.yml 真链路（需用户点头）
 - [ ] 用户真机验收
 
