@@ -722,7 +722,7 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
 
   emit(app, ImportProgress::stage(id, "extract", None));
   extract_wav(&video, &wav, |pct| {
-    let stage = if pct < 100 { ImportProgress::stage(id, "convertSetup", Some(pct)) } else { ImportProgress::stage(id, "extract", None) };
+    let stage = if pct < 100 { ImportProgress::stage(id, "convertSetup", Some(pct)) } else { ImportProgress::stage(id, "extract", Some(0)) };
     emit(app, stage);
   })?;
 

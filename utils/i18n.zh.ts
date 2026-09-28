@@ -134,6 +134,7 @@ export const zh: Record<keyof typeof en, string> = {
   'import.needCookies': 'YouTube 要求登录，或者登录状态过期了。',
   'import.failedDownload': '下载失败：{detail}',
   'import.failedSetup': '转录组件没下载完：{detail}。点重试会接着下',
+  'import.failedConvertSetup': '转换组件没下载完：{detail}。点重试会接着下',
   'import.failedExtract': '提取音频失败：{detail}',
   'import.extractCodec': '这个视频的声音格式读不出来',
   'import.extractNoAudio': '这个视频里没找到能识别的声音：可能本来没声音，或是杜比 AC-3 这类格式',

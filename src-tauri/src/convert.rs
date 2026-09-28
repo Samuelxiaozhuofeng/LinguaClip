@@ -62,13 +62,17 @@ pub(crate) fn find() -> Option<PathBuf> {
 }
 
 // Returns ffmpeg, downloading it first when there is none. `on_pct` is not
-// called at all when nothing needs downloading.
+// called at all when nothing needs downloading. A failed download says
+// "convertSetup:", so the user is not told the transcription parts failed.
 pub(crate) fn ensure(on_pct: impl FnMut(u32)) -> Result<PathBuf, String> {
   let _guard = INSTALLING.lock().unwrap_or_else(|e| e.into_inner());
   if let Some(found) = find() {
     return Ok(found);
   }
-  download(&tool_dir(), on_pct)
+  download(&tool_dir(), on_pct).map_err(|e| match e.strip_prefix("setup:") {
+    Some(rest) => format!("convertSetup:{rest}"),
+    None => e,
+  })
 }
 
 fn download(dir: &Path, mut on_pct: impl FnMut(u32)) -> Result<PathBuf, String> {

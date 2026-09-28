@@ -75,6 +75,9 @@ export function formatImportError(raw: string): string {
   if (raw.startsWith('missing:')) {
     return t('import.missingTool', { name: raw.slice('missing:'.length) });
   }
+  if (raw.startsWith('convertSetup:')) {
+    return t('import.failedConvertSetup', { detail: raw.slice('convertSetup:'.length) });
+  }
   if (raw.startsWith('setup:')) {
     return t('import.failedSetup', { detail: raw.slice('setup:'.length) });
   }

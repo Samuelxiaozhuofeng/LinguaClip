@@ -133,6 +133,7 @@ export const en = {
   'import.needCookies': 'YouTube requires sign-in, or the saved sign-in has expired.',
   'import.failedDownload': 'Download failed: {detail}',
   'import.failedSetup': 'Transcription parts did not finish downloading: {detail}. Retry picks up where it stopped',
+  'import.failedConvertSetup': 'Converter did not finish downloading: {detail}. Retry picks up where it stopped',
   'import.failedExtract': 'Audio extract failed: {detail}',
   'import.extractCodec': "This video's audio can't be read",
   'import.extractNoAudio': 'No readable audio in this video: it may be silent, or use a format such as Dolby AC-3',
