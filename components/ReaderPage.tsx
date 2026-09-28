@@ -13,7 +13,8 @@ import { detectLang } from '../utils/dictionary';
 import { useJaVersion } from '../utils/japanese';
 import { settleSplits } from '../utils/jaSegments';
 import { addWord } from '../utils/review';
-import { addLooked, getLooked, useLookedVersion } from '../utils/readLooked';
+import { addLooked, getLooked, lookedKey, useLookedVersion } from '../utils/readLooked';
+import { getWordTokens, tokenizeText } from '../utils/textTokenizer';
 import { canCloze } from '../utils/aiDrills';
 import { getTransJob, prepareTrans, subscribeTrans } from '../utils/transPrep';
 import { formatTimeCode, getAudioPaddingConfig, getPracticeConfig, getWatchPrefs, ReadBy, saveWatchPrefs } from '../utils/storage';
@@ -54,8 +55,9 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     lookLine.current = line;
     lookup(word, line.text);
   }, [record.id, ja]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A kept word is its key (頼む for 頼まれた, lowercased): find a line with a word keyed the same.
   const again = (word: string) => {
-    lookLine.current = lines.find(l => l.text.includes(word)) ?? null;
+    lookLine.current = lines.find(l => getWordTokens(tokenizeText(l.text)).some(w => lookedKey(w.value, ja) === word)) ?? null;
     lookup(word, lookLine.current?.text);
   };
   const keepWord = (word: string, definition: string, example: string) => {
