@@ -181,7 +181,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   // Scrolling back to it on entry is ours, not the reader's: nothing is kept until the reader
   // touches the page (wheel, click, key); until then it stays anchored, also when furigana
   // arriving late makes the lines above it taller.
-  const restored = useRef(false);
+  const restored = useRef(!resumeAt); // nothing to go back to: every scroll counts from the start
   const noteRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (restored.current) return;
@@ -208,11 +208,19 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     settle.current = window.setTimeout(() => { settle.current = 0; keepPlace(); }, 500);
   };
   useEffect(() => () => window.clearTimeout(settle.current), []);
+  // Moves the page itself and keeps the new place at once: a jump to the top may not scroll
+  // at all (already there), so it can't wait for a scroll to be noticed.
+  const jumpTo = (place: number) => {
+    window.clearTimeout(settle.current);
+    settle.current = 0;
+    ours.current = Date.now();
+    setReadPos(record.id, place);
+    scroller.current?.scrollTo({ top: 0 });
+  };
   const fromTop = () => {
     setResumeNote(false);
-    setReadPos(record.id, 0);
     if (by === 'section') setSec(0);
-    scroller.current?.scrollTo({ top: 0 });
+    jumpTo(0);
   };
 
   const leave = () => {
@@ -223,7 +231,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   const setKanaPref = (on: boolean) => { setKana(on); saveWatchPrefs({ kana: on }); };
   const setAutoClipPref = (on: boolean) => { setAutoClip(on); saveWatchPrefs({ autoClip: on }); };
   const goSection = (i: number) => {
-    if (by === 'section') { setSec(i); scroller.current?.scrollTo({ top: 0 }); return; }
+    if (by === 'section') { setSec(i); jumpTo(i === 0 ? 0 : sections[i].subtitles[0]?.startTime ?? 0); return; }
     scroller.current?.querySelector(`[data-section="${i}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
   const shown = by === 'section' ? [sections[sec]] : sections;
