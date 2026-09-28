@@ -154,9 +154,12 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   const done = !!clip?.done;
   const playingId = !clip || done ? null : clip.kind === 'line' ? clip.line!.id : lines[lineAt(lines, now)]?.id ?? null;
   const ours = useRef(0); // when the page last scrolled itself: that is not where the reader is
+  const settle = useRef(0); // a scroll of the reader's waiting to be kept
   useEffect(() => {
     if (!clip || clip.kind === 'line' || playingId === null) return;
     ours.current = Date.now();
+    window.clearTimeout(settle.current); // a scroll of the reader's just before this one: the page is not there any more
+    settle.current = 0;
     scroller.current?.querySelector(`[data-line="${playingId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [playingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -196,9 +199,9 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     const el = [...box.querySelectorAll<HTMLElement>('[data-line]')].find(e => e.getBoundingClientRect().bottom > top);
     return el ? lines.find(l => String(l.id) === el.dataset.line) ?? null : null;
   };
-  const keepPlace = () => { if (restored.current) { const l = topLine(); if (l) setReadPos(record.id, l.startTime); } };
+  // The first line is the top: kept as 0, so no "picking up" note for it next time.
+  const keepPlace = () => { if (restored.current) { const l = topLine(); if (l) setReadPos(record.id, l === lines[0] ? 0 : l.startTime); } };
   // Only the reader's own scrolling counts; the player following its line does not.
-  const settle = useRef(0);
   const onScroll = () => {
     if (!restored.current || Date.now() - ours.current < 1000) return;
     window.clearTimeout(settle.current);
@@ -231,7 +234,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     : t('reader.clipSection', { n: clip.section! + 1, time: formatTimeCode(now), end: formatTimeCode(clip.to) });
 
   return (
-    <div className="fixed inset-0 bg-paper flex flex-col">
+    <div className="fixed inset-0 bg-paper flex flex-col" onWheelCapture={touched} onPointerDownCapture={touched} onKeyDownCapture={touched} onTouchStartCapture={touched}>
       <header className={`h-16 shrink-0 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-6 flex items-center gap-4 bg-page border-b border-line`} data-tauri-drag-region>
         <button type="button" onClick={leave} className="press h-10 pl-3 pr-4 flex items-center gap-1.5 min-w-0 max-w-[36%] rounded-full bg-page border border-line text-ink text-[13px] hover:bg-shade">
           <ArrowLeft size={16} className="shrink-0" /><span className="truncate">{record.displayName}</span>
@@ -248,7 +251,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
       </header>
 
       <div className="flex-1 min-h-0 flex gap-8 pl-10 pr-8">
-        <div ref={scroller} onScroll={onScroll} onWheel={touched} onPointerDown={touched} onKeyDown={touched} onTouchStart={touched} className="flex-1 min-w-0 overflow-y-auto pb-5">
+        <div ref={scroller} onScroll={onScroll} className="flex-1 min-w-0 overflow-y-auto pb-5">
           <div className="mx-auto max-w-[780px] pt-5">
           {ja && <div className="mb-4"><JaBanner /></div>}
           {resumeNote && resumeAt && (
