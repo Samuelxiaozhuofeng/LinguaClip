@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Pause, Play, RotateCcw, X } from 'lucide-react';
 import type { Subtitle, VideoRecord } from '../types';
 import { Btn, Seg } from './ui';
-import ReaderLine, { Trans } from './ReaderLine';
+import ReaderLine from './ReaderLine';
 import DefinitionPanel from './DefinitionPanel';
 import { JaBanner } from './JaSetup';
 import { useClip } from './ReviewSession';
@@ -79,9 +79,6 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     askTrans();
     setOpenT(s => { const n = new Set(s); if (n.has(line.id)) n.delete(line.id); else n.add(line.id); return n; });
   }, [trans, transBusy]); // eslint-disable-line react-hooks/exhaustive-deps
-  const transOf = (i: number, line: Subtitle): Trans | null => hasAi
-    ? { open: allT !== openT.has(line.id), text: trans?.[i] ?? null, pending: transBusy }
-    : null;
 
   // --- The small player ---
   const { play, stop, video, ref: vref } = useClip();
@@ -187,7 +184,8 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
                 )}
                 {s.subtitles.map(line => (
                   <ReaderLine key={line.id} line={line} ja={ja} jaVersion={jaVersion} kana={kana} looked={looked}
-                    playing={playingId === line.id} trans={transOf(indexOf.get(line.id)!, line)}
+                    playing={playingId === line.id} hasTrans={hasAi} transOpen={allT !== openT.has(line.id)}
+                    transText={trans?.[indexOf.get(line.id)!] ?? null} transPending={transBusy}
                     onWord={onWord} onListen={onListen} onView={onView} onTrans={toggleTrans} />
                 ))}
                 {by === 'section' && (

@@ -11,8 +11,6 @@ import { useT } from '../utils/i18n';
 // hover the line's own buttons — hear it, see it in the small player, its translation.
 // Text only — never parsed as HTML; the translation is text too.
 
-export type Trans = { open: boolean; text: string | null; pending: boolean };
-
 const ReaderLine: React.FC<{
   line: Subtitle;
   ja: boolean;
@@ -20,12 +18,16 @@ const ReaderLine: React.FC<{
   kana: boolean;
   looked: Set<string>;
   playing: boolean;
-  trans: Trans | null; // null: no AI, no translation button
+  hasTrans: boolean; // AI set up: the translation button shows
+  transOpen: boolean;
+  transText: string | null;
+  transPending: boolean;
   onWord: (word: string, line: Subtitle) => void;
   onListen: (line: Subtitle) => void;
   onView: (line: Subtitle) => void;
   onTrans: (line: Subtitle) => void;
-}> = ({ line, ja, jaVersion, kana, looked, playing, trans, onWord, onListen, onView, onTrans }) => {
+}> = ({ line, ja, jaVersion, kana, looked, playing, hasTrans, transOpen, transText, transPending, onWord, onListen, onView, onTrans }) => {
+  const trans = hasTrans ? { open: transOpen, text: transText, pending: transPending } : null;
   const t = useT();
   const groups = useMemo(() => sentenceParts(line.text).map(g => ({ ...g, key: g.word ? lookedKey(g.word, ja) : null })),
     [line.text, ja, jaVersion]); // eslint-disable-line react-hooks/exhaustive-deps
