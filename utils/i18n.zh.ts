@@ -625,6 +625,7 @@ export const zh: Record<keyof typeof en, string> = {
   'watch.listResize': '拖动调整宽度',
   'watch.exitFullscreen': '退出全屏',
   'watch.lookedBefore': '读字幕时查过 · 点一下查词',
+  'watch.lookedBeforeGloss': '读字幕时查过：{word} · {gloss}（点一下看完整释义）',
 
   // --- Reader (components/ReaderPage.tsx) ---
   'reader.sectionN': '第 {n} 段',
@@ -656,5 +657,10 @@ export const zh: Record<keyof typeof en, string> = {
   'reader.clipSection': '正在放第 {n} 段 · {time} / {end}',
   'reader.clipDone': '放完了',
   'reader.lookedHead': '这一集查过的词',
+  'reader.autoClipOn': '查词时放这句 · 开',
+  'reader.autoClipOff': '查词时放这句 · 关',
+  'reader.autoClipTitle': '打开后，点词查释义时右边小窗同时放这一句',
+  'reader.resumed': '接着上次，从 {time} 开始',
+  'reader.fromTop': '从头读',
   'reader.lookedEmpty': '点台词里的词就能查。查过的词会记在这里，看剧时字幕上也会标出来。',
 };

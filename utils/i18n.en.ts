@@ -624,6 +624,7 @@ export const en = {
   'watch.listResize': 'Drag to resize',
   'watch.exitFullscreen': 'Exit full screen',
   'watch.lookedBefore': 'Looked up while reading · click to look up',
+  'watch.lookedBeforeGloss': 'Looked up while reading: {word} · {gloss} (click for the full entry)',
 
   // --- Reader (components/ReaderPage.tsx) ---
   'reader.sectionN': 'Part {n}',
@@ -655,5 +656,10 @@ export const en = {
   'reader.clipSection': 'Part {n} · {time} / {end}',
   'reader.clipDone': 'Finished',
   'reader.lookedHead': 'Words looked up here',
+  'reader.autoClipOn': 'Play line on lookup · on',
+  'reader.autoClipOff': 'Play line on lookup · off',
+  'reader.autoClipTitle': 'When on, looking a word up also plays its line in the small player',
+  'reader.resumed': 'Picking up where you left off, at {time}',
+  'reader.fromTop': 'Start over',
   'reader.lookedEmpty': 'Click a word in the lines to look it up. It is kept here and underlined on the subtitle when you watch.',
 } as const;

@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { tokenizeText, TokenType } from '../utils/textTokenizer';
 import { useT } from '../utils/i18n';
 import { useJaVersion } from '../utils/japanese';
-import { getLooked, lookedKey, useLookedVersion } from '../utils/readLooked';
+import { getGloss, getLooked, lookedKey, useLookedVersion } from '../utils/readLooked';
 import type { WatchSubs } from '../utils/storage';
 import { bareWord } from './BlurLine';
 
@@ -23,10 +23,17 @@ const WatchLine: React.FC<{
   const jaVersion = useJaVersion();
   const lookedVersion = useLookedVersion();
   const tokens = useMemo(() => tokenizeText(text), [text, jaVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  // token index → the hint shown when pointing at it (with the meaning found while reading)
   const seen = useMemo(() => {
     const looked = new Set(getLooked(videoId));
-    return new Set(tokens.filter(tk => tk.type === TokenType.WORD && looked.has(lookedKey(tk.value, ja) ?? '')).map(tk => tk.index));
-  }, [videoId, ja, tokens, lookedVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+    const gloss = getGloss(videoId);
+    const out = new Map<number, string>();
+    for (const tk of tokens) {
+      const key = tk.type === TokenType.WORD ? lookedKey(tk.value, ja) : null;
+      if (key && looked.has(key)) out.set(tk.index, gloss[key] ? t('watch.lookedBeforeGloss', { word: key, gloss: gloss[key] }) : t('watch.lookedBefore'));
+    }
+    return out;
+  }, [videoId, ja, tokens, lookedVersion, t]); // eslint-disable-line react-hooks/exhaustive-deps
   const box = 'inline-block max-w-full px-4 py-1.5 rounded-xl bg-black/60 text-white font-serif text-[clamp(20px,2.4vw,34px)] leading-snug';
 
   if (subs === 'hide' && !revealed) {
@@ -48,7 +55,7 @@ const WatchLine: React.FC<{
         if (tk.type === TokenType.WORD) {
           const word = bareWord(tk.value);
           return word ? (
-            <button key={i} type="button" onClick={e => { e.currentTarget.blur(); onWord(word); }} title={seen.has(tk.index) ? t('watch.lookedBefore') : t('common.lookup')}
+            <button key={i} type="button" onClick={e => { e.currentTarget.blur(); onWord(word); }} title={seen.get(tk.index) ?? t('common.lookup')}
               className={`inline rounded px-0.5 hover:bg-white/25 ${seen.has(tk.index) ? 'border-b-2 border-dotted border-accent' : ''}`}>{tk.value}</button>
           ) : <span key={i}>{tk.value}</span>;
         }

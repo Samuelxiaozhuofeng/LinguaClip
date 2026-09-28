@@ -88,6 +88,34 @@ assert.deepEqual(R.getLooked('v1'), []);
 store.set('linguaclip_read_looked', JSON.stringify({ v1: 'nope' }));
 assert.deepEqual(R.getLooked('v1'), []);
 
+// 5b. Meanings: only for words on the list, under the same key, cut to 40 chars; words
+// that fell off the list lose theirs; bad data reads as none.
+store.delete('linguaclip_read_looked');
+R.addLooked('g1', '頼まれた', true);
+R.setGloss('g1', '頼まれた', true, '请求，拜托，委托');
+R.setGloss('g1', '食べる', true, '吃'); // never looked up here: not kept
+assert.deepEqual(R.getGloss('g1'), { '頼む': '请求，拜托，委托' });
+R.addLooked('g1', 'x', false);
+R.setGloss('g1', 'X', false, 'a'.repeat(60));
+assert.equal(R.getGloss('g1').x, 'a'.repeat(40) + '…');
+store.set('linguaclip_read_looked', JSON.stringify({ g1: ['x'] })); // 頼む fell off the list
+R.setGloss('g1', 'x', false, 'b');
+assert.deepEqual(R.getGloss('g1'), { x: 'b' });
+store.set('linguaclip_read_gloss', JSON.stringify({ g1: { x: 3, y: 'ok' } }));
+assert.deepEqual(R.getGloss('g1'), { y: 'ok' });
+
+// 5c. Reading place: bad data is the top; forgetting a video clears words, meanings and place.
+R.setReadPos('g1', 192.5);
+assert.equal(R.getReadPos('g1'), 192.5);
+store.set('linguaclip_read_pos', JSON.stringify({ g1: 'soon', g2: -3 }));
+assert.equal(R.getReadPos('g1'), 0);
+assert.equal(R.getReadPos('g2'), 0);
+R.setReadPos('g1', 12);
+R.forgetLooked('g1');
+assert.equal(R.getReadPos('g1'), 0);
+assert.deepEqual(R.getGloss('g1'), {});
+assert.deepEqual(R.getLooked('g1'), []);
+
 // 6. AI answers: wrong length throws (batch retry); a non-string line is just missing.
 assert.deepEqual(R.parseTransResponse('{"lines":["一","  二 "]}', 2), ['一', '二']);
 assert.deepEqual(R.parseTransResponse('```json\n{"lines":["一",3]}\n```', 2), ['一', null]);

@@ -13,7 +13,8 @@ import { detectLang } from '../utils/dictionary';
 import { useJaVersion } from '../utils/japanese';
 import { settleSplits } from '../utils/jaSegments';
 import { addWord } from '../utils/review';
-import { addLooked, getLooked, lookedKey, useLookedVersion } from '../utils/readLooked';
+import { addLooked, getLooked, getReadPos, lookedKey, setGloss, setReadPos, useLookedVersion } from '../utils/readLooked';
+import type { DefinitionState } from './DefinitionPanel';
 import { getWordTokens, tokenizeText } from '../utils/textTokenizer';
 import { canCloze } from '../utils/aiDrills';
 import { getTransJob, prepareTrans, subscribeTrans } from '../utils/transPrep';
@@ -28,6 +29,20 @@ import { getLang, useT } from '../utils/i18n';
 // ending on "watch this section". Leaving (back or "done") returns to the panel.
 // Nothing about the record changes: no progress, no position.
 
+// The first meaning of a lookup, as plain text: the dictionary's first sense (its Chinese
+// line when it has one) — of the entry spelled as the kept word when there is one (頼まれた
+// also brings 頼む, whose senses are meanings; 頼まれた's first is a grammar note) — else
+// the AI's definition. Kept as the hint for the watch page.
+const firstMeaning = (d: DefinitionState, key: string | null): string => {
+  const entry = d.dict?.find(e => e.word === key) ?? d.dict?.[0];
+  const sense = entry?.senses[0];
+  if (sense) {
+    const rows = sense.text.map(p => (typeof p === 'string' ? p : '')).join('').split('\n').map(r => r.trim()).filter(Boolean);
+    return rows.find(r => /[\u4e00-\u9fff]/.test(r)) ?? rows[0] ?? '';
+  }
+  return (d.data?.definition ?? '').replace(/<[^>]*>/g, '');
+};
+
 // What the small player is doing: one line (heard, or seen), on from a line, or a section.
 type Clip = { kind: 'line' | 'from' | 'section'; view: boolean; from: number; to: number; line?: Subtitle; section?: number; done?: boolean };
 
@@ -36,12 +51,20 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   const lines = useMemo(() => [...parseSRT(record.subtitleText)].sort((a, b) => a.startTime - b.startTime), [record.subtitleText]);
   const sections = useMemo(() => buildSections(lines, getPracticeConfig().sectionLength), [lines]);
   const indexOf = useMemo(() => new Map(lines.map((l, i) => [l.id, i])), [lines]);
-  const [sec, setSec] = useState(0); // "section" mode: the one on the page
+  // Where reading stopped last time: the line to scroll to, and (by section) its section.
+  const [resumeAt] = useState(() => {
+    const pos = getReadPos(record.id);
+    const i = pos > 0 ? lines.findIndex(l => l.startTime >= pos - 0.01) : -1;
+    return i >= 0 ? lines[i] : null;
+  });
+  const [sec, setSec] = useState(() => Math.max(0, resumeAt ? sections.findIndex(s => s.subtitles.includes(resumeAt)) : 0)); // "section" mode: the one on the page
+  const [resumeNote, setResumeNote] = useState(!!resumeAt);
   const dictLang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
   const ja = dictLang === 'ja';
   const jaVersion = useJaVersion();
   useEffect(() => { settleSplits(record.id, lines.map(l => l.text)).catch(() => {}); }, [record.id, lines]);
   const [kana, setKana] = useState(() => getWatchPrefs().kana);
+  const [autoClip, setAutoClip] = useState(() => getWatchPrefs().autoClip);
   const scroller = useRef<HTMLDivElement>(null);
 
   // --- Looked-up words: kept for the watch page, listed on the side ---
@@ -54,7 +77,12 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     addLooked(record.id, word, ja);
     lookLine.current = line;
     lookup(word, line.text);
-  }, [record.id, ja]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (autoClip) lineClip(line, true);
+  }, [record.id, ja, autoClip]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The meaning found, for the hint on the watch page.
+  useEffect(() => {
+    if (def.word && !def.loading && (def.dict || def.data)) setGloss(record.id, def.word, ja, firstMeaning(def, lookedKey(def.word, ja)));
+  }, [def]); // eslint-disable-line react-hooks/exhaustive-deps
   // A kept word is its key (頼む for 頼まれた, lowercased): find a line with a word keyed the same.
   const again = (word: string) => {
     lookLine.current = lines.find(l => getWordTokens(tokenizeText(l.text)).some(w => lookedKey(w.value, ja) === word)) ?? null;
@@ -125,8 +153,10 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   }, [clip]); // eslint-disable-line react-hooks/exhaustive-deps
   const done = !!clip?.done;
   const playingId = !clip || done ? null : clip.kind === 'line' ? clip.line!.id : lines[lineAt(lines, now)]?.id ?? null;
+  const ours = useRef(0); // when the page last scrolled itself: that is not where the reader is
   useEffect(() => {
     if (!clip || clip.kind === 'line' || playingId === null) return;
+    ours.current = Date.now();
     scroller.current?.querySelector(`[data-line="${playingId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [playingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -144,8 +174,51 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const leave = () => { closePlayer(); onExit(lookedList.length); };
+  // --- Where reading stopped: the top line on screen, kept when scrolling settles and on leaving.
+  // Scrolling back to it on entry is ours, not the reader's: nothing is kept until the reader
+  // touches the page (wheel, click, key); until then it stays anchored, also when furigana
+  // arriving late makes the lines above it taller.
+  const restored = useRef(false);
+  const noteRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (restored.current) return;
+    const el = resumeAt && scroller.current?.querySelector(`[data-line="${resumeAt.id}"]`);
+    if (el && scroller.current) {
+      el.scrollIntoView({ block: 'start' });
+      scroller.current.scrollTop -= noteRef.current?.offsetHeight ?? 0; // clear of the note pinned on top
+    }
+  }, [jaVersion, kana]); // eslint-disable-line react-hooks/exhaustive-deps
+  const touched = () => { restored.current = true; };
+  const topLine = (): Subtitle | null => {
+    const box = scroller.current;
+    if (!box) return null;
+    const top = box.getBoundingClientRect().top + (noteRef.current?.offsetHeight ?? 0) + 8;
+    const el = [...box.querySelectorAll<HTMLElement>('[data-line]')].find(e => e.getBoundingClientRect().bottom > top);
+    return el ? lines.find(l => String(l.id) === el.dataset.line) ?? null : null;
+  };
+  const keepPlace = () => { if (restored.current) { const l = topLine(); if (l) setReadPos(record.id, l.startTime); } };
+  // Only the reader's own scrolling counts; the player following its line does not.
+  const settle = useRef(0);
+  const onScroll = () => {
+    if (!restored.current || Date.now() - ours.current < 1000) return;
+    window.clearTimeout(settle.current);
+    settle.current = window.setTimeout(() => { settle.current = 0; keepPlace(); }, 500);
+  };
+  useEffect(() => () => window.clearTimeout(settle.current), []);
+  const fromTop = () => {
+    setResumeNote(false);
+    setReadPos(record.id, 0);
+    if (by === 'section') setSec(0);
+    scroller.current?.scrollTo({ top: 0 });
+  };
+
+  const leave = () => {
+    if (settle.current) { window.clearTimeout(settle.current); keepPlace(); } // a scroll not yet kept
+    closePlayer();
+    onExit(lookedList.length);
+  };
   const setKanaPref = (on: boolean) => { setKana(on); saveWatchPrefs({ kana: on }); };
+  const setAutoClipPref = (on: boolean) => { setAutoClip(on); saveWatchPrefs({ autoClip: on }); };
   const goSection = (i: number) => {
     if (by === 'section') { setSec(i); scroller.current?.scrollTo({ top: 0 }); return; }
     scroller.current?.querySelector(`[data-section="${i}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -168,14 +241,22 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
             options={sections.map((_, i) => ({ value: i, label: t('reader.sectionN', { n: i + 1 }) }))} />
         )}
         <div className="flex-1" />
+        <Btn size="sm" tone={autoClip ? 'ink' : 'white'} aria-pressed={autoClip} onClick={() => setAutoClipPref(!autoClip)} title={t('reader.autoClipTitle')}>{t(autoClip ? 'reader.autoClipOn' : 'reader.autoClipOff')}</Btn>
         {ja && <Btn size="sm" tone={kana ? 'ink' : 'white'} aria-pressed={kana} onClick={() => setKanaPref(!kana)}>{t(kana ? 'reader.kanaOn' : 'reader.kanaOff')}</Btn>}
         {hasAi && <Btn size="sm" tone={allT ? 'ink' : 'white'} aria-pressed={allT} onClick={() => { if (!allT) askTrans(); setAllT(!allT); setOpenT(new Set()); }}>{t(allT ? 'reader.transAllOn' : 'reader.transAll')}</Btn>}
         <Btn tone="accent" onClick={leave}>{t('reader.done')}</Btn>
       </header>
 
       <div className="flex-1 min-h-0 flex gap-8 pl-10 pr-8">
-        <div ref={scroller} className="flex-1 min-w-0 overflow-y-auto py-5">
-          {ja && <div className="mb-4 max-w-3xl"><JaBanner /></div>}
+        <div ref={scroller} onScroll={onScroll} onWheel={touched} onPointerDown={touched} onKeyDown={touched} onTouchStart={touched} className="flex-1 min-w-0 overflow-y-auto pb-5">
+          <div className="mx-auto max-w-[780px] pt-5">
+          {ja && <div className="mb-4"><JaBanner /></div>}
+          {resumeNote && resumeAt && (
+            <div ref={noteRef} className="sticky top-0 z-10 -mt-5 mb-1 px-3 py-2.5 bg-paper flex items-center gap-3 text-[13px] text-mute">
+              <span>{t('reader.resumed', { time: formatTimeCode(resumeAt.startTime) })}</span>
+              <Btn size="sm" onClick={fromTop}>{t('reader.fromTop')}</Btn>
+            </div>
+          )}
           {shown.map(s => {
             const i = sections.indexOf(s);
             const last = i === sections.length - 1;
@@ -206,6 +287,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
               </section>
             );
           })}
+          </div>
         </div>
 
         <aside className="w-[380px] shrink-0 py-5 flex flex-col gap-4 min-h-0">
