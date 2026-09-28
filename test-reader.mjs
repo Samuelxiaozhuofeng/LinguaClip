@@ -57,6 +57,7 @@ R.addLooked('v2', 'Went', false);
 R.addLooked('v2', 'there', false);
 R.addLooked('v2', 'went', false);
 assert.deepEqual(R.getLooked('v2'), ['there', 'went']);
+assert.equal(R.lookedKey("Don't", false), "don't"); // the apostrophe stays: the watch page keys the same raw word
 
 // 3. Japanese with the dictionary: kept in dictionary form, so the watch page finds
 // the word again conjugated differently (頼まれた while reading, 頼む on screen).

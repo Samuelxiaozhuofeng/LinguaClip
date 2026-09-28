@@ -25,7 +25,7 @@ const WatchLine: React.FC<{
   const tokens = useMemo(() => tokenizeText(text), [text, jaVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const seen = useMemo(() => {
     const looked = new Set(getLooked(videoId));
-    return new Set(tokens.filter(tk => tk.type === TokenType.WORD && looked.has(lookedKey(bareWord(tk.value), ja) ?? '')).map(tk => tk.index));
+    return new Set(tokens.filter(tk => tk.type === TokenType.WORD && looked.has(lookedKey(tk.value, ja) ?? '')).map(tk => tk.index));
   }, [videoId, ja, tokens, lookedVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const box = 'inline-block max-w-full px-4 py-1.5 rounded-xl bg-black/60 text-white font-serif text-[clamp(20px,2.4vw,34px)] leading-snug';
 
