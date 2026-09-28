@@ -417,7 +417,7 @@ mod tests {
     std::fs::create_dir_all(&dir).unwrap();
     let video = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/speech.m4v");
     let wav = dir.join("s.wav");
-    crate::import::extract_wav(&video, &wav).unwrap();
+    crate::import::extract_wav(&video, &wav, |_| {}).unwrap();
     let (at, n) = wav_data(&wav).unwrap();
     let len = std::fs::metadata(&wav).unwrap().len();
     assert_eq!(at + n * 2, len);

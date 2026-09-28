@@ -413,15 +413,23 @@ fn download_video(
 }
 
 // Needs no ffmpeg: macOS's own afconvert, or our built-in decoder elsewhere,
-// reads the audio of every video we accept (mp4/mov/m4v). ffmpeg, when
-// downloaded or installed, covers the odd codec those refuse.
-pub(crate) fn extract_wav(video: &Path, wav: &Path) -> Result<(), String> {
+// reads the audio of nearly every video we accept (mp4/mov/m4v). The odd codec
+// they refuse (e.g. AAC with a program config element) goes to ffmpeg,
+// downloaded first if need be; `on_setup` reports that download, with a
+// final 100 once it is over and extracting goes on.
+pub(crate) fn extract_wav(video: &Path, wav: &Path, mut on_setup: impl FnMut(u32)) -> Result<(), String> {
   let video_s = video.to_str().ok_or_else(|| "extract:bad path".to_string())?;
   let wav_s = wav.to_str().ok_or_else(|| "extract:bad path".to_string())?;
   if let Err(first) = native_extract(video_s, wav_s) {
-    let Some(ffmpeg) = crate::convert::find() else {
-      return Err(format!("extract:{}", tail_chars(&first, 300)));
-    };
+    log::error!("native extract failed, trying ffmpeg: {first}");
+    let mut downloaded = false;
+    let ffmpeg = crate::convert::ensure(|pct| {
+      downloaded = true;
+      on_setup(pct);
+    })?;
+    if downloaded {
+      on_setup(100);
+    }
     let output = command(ffmpeg)
       .env("PATH", augmented_path())
       .args(["-y", "-loglevel", "error", "-i", video_s, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav_s])
@@ -713,7 +721,10 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
   let srt = dir.join(srt_name);
 
   emit(app, ImportProgress::stage(id, "extract", None));
-  extract_wav(&video, &wav)?;
+  extract_wav(&video, &wav, |pct| {
+    let stage = if pct < 100 { ImportProgress::stage(id, "convertSetup", Some(pct)) } else { ImportProgress::stage(id, "extract", None) };
+    emit(app, stage);
+  })?;
 
   let result = match (&parts, engine) {
     (Some((parts, tier)), _) => {

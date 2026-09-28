@@ -495,7 +495,7 @@ mod tests {
     let vad = get(find_vad(), &VAD, VAD.name);
     let video = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/speech.m4v");
     let wav = dir.join("speech.wav");
-    crate::import::extract_wav(&video, &wav).unwrap();
+    crate::import::extract_wav(&video, &wav, |_| {}).unwrap();
     for tier in [Tier::Standard, Tier::Light] {
       let model = get(find_model(tier), tier.asset(), tier.asset().name);
       let stem = dir.join(format!("speech-{tier:?}"));

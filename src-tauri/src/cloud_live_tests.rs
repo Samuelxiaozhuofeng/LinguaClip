@@ -19,7 +19,7 @@ fn groq_transcribes_fixture() {
   std::fs::create_dir_all(&dir).unwrap();
   let video = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/speech.m4v");
   let wav = dir.join("s.wav");
-  crate::import::extract_wav(&video, &wav).unwrap();
+  crate::import::extract_wav(&video, &wav, |_| {}).unwrap();
   let stem = dir.join("s");
   let words = transcribe(|_| {}, Provider::Groq, &key, "en", &wav, &stem).unwrap();
   let srt = std::fs::read_to_string(stem.with_extension("srt")).unwrap();
@@ -41,7 +41,7 @@ fn groq_pieces_stitch_in_order() {
   let dir = std::env::temp_dir().join(format!("lc-groq-{}", uuid::Uuid::new_v4()));
   std::fs::create_dir_all(&dir).unwrap();
   let wav = dir.join("s.wav");
-  crate::import::extract_wav(Path::new(&video), &wav).unwrap();
+  crate::import::extract_wav(Path::new(&video), &wav, |_| {}).unwrap();
   let (_, samples) = wav_data(&wav).unwrap();
   let stem = dir.join("s");
   let mut pcts = Vec::new();
@@ -75,7 +75,7 @@ fn bailian_transcribes() {
   for (i, (video, lang)) in [(Some(fixture), "en"), (long, "es")].into_iter().enumerate() {
     let Some(video) = video else { continue };
     let wav = dir.join(format!("s{i}.wav"));
-    crate::import::extract_wav(Path::new(&video), &wav).unwrap();
+    crate::import::extract_wav(Path::new(&video), &wav, |_| {}).unwrap();
     let stem = dir.join(format!("s{i}"));
     let words = transcribe(|_| {}, Provider::Bailian, &key, lang, &wav, &stem).unwrap();
     let srt = std::fs::read_to_string(stem.with_extension("srt")).unwrap();
