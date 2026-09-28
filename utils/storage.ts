@@ -128,18 +128,21 @@ export const forgetWatchPos = (videoId: string) => writeWatchPos(all => { delete
 
 // How subtitles show, whether each line pauses at its end, whether the
 // start-of-practice panel last chose "watch", whether the controls are pinned,
-// and whether the subtitle list is open and how wide (% of the window).
+// and whether the subtitle list is open and how wide (% of the window). The reader
+// (components/ReaderPage.tsx) keeps here how the panel last chose to read and whether
+// furigana shows; choosing to read is never kept as `chosen`.
 export type WatchSubs = 'show' | 'blur' | 'hide';
-export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean; pin: boolean; list: boolean; listPct: number };
+export type ReadBy = 'all' | 'section';
+export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean; pin: boolean; list: boolean; listPct: number; readBy: ReadBy; kana: boolean };
 export const LIST_PCT = { min: 20, max: 50, def: 30 };
 
 export const getWatchPrefs = (): WatchPrefs => {
   try {
     const v = JSON.parse(localStorage.getItem(STORAGE_KEY_WATCH_PREFS) || '{}') ?? {};
     const pct = typeof v.listPct === 'number' && Number.isFinite(v.listPct) ? Math.min(LIST_PCT.max, Math.max(LIST_PCT.min, v.listPct)) : LIST_PCT.def;
-    return { subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen === true, pin: v.pin === true, list: v.list === true, listPct: pct };
+    return { subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen === true, pin: v.pin === true, list: v.list === true, listPct: pct, readBy: v.readBy === 'section' ? 'section' : 'all', kana: v.kana !== false };
   } catch {
-    return { subs: 'show', autoPause: false, chosen: false, pin: false, list: false, listPct: LIST_PCT.def };
+    return { subs: 'show', autoPause: false, chosen: false, pin: false, list: false, listPct: LIST_PCT.def, readBy: 'all', kana: true };
   }
 };
 

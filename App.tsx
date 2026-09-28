@@ -7,6 +7,8 @@ import Shell from './components/Shell';
 import Studio from './components/Studio';
 import WatchPage from './components/WatchPage';
 import CustomPanel, { PanelChoice, nextPick, paceOf } from './components/CustomPanel';
+import ReaderPage from './components/ReaderPage';
+import type { ReadBy } from './utils/storage';
 import { DialogHost, dialog } from './components/Dialog';
 import { PracticeProvider } from './hooks/usePracticeContext';
 import { useVideoHistory } from './hooks/useVideoHistory';
@@ -85,10 +87,11 @@ export default function App() {
   const [blurPlaybackMode, setBlurPlaybackModeState] = useState<BlurPlaybackMode>(BlurPlaybackMode.SENTENCE_BY_SENTENCE);
   const [showComplete, setShowComplete] = useState(false);
   // The start-of-practice panel, and the custom set being practised (null = section by section).
-  const [panel, setPanel] = useState<{ record: VideoRecord; lm: LearningMode } | null>(null);
+  const [panel, setPanel] = useState<{ record: VideoRecord; lm: LearningMode; read?: number } | null>(null);
   type CustomSession = { record: VideoRecord; lm: LearningMode; cfg: CustomConfig; watch: Set<number>; end: number };
   const [custom, setCustom] = useState<CustomSession | null>(null);
   const [watching, setWatching] = useState<VideoRecord | null>(null); // watch mode's video, its path checked
+  const [reading, setReading] = useState<{ record: VideoRecord; lm: LearningMode; by: ReadBy } | null>(null); // the reader's, likewise
   const customRef = useRef<CustomSession | null>(null);
   // Every write of the record's section progress goes through here, so a custom
   // set can never move the shelf's "part 3 of 12" or where "continue" lands.
@@ -233,10 +236,16 @@ export default function App() {
         await VideoStorage.patchVideoRecord(record.id, { videoPath });
       }
 
-      if (choice.kind === 'watch') {
+      if (choice.kind === 'watch' || choice.kind === 'read') {
         if (stale()) return;
         if (parseSRT(record.subtitleText).length === 0) {
           dialog.alert(t('app.noSubtitlesTitle'), t('app.noSubtitlesBody', { name: record.videoFileName }));
+          return;
+        }
+        // Reading comes before practice: the record is left as it is.
+        if (choice.kind === 'read') {
+          setReading({ record: { ...record, videoPath }, lm, by: choice.by });
+          setAppState(AppState.READ);
           return;
         }
         // Watching moves the video up the shelf; its practice mode and progress stay.
@@ -368,6 +377,10 @@ export default function App() {
 
   const page = appState === AppState.WATCH && watching ? (
     <WatchPage key={watching.id} record={watching} onExit={() => { setWatching(null); setAppState(AppState.UPLOAD); }} />
+  ) : appState === AppState.READ && reading ? (
+    // Done reading: back to the panel to pick how to practise.
+    <ReaderPage key={reading.record.id} record={reading.record} by={reading.by}
+      onExit={n => { setReading(null); setAppState(AppState.UPLOAD); setPanel({ record: reading.record, lm: reading.lm, read: n }); }} />
   ) : appState !== AppState.PRACTICE ? (
     <Shell active={appState} onNav={setAppState} hideAdd={appState === AppState.UPLOAD && homeEmpty} onAdd={() => { setAppState(AppState.UPLOAD); setAddAsked(true); }}>
       {appState === AppState.SETTINGS ? <Settings /> :
@@ -424,6 +437,7 @@ export default function App() {
         <CustomPanel
           record={panel.record}
           pace={paceOf(panel.lm, panel.record.blurPlaybackMode)}
+          read={panel.read}
           onCancel={() => setPanel(null)}
           onStart={choice => { setPanel(null); openPractice(panel.record, panel.lm, choice); }}
         />

@@ -6,14 +6,16 @@ import { parseSRT } from '../utils/srtParser';
 import { canCloze } from '../utils/aiDrills';
 import { CustomConfig, CustomPick, LEVELS, Level, LineLabel, MINUTE_CHOICES, PaceMode, pickCustom } from '../utils/customPick';
 import { getLevelJob, prepareLevels, readLevels, subscribeLevels } from '../utils/levelPrep';
-import { formatTimeCode, getCustomConfig, getCustomPos, getWatchPrefs, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
+import { formatTimeCode, getCustomConfig, getCustomPos, getWatchPrefs, ReadBy, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
 
 // Asked before every practice session: section by section as before, or a
 // custom set — so many minutes, at a level, from where the last set stopped —
-// or just watching (components/WatchPage.tsx). The last way chosen comes back.
+// or just watching (components/WatchPage.tsx), or reading the subtitles first
+// (components/ReaderPage.tsx). The last way chosen comes back — never "read": that
+// comes before practice, and the panel reopens after it to pick the practice.
 // Esc / clicking outside cancels; it never counts as a choice.
 
-export type PanelChoice = { kind: 'all' } | { kind: 'watch' } | { kind: 'custom'; cfg: CustomConfig; pick: CustomPick };
+export type PanelChoice = { kind: 'all' } | { kind: 'watch' } | { kind: 'read'; by: ReadBy } | { kind: 'custom'; cfg: CustomConfig; pick: CustomPick };
 
 export const paceOf = (lm: LearningMode, bpm?: BlurPlaybackMode): PaceMode =>
   lm === LearningMode.DICTATION ? 'dictation' : bpm === BlurPlaybackMode.CONTINUOUS ? 'flow' : 'step';
@@ -31,9 +33,10 @@ export async function nextPick(record: VideoRecord, cfg: CustomConfig, pace: Pac
 const CustomPanel: React.FC<{
   record: VideoRecord;
   pace: PaceMode;
+  read?: number; // back from reading: how many words were looked up
   onCancel: () => void;
   onStart: (choice: PanelChoice) => void;
-}> = ({ record, pace, onCancel, onStart }) => {
+}> = ({ record, pace, read: justRead, onCancel, onStart }) => {
   const t = useT();
   const hasAi = canCloze();
   const [cfg, setCfg] = useState<CustomConfig>(() => {
@@ -41,13 +44,15 @@ const CustomPanel: React.FC<{
     return hasAi ? c : { ...c, level: null };
   });
   const [watch, setWatch] = useState(() => getWatchPrefs().chosen);
+  const [read, setRead] = useState(false);
+  const [readBy, setReadBy] = useState<ReadBy>(() => getWatchPrefs().readBy);
   const subs = useMemo(() => parseSRT(record.subtitleText), [record.subtitleText]);
   const [labels, setLabels] = useState<LineLabel[] | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const [tries, setTries] = useState(0);
   const [waiting, setWaiting] = useState(false);
-  const want = !watch && cfg.on && needsLabels(cfg);
+  const want = !watch && !read && cfg.on && needsLabels(cfg);
 
   useEffect(() => {
     setFailed(false);
@@ -67,11 +72,12 @@ const CustomPanel: React.FC<{
 
   const pickWith = (timeOnly: boolean) =>
     pickCustom(subs, timeOnly || !want ? null : labels, timeOnly ? { ...cfg, level: null } : cfg, getCustomPos(record.id), pace);
-  const custom = !watch && cfg.on;
+  const custom = !watch && !read && cfg.on;
   const preview = custom && (!want || labels) ? pickWith(false) : null;
   const empty = custom && (!want || labels) && !preview;
 
   const start = (timeOnly = false) => {
+    if (read) { saveWatchPrefs({ readBy }); onStart({ kind: 'read', by: readBy }); return; }
     saveWatchPrefs({ chosen: watch });
     if (watch) { onStart({ kind: 'watch' }); return; }
     if (!cfg.on) { saveCustomConfig(cfg); onStart({ kind: 'all' }); return; }
@@ -136,13 +142,31 @@ const CustomPanel: React.FC<{
           <p className="mt-1 text-sm text-mute truncate" title={record.displayName}>{record.displayName}</p>
         </div>
         <div className="px-6 py-4 flex flex-col gap-4">
-          <Row label={t('custom.way')} hint={watch ? t('custom.watchHint') : cfg.on ? undefined : t('custom.allHint')}>
-            <Seg value={watch ? 'watch' : cfg.on ? 'custom' : 'all'} onChange={v => { setWaiting(false); setWatch(v === 'watch'); if (v !== 'watch') set({ on: v === 'custom' }); }} options={[
+          {justRead !== undefined && (
+            <div className="px-3.5 py-3 rounded-[10px] bg-shade text-sm leading-relaxed">
+              {t('custom.justRead', { n: justRead })}
+              {justRead > 0 && <span className="block text-mute">{t('custom.justReadHint')}</span>}
+            </div>
+          )}
+          <Row label={t('custom.way')} hint={read ? t('custom.readHint') : watch ? t('custom.watchHint') : cfg.on ? undefined : t('custom.allHint')}>
+            <Seg value={read ? 'read' : watch ? 'watch' : cfg.on ? 'custom' : 'all'} onChange={v => {
+              setWaiting(false); setRead(v === 'read'); setWatch(v === 'watch');
+              if (v === 'all' || v === 'custom') set({ on: v === 'custom' });
+            }} options={[
               { value: 'all', label: t('custom.all') },
               { value: 'custom', label: t('custom.custom') },
               { value: 'watch', label: t('custom.watch') },
+              { value: 'read', label: t('custom.read') },
             ]} />
           </Row>
+          {read && (
+            <Row label={t('custom.readBy')} hint={t(readBy === 'section' ? 'custom.readBySectionHint' : 'custom.readByAllHint')}>
+              <Seg<ReadBy> size="sm" value={readBy} onChange={setReadBy} options={[
+                { value: 'all', label: t('custom.readByAll') },
+                { value: 'section', label: t('custom.readBySection') },
+              ]} />
+            </Row>
+          )}
           {custom && <>
             <Row label={t('custom.minutes')}>
               <Seg size="sm" value={cfg.minutes} onChange={minutes => set({ minutes })} options={
@@ -167,7 +191,7 @@ const CustomPanel: React.FC<{
         <div className="px-6 pt-2 pb-6 flex justify-end gap-3">
           <Btn onClick={onCancel}>{t('dialog.cancel')}</Btn>
           <Btn tone="accent" onClick={() => start()} disabled={!!empty || (want && failed) || waiting} autoFocus>
-            {waiting ? t('custom.waiting') : watch ? t('custom.startWatch') : t('custom.start')}
+            {waiting ? t('custom.waiting') : read ? t('custom.startRead') : watch ? t('custom.startWatch') : t('custom.start')}
           </Btn>
         </div>
       </Card>

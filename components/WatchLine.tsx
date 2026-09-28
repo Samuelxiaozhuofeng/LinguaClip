@@ -1,23 +1,32 @@
 import React, { useMemo } from 'react';
 import { tokenizeText, TokenType } from '../utils/textTokenizer';
 import { useT } from '../utils/i18n';
-import { useJaVersion } from '../utils/japanese';
+import { hasKana, useJaVersion } from '../utils/japanese';
+import { getLooked, lookedKey, useLookedVersion } from '../utils/readLooked';
 import type { WatchSubs } from '../utils/storage';
 import { bareWord } from './BlurLine';
 
 // Watch mode's subtitle, laid over the picture. Shown: every word looks up on a
 // click. Blurred / hidden: a click shows this one line (the next line covers
-// again), then its words look up. Text only — never parsed as HTML.
+// again), then its words look up. Text only — never parsed as HTML. Words looked up
+// while reading this video's subtitles (components/ReaderPage.tsx) are underlined.
 const WatchLine: React.FC<{
+  videoId: string;
   text: string;
   subs: WatchSubs;
   revealed: boolean;
   onReveal: () => void;
   onWord: (word: string) => void;
-}> = ({ text, subs, revealed, onReveal, onWord }) => {
+}> = ({ videoId, text, subs, revealed, onReveal, onWord }) => {
   const t = useT();
   const jaVersion = useJaVersion();
+  const lookedVersion = useLookedVersion();
   const tokens = useMemo(() => tokenizeText(text), [text, jaVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const seen = useMemo(() => {
+    const looked = new Set(getLooked(videoId));
+    const ja = hasKana(text);
+    return new Set(tokens.filter(tk => tk.type === TokenType.WORD && looked.has(lookedKey(bareWord(tk.value), ja) ?? '')).map(tk => tk.index));
+  }, [videoId, tokens, lookedVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const box = 'inline-block max-w-full px-4 py-1.5 rounded-xl bg-black/60 text-white font-serif text-[clamp(20px,2.4vw,34px)] leading-snug';
 
   if (subs === 'hide' && !revealed) {
@@ -39,8 +48,8 @@ const WatchLine: React.FC<{
         if (tk.type === TokenType.WORD) {
           const word = bareWord(tk.value);
           return word ? (
-            <button key={i} type="button" onClick={e => { e.currentTarget.blur(); onWord(word); }} title={t('common.lookup')}
-              className="inline rounded px-0.5 hover:bg-white/25">{tk.value}</button>
+            <button key={i} type="button" onClick={e => { e.currentTarget.blur(); onWord(word); }} title={seen.has(tk.index) ? t('watch.lookedBefore') : t('common.lookup')}
+              className={`inline rounded px-0.5 hover:bg-white/25 ${seen.has(tk.index) ? 'border-b-2 border-dotted border-accent' : ''}`}>{tk.value}</button>
           ) : <span key={i}>{tk.value}</span>;
         }
         if (tk.type === TokenType.SPACE) return <span key={i}> </span>;

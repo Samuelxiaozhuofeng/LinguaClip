@@ -12,6 +12,7 @@ export enum AppState {
   CARDS = 'CARDS',
   SETTINGS = 'SETTINGS',
   WATCH = 'WATCH',       // watch mode: the whole window is the video (components/WatchPage.tsx)
+  READ = 'READ',         // reading the subtitles before practice (components/ReaderPage.tsx)
 }
 
 export enum PracticeMode {

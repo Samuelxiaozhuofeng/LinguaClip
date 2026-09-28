@@ -78,7 +78,7 @@ export const useClip = () => {
   const video = (className: string) => (
     <video ref={ref} crossOrigin="anonymous" src={src ? videoSrcFromPath(src) : undefined} onLoadedMetadata={onLoadedMetadata} className={className} />
   );
-  return { play, stop, video };
+  return { play, stop, video, ref };
 };
 
 // `langOf` (from a library page): each card's language deck. Then lookups use the card's

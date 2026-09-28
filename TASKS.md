@@ -1,3 +1,19 @@
+# 字幕阅读器（2026-09-28 用户拍板，设计稿 https://claude.ai/artifact/Y5wY1iEHN7tLNnGkEeryy5）
+
+用户拍板：面板多「先读字幕」（整集读完 / 读一段看一段）；阅读页假名常显可关、点词查（日语按原形）、AI 中文默认折叠、点句在右侧小窗放片段（放完停，「从这里接着看」）；查过的词看剧时字幕上红虚线（关字幕看不见可接受）；读完回面板选练法。先做日语 + 英西法德。
+
+- [x] 产品门 pm + 用户拍板 + 设计稿
+- [x] 设计门 reviewer（查过的词 localStorage、翻译缓存 trans.json）：采纳写盘串行 + 写前查取消；翻译改成第一次点开中文才开始
+- [ ] 数据：utils/readLooked.ts（查过的词）+ utils/transPrep.ts（翻译）+ cache kind trans（Rust / desktop.ts）+ 删视频清理
+- [ ] 面板「先读字幕」+ App READ 状态 + 回面板提示
+- [ ] 阅读页 ReaderPage（台词、假名、查词、中文、分段、小窗、查过的词列表）
+- [ ] 看剧页：进页加载日语词典 + 字幕标查过的词
+- [ ] 中英文案；docs（README 本地数据 + watch.md / 新 reader 说明）
+- [ ] tsc + test-*.mjs（新增 test-reader.mjs）+ cargo test
+- [ ] 浏览器实测
+- [ ] codex-review + 错题本
+- [ ] npm run release + 验收路径
+
 # 复习改版：单词卡先想再翻 + FSRS 四键 + 假名（2026-09-28 用户拍板，设计稿 https://claude.ai/artifact/Higxw51FPcfXk2uXHLWSGR）
 
 用户拍板：设置「单词卡正面」只看词 / 看原句；单词卡翻面才播片段、显示读音释义原句（目标词注假名常显，其余汉字悬停才显）；句子卡、单词卡都用四键（重来 / 困难 / 良好 / 简单 + 下次间隔，1–4 键）；句子卡交卷后按听写结果圈建议、回车采用；「重来」本轮末尾再来一次；Anki 已有 LinguaClip 样式直接改写（1A），单词卡声音截图挪背面。

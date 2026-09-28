@@ -9,7 +9,7 @@
 | `components/CustomPanel.tsx` | 「练法」第三项 `watch` → `onStart({ kind: 'watch' })`；上次是否选看剧存 `watchPrefs.chosen` |
 | `App.tsx` `openPractice` | watch 分支：查路径（同练习）→ 字幕为空弹 `app.noSubtitles*` → 只 patch `lastPracticed` → `AppState.WATCH` |
 | `components/WatchPage.tsx` | 页面：播放、当前句、快捷键、收藏、Anki、查词、小结 / 听写入口 |
-| `components/WatchLine.tsx` | 叠加字幕一行：`show` / `blur` / `hide`，按词查词（纯文本渲染） |
+| `components/WatchLine.tsx` | 叠加字幕一行：`show` / `blur` / `hide`，按词查词（纯文本渲染）；阅读器里查过的词（`utils/readLooked.ts`）画红虚线。进页面就 `settleSplits` 加载日语词典，否则日语整句一格、标不上 |
 | `components/WatchList.tsx` | 右侧字幕列表（学 asbplayer）：当前句高亮、鼠标不在列表上时自动滚到中间、点一句 `jump`、左边缘拖宽（20–50%，松手才存） |
 | `components/WatchSummary.tsx` | 小结弹窗：收藏句勾选 → 听写；本次查过的词 → 再查 |
 | `utils/srtParser.ts` `lineAt` | 某一秒的「当前句」= 最后一个已开始的句子（`test-watch.mjs`） |

@@ -13,6 +13,7 @@ import { useAnkiIntegration } from '../hooks/useAnkiIntegration';
 import { lineAt, parseSRT } from '../utils/srtParser';
 import { isFullscreen, setFullscreen, videoSrcFromPath } from '../utils/desktop';
 import { detectLang } from '../utils/dictionary';
+import { settleSplits } from '../utils/jaSegments';
 import { addWord, getAllCards, hasAudio, ReviewCard } from '../utils/review';
 import { formatTimeCode, getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos, WatchPrefs, WatchSubs } from '../utils/storage';
 import { formatCombo, matches, useShortcuts } from '../utils/shortcuts';
@@ -164,6 +165,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
 
   // --- Lookup: pauses the video; closing the card resumes it if it was playing ---
   const dictLang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
+  useEffect(() => { settleSplits(record.id, lines.map(l => l.text)).catch(() => {}); }, [record.id, lines]); // words, and the reader's marks on them
   const { def, lookup, explain, closeDef } = useLookup(dictLang, shown?.text ?? '');
   const lookLine = useRef<Subtitle | null>(null);
   const resumeAfter = useRef(false);
@@ -393,7 +395,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
       {/* The subtitle rides above the controls while they show */}
       {shown && (
         <div data-watch-line className="absolute inset-x-0 px-6 flex justify-center text-center transition-[bottom] duration-200" style={{ bottom: showBottom ? 132 : 44 }}>
-          <WatchLine key={shown.id} text={shown.text} subs={prefs.subs} revealed={revealed === shown.id}
+          <WatchLine key={shown.id} videoId={record.id} text={shown.text} subs={prefs.subs} revealed={revealed === shown.id}
             onReveal={() => setRevealed(shown.id)} onWord={w => onWord(w, shown)} />
         </div>
       )}

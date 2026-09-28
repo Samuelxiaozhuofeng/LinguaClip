@@ -17,6 +17,8 @@ import AddVideo from './AddVideo';
 import { canCloze } from '../utils/aiDrills';
 import { cancelPrep, getPrepJob, prepStatus, prepareBreakdowns, subscribePrep } from '../utils/breakdownPrep';
 import { cancelLevels } from '../utils/levelPrep';
+import { cancelTrans } from '../utils/transPrep';
+import { forgetLooked } from '../utils/readLooked';
 import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribeCloze } from '../utils/clozePrep';
 import { cancelSegments, getSegJob, subscribeSeg } from '../utils/jaSegments';
 import { deckCounts, deleteVideoCards, getAllCards, keepOrphans, subscribeCards } from '../utils/review';
@@ -212,12 +214,13 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
     );
     if (trash === null) return; // dismissed the file question: nothing is deleted
     setDeletingId(v.id);
-    await Promise.all([cancelPrep(v.id), cancelCloze(v.id), cancelSegments(v.id), cancelLevels(v.id)]);
+    await Promise.all([cancelPrep(v.id), cancelCloze(v.id), cancelSegments(v.id), cancelLevels(v.id), cancelTrans(v.id)]);
     try {
       await VideoStorage.deleteVideoRecord(v.id);
       setVideos(prev => (prev ? prev.filter(x => x.id !== v.id) : prev));
       forgetCustomPos(v.id);
       forgetWatchPos(v.id);
+      forgetLooked(v.id);
     } catch {
       dialog.alert(t('home.deleteFailTitle'), t('home.deleteFailBody'));
       setDeletingId(null);
