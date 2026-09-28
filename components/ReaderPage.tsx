@@ -201,9 +201,11 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   };
   // The first line is the top: kept as 0, so no "picking up" note for it next time.
   const keepPlace = () => { if (restored.current) { const l = topLine(); if (l) setReadPos(record.id, l === lines[0] ? 0 : l.startTime); } };
-  // Only the reader's own scrolling counts; the player following its line does not.
+  // Only the reader's own scrolling counts; the player following its line does not. A long
+  // smooth scroll of ours can outlast any fixed window, so ours lasts while the page keeps moving.
   const onScroll = () => {
-    if (!restored.current || Date.now() - ours.current < 1000) return;
+    if (Date.now() - ours.current < 300) { ours.current = Date.now(); return; }
+    if (!restored.current) return;
     window.clearTimeout(settle.current);
     settle.current = window.setTimeout(() => { settle.current = 0; keepPlace(); }, 500);
   };
