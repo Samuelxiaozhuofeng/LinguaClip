@@ -395,7 +395,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
       {/* The subtitle rides above the controls while they show */}
       {shown && (
         <div data-watch-line className="absolute inset-x-0 px-6 flex justify-center text-center transition-[bottom] duration-200" style={{ bottom: showBottom ? 132 : 44 }}>
-          <WatchLine key={shown.id} videoId={record.id} text={shown.text} subs={prefs.subs} revealed={revealed === shown.id}
+          <WatchLine key={shown.id} videoId={record.id} ja={dictLang === 'ja'} text={shown.text} subs={prefs.subs} revealed={revealed === shown.id}
             onReveal={() => setRevealed(shown.id)} onWord={w => onWord(w, shown)} />
         </div>
       )}

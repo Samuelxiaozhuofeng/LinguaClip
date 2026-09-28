@@ -34,6 +34,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   const t = useT();
   const lines = useMemo(() => [...parseSRT(record.subtitleText)].sort((a, b) => a.startTime - b.startTime), [record.subtitleText]);
   const sections = useMemo(() => buildSections(lines, getPracticeConfig().sectionLength), [lines]);
+  const indexOf = useMemo(() => new Map(lines.map((l, i) => [l.id, i])), [lines]);
   const [sec, setSec] = useState(0); // "section" mode: the one on the page
   const dictLang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
   const ja = dictLang === 'ja';
@@ -75,10 +76,12 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
       .then(setTrans).catch(console.error).finally(() => setTransBusy(false));
   };
   useEffect(() => subscribeTrans(() => { const job = getTransJob(record.id); if (job) setTrans(job.lines); }), [record.id]);
+  // A line open with no translation (its batch failed): the click retries, it doesn't fold.
   const toggleTrans = useCallback((line: Subtitle) => {
     askTrans();
-    setOpenT(s => { const n = new Set(s); if (n.has(line.id)) n.delete(line.id); else n.add(line.id); return n; });
-  }, [trans, transBusy]); // eslint-disable-line react-hooks/exhaustive-deps
+    const missing = (allT !== openT.has(line.id)) && !trans?.[indexOf.get(line.id)!] && !transBusy;
+    if (!missing) setOpenT(s => { const n = new Set(s); if (n.has(line.id)) n.delete(line.id); else n.add(line.id); return n; });
+  }, [trans, transBusy, allT, openT]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- The small player ---
   const { play, stop, video, ref: vref } = useClip();
@@ -146,7 +149,6 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     scroller.current?.querySelector(`[data-section="${i}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
   const shown = by === 'section' ? [sections[sec]] : sections;
-  const indexOf = useMemo(() => new Map(lines.map((l, i) => [l.id, i])), [lines]);
 
   const status = !clip ? '' : done ? t('reader.clipDone')
     : clip.kind === 'line' ? t('reader.clipLine', { time: formatTimeCode(clip.line!.startTime) })
