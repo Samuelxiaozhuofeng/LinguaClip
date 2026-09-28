@@ -4,15 +4,16 @@
 
 - [x] 产品门 pm + 用户拍板 + 设计稿
 - [x] 设计门 reviewer（查过的词 localStorage、翻译缓存 trans.json）：采纳写盘串行 + 写前查取消；翻译改成第一次点开中文才开始
-- [ ] 数据：utils/readLooked.ts（查过的词）+ utils/transPrep.ts（翻译）+ cache kind trans（Rust / desktop.ts）+ 删视频清理
-- [ ] 面板「先读字幕」+ App READ 状态 + 回面板提示
-- [ ] 阅读页 ReaderPage（台词、假名、查词、中文、分段、小窗、查过的词列表）
-- [ ] 看剧页：进页加载日语词典 + 字幕标查过的词
-- [ ] 中英文案；docs（README 本地数据 + watch.md / 新 reader 说明）
-- [ ] tsc + test-*.mjs（新增 test-reader.mjs）+ cargo test
-- [ ] 浏览器实测
-- [ ] codex-review + 错题本
-- [ ] npm run release + 验收路径
+- [x] 数据：utils/readLooked.ts（查过的词）+ utils/transPrep.ts（翻译）+ cache kind trans（Rust / desktop.ts）+ 删视频清理
+- [x] 面板「先读字幕」+ App READ 状态 + 回面板提示
+- [x] 阅读页 ReaderPage（台词、假名、查词、中文、分段、小窗、查过的词列表）
+- [x] 看剧页：进页加载日语词典 + 字幕标查过的词
+- [x] 中英文案；docs（README 本地数据 + watch.md / 新 reader 说明）
+- [x] tsc + test-*.mjs（新增 test-reader.mjs）+ cargo test
+- [x] 浏览器实测（日语整集 / 分段、查词原形标记、AI 译文 + 失败重试、小窗一句停 / 接着放 / 放一段、Esc、假名开关记住、回面板提示、看剧红虚线、英语 that's、旧练法照常）
+- [x] codex-review 三路 + 错题本（修：翻译失败点「中」重试不收起、全汉字行认日语、列表回查能收词、撇号词标记、整页重画；划掉：小窗跳回 0 秒、空格双触发（Chrome 未复现））
+- [x] npm run release + 验收路径
+- [ ] 用户真机验收
 
 # 复习改版：单词卡先想再翻 + FSRS 四键 + 假名（2026-09-28 用户拍板，设计稿 https://claude.ai/artifact/Higxw51FPcfXk2uXHLWSGR）
 
