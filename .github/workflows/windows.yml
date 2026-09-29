@@ -6,6 +6,11 @@ name: Windows build
 
 on:
   workflow_dispatch:
+    inputs:
+      config:
+        description: 'Extra tauri --config JSON, for update tests (docs/update.md), e.g. {"version":"0.2.1"}'
+        required: false
+        default: '{}'
 
 jobs:
   windows:
@@ -27,8 +32,22 @@ jobs:
       - name: Download parts and transcribe a clip (network)
         run: cargo test --manifest-path src-tauri/Cargo.toml -- --ignored fetch_vad fetch_whisper transcribes_speech downloads_ffmpeg
       # No AI keys exist in CI, so nothing of the author's can end up in the build.
-      - run: npx tauri build --bundles nsis
+      # With the updater key secret (official builds) it also makes the signed update package, docs/update.md.
+      - name: Build
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          EXTRA: ${{ inputs.config || '{}' }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            npx tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":true}}' --config "$EXTRA"
+          else
+            npx tauri build --bundles nsis --config "$EXTRA"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: LinguaClip-windows
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig

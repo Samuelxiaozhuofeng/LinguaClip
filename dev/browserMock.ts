@@ -9,6 +9,8 @@
  *   default); `window.__MOCK__.probe` = what probe_video reports for any file.
  * - `window.__MOCK__.jaDict`: is the Japanese dictionary "downloaded" (false by
  *   default); its files are served from node_modules/kuromoji/dict.
+ * - `window.__MOCK__.update = { version, body }` fakes a newer release (null = up to
+ *   date, 'fail' = no connection); `updateFail = 'download' | 'install'` fakes that step failing.
  * - Rust commands are logged to `window.__MOCK__.calls`; fake import progress
  *   with `window.__MOCK__.emit('import-progress', {...})`.
  * - vite aliases @tauri-apps/plugin-http to this file, hence the `fetch` export;
@@ -38,6 +40,8 @@ const mock = {
   device: { id: 'browser-dev-device-0001', name: 'Browser (dev)' },
   clipFail: null as string | null, // set to make cut_clip fail with this message
   probe: { duration: 19, video: 'h264', audio: 'ac3', subtitles: [] as unknown[] },
+  update: null as null | 'fail' | { version: string; body: string },
+  updateFail: null as null | 'download' | 'install',
   emit,
 };
 (window as any).__MOCK__ = mock;
@@ -143,6 +147,31 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
       return null;
     case 'probe_import_sizes':
       return { '1080': null, '720': null, '480': null };
+    case 'plugin:app|version':
+      return '0.2.1';
+    case 'plugin:updater|check': {
+      await new Promise(r => setTimeout(r, 600));
+      if (mock.update === 'fail') throw new Error('network');
+      return mock.update && { rid: 1, currentVersion: '0.2.1', version: mock.update.version, body: mock.update.body, rawJson: {} };
+    }
+    case 'plugin:updater|download': {
+      const send = (m: unknown) => args.onEvent?.onmessage?.(m);
+      const total = 7_000_000;
+      send({ event: 'Started', data: { contentLength: total } });
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 150));
+        if (mock.updateFail === 'download' && i === 8) throw new Error('connection reset');
+        send({ event: 'Progress', data: { chunkLength: total / 20 } });
+      }
+      send({ event: 'Finished' });
+      return 2;
+    }
+    case 'plugin:updater|install':
+      if (mock.updateFail === 'install') throw new Error('install failed');
+      return null;
+    case 'plugin:process|restart':
+      location.reload();
+      return null;
     default:
       // start_import, open_youtube_login, window chrome… nothing to do in a browser
       return null;

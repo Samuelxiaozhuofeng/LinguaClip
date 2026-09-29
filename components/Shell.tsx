@@ -4,6 +4,7 @@ import { AppState } from '../types';
 import { useT } from '../utils/i18n';
 import { IS_WINDOWS } from '../utils/platform';
 import { deckCounts, getAllCards, subscribeCards } from '../utils/review';
+import { UpdatePill } from './UpdateUI';
 
 // Page frame for the non-practice screens: wordmark, a centred pill of tabs (the two
 // libraries carry how many cards are due), the quiet "add video" button, scrolling body.
@@ -25,7 +26,7 @@ const Shell: React.FC<{ active: AppState; onNav: (s: AppState) => void; onAdd: (
   <div className="h-full flex flex-col">
     {/* The Mac's traffic lights sit top-left, so the wordmark starts after them. */}
     <header className={`shrink-0 relative h-16 ${IS_WINDOWS ? 'pl-6' : 'pl-24'} pr-6 lg:pr-10 flex items-center justify-between`} data-tauri-drag-region="deep">
-      <span className="text-[15px] font-semibold select-none">LinguaClip</span>
+      <span className="flex items-center"><span className="text-[15px] font-semibold select-none">LinguaClip</span><UpdatePill /></span>
       <nav className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-0.5 p-1 bg-page border border-line rounded-full">
         {NAV.map(({ state, label, badge }) => {
           const on = active === state;

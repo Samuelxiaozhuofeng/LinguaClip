@@ -27,9 +27,28 @@ jobs:
       - name: Download parts and transcribe a clip (network)
         run: cargo test --manifest-path src-tauri/Cargo.toml -- --ignored fetch_whisper transcribes_speech
       # No AI keys exist in CI, so nothing of the author's can end up in the build.
-      - run: npx tauri build --bundles app
+      # With the updater key secret (official builds) it also makes the signed update package, docs/update.md.
+      - name: Build
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            npx tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          else
+            npx tauri build --bundles app
+          fi
       - run: ditto -c -k --keepParent src-tauri/target/release/bundle/macos/LinguaClip.app LinguaClip-mac-intel.zip
+      - name: Update package
+        shell: bash
+        run: |
+          B=src-tauri/target/release/bundle/macos
+          if [ -f $B/LinguaClip.app.tar.gz.sig ]; then
+            cp $B/LinguaClip.app.tar.gz LinguaClip-mac-intel.app.tar.gz
+            cp $B/LinguaClip.app.tar.gz.sig LinguaClip-mac-intel.app.tar.gz.sig
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: LinguaClip-mac-intel
-          path: LinguaClip-mac-intel.zip
+          path: LinguaClip-mac-intel*

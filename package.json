@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "release": "tauri build --bundles app",
     "postrelease": "bash scripts/install-macos.sh",
-    "release:public": "tauri build --bundles app && ditto -c -k --keepParent src-tauri/target/release/bundle/macos/LinguaClip.app src-tauri/target/LinguaClip.zip"
+    "release:public": "bash scripts/release-mac.sh"
   },
   "dependencies": {
     "@fontsource/instrument-sans": "^5.3.0",
@@ -20,6 +20,8 @@
     "@tauri-apps/plugin-fs": "^2.5.2",
     "@tauri-apps/plugin-http": "^2.6.1",
     "@tauri-apps/plugin-opener": "^2.5.5",
+    "@tauri-apps/plugin-process": "~2.3.1",
+    "@tauri-apps/plugin-updater": "~2.12.0",
     "kuromoji": "^0.1.2",
     "lucide-react": "^0.554.0",
     "react": "^19.2.0",

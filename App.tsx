@@ -10,6 +10,8 @@ import CustomPanel, { PanelChoice, nextPick, paceOf } from './components/CustomP
 import { ProHost, Reader, readerGate } from '@pro';
 import type { ReadBy } from './utils/storage';
 import { DialogHost, dialog } from './components/Dialog';
+import { UpdateDialog } from './components/UpdateUI';
+import { checkUpdate } from './utils/update';
 import { PracticeProvider } from './hooks/usePracticeContext';
 import { useVideoHistory } from './hooks/useVideoHistory';
 import { usePracticeSession } from './hooks/usePracticeSession';
@@ -52,6 +54,8 @@ export default function App() {
 
   // Cards left by videos deleted in older versions: ask once whether they go too.
   useEffect(() => { askAboutOrphans().catch(console.error); }, []);
+  // Official build only: look for a new version once, quietly (docs/update.md).
+  useEffect(() => { const id = setTimeout(() => { checkUpdate(); }, 5000); return () => clearTimeout(id); }, []);
 
   // Cards' own clips: fill in what's missing, now and after card changes (utils/clips.ts).
   useEffect(() => startClips(), []);
@@ -450,6 +454,7 @@ export default function App() {
         />
       )}
       {ProHost && <ProHost />}
+      <UpdateDialog />
       <DialogHost />
     </>
   );

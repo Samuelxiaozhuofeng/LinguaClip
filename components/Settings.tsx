@@ -13,6 +13,7 @@ import SettingsTranscribe from './SettingsTranscribe';
 import { useT, useLang, setLang, Lang } from '../utils/i18n';
 import { openExternal } from '../utils/desktop';
 import { ProFooter } from '@pro';
+import { UpdateRow } from './UpdateUI';
 
 type DeckByLang = NonNullable<AnkiCardTemplateConfig['deckByLang']>;
 
@@ -270,6 +271,7 @@ const Settings: React.FC = () => {
           </button>
         )}
       </p>
+      <UpdateRow />
 
       {savedFlash && (
         <div className="fixed bottom-6 right-6 z-50">

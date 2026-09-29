@@ -15,3 +15,5 @@ export const readerTrial = (_id: string): ReaderTrial => ({ pro: false, used: 0,
 export const ProFooter: React.FC | null = null;
 // Activation / manage dialogs + license check at launch, mounted once at the root.
 export const ProHost: React.FC | null = null;
+// No self-update: it would swap a self-built copy for the official build.
+export const UPDATES = false;

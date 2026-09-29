@@ -9,6 +9,9 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { exists, readFile, readTextFile } from '@tauri-apps/plugin-fs';
+import { check, type Update } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
+import { getVersion } from '@tauri-apps/api/app';
 import { IS_WINDOWS } from './platform';
 
 // What the player opens as is; the rest of VIDEO_EXTS gets converted to mp4 on
@@ -192,3 +195,9 @@ export async function transcribeLocation(model: string): Promise<{ dir: string; 
 // Window fullscreen (watch mode). The window's own, not the page's: Esc stays with the page.
 export const isFullscreen = (): Promise<boolean> => getCurrentWindow().isFullscreen();
 export const setFullscreen = (on: boolean): Promise<void> => getCurrentWindow().setFullscreen(on);
+
+// One-click update (docs/update.md): the manifest is linguaclipapp.com/download/latest.json.
+export type { Update };
+export const appVersion = (): Promise<string> => getVersion();
+export const checkForUpdate = (): Promise<Update | null> => check({ timeout: 20000 });
+export const relaunchApp = (): Promise<void> => relaunch();

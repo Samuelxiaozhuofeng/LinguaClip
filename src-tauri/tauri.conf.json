@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "LinguaClip",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "com.linguaclip.app",
   "build": {
     "frontendDist": "../dist",
@@ -21,7 +21,10 @@
         "fullscreen": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 18, "y": 32 }
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 32
+        }
       }
     ],
     "security": {
@@ -50,5 +53,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg0MzE4Qzc0RTBGNEExNUMKUldSY29mVGdkSXd4aExHcWlZZHdBNGxTNzlXTVFXRUc1S2tNMnNOUnJLM05RTnd6V1lwd0p5UW4K",
+      "endpoints": [
+        "https://linguaclipapp.com/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
