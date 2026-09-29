@@ -626,7 +626,7 @@ export const en = {
   'watch.lookedBefore': 'Looked up while reading · click to look up',
   'watch.lookedBeforeGloss': 'Looked up while reading: {word} · {gloss} (click for the full entry)',
 
-  // --- Reader (components/ReaderPage.tsx) ---
+  // --- Reader (pro/ReaderPage.tsx) ---
   'reader.sectionN': 'Part {n}',
   'reader.sectionHead': 'Part {n} · {from} – {to}',
   'reader.kanaOn': 'Readings · on',

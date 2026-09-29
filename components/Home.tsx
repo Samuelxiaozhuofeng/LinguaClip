@@ -17,7 +17,7 @@ import AddVideo from './AddVideo';
 import { canCloze } from '../utils/aiDrills';
 import { cancelPrep, getPrepJob, prepStatus, prepareBreakdowns, subscribePrep } from '../utils/breakdownPrep';
 import { cancelLevels } from '../utils/levelPrep';
-import { cancelTrans } from '../utils/transPrep';
+import { cancelTrans } from '@pro';
 import { forgetLooked } from '../utils/readLooked';
 import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribeCloze } from '../utils/clozePrep';
 import { cancelSegments, getSegJob, subscribeSeg } from '../utils/jaSegments';

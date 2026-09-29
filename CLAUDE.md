@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 两个仓库（开源版 / Pro 版）
+
+- 本机这份 = **私有仓库** `linguaclip-pro`（`origin`），所有开发都在这里。Pro 功能（目前是阅读器）的代码只放 `pro/`。
+- **公开仓库** `video_dictation_local` 不直接改：`scripts/sync-public.sh "说明"` 把已提交的代码去掉 `pro/` 和 `TASKS.md` 导到 `~/.cache/linguaclip-public`，在那里跑类型检查 + 打包，通过才提交；`--push` 才推上去（推送前要用户点头）。本机没有指向公开仓库的 remote，别加回来。
+- 免费代码只通过 `@pro` 用 Pro 功能：有 `pro/` 时指向 `pro/index.ts`，没有时指向 `utils/proStub.ts`（`vite.config.ts` / `tsconfig.json`）。两边导出同样的名字；Pro 功能不在时（如 `Reader` 为 null）入口要自己消失。**免费代码里不许直接 import `pro/` 下的文件**，同步脚本会拦。
+- 新增 Pro 功能：代码放 `pro/`，在 `pro/index.ts` 和 `utils/proStub.ts` 各加一个同名导出。
+
 ## 先读 docs/
 
 `docs/README.md` 是这个仓库的技术速览（目录表 + 本地数据结构），`docs/desktop.md` 是 Tauri 桌面版的运行时约定，`docs/import.md` 是自动生成字幕那条链路，`docs/watch.md` 是看剧模式。动手前读对应那份，别只靠代码猜。
@@ -25,7 +32,7 @@ node test-japanese.mjs    # 日语切词组 + 假名判对 + AI 校对回答校�
 node test-custom.mjs      # 定制练习：挑句（水平区间、时长、照常播放 / 跳过、从头再挑）+ AI 分级回答 / 缓存校验
 node test-wordtimes.mjs   # 逐词时间：空格对到 words.json 的哪一段 + ⌘K / ⌘J 实际播放区间
 node test-watch.mjs       # 看剧：某一秒屏幕上是哪一句（lineAt）
-node test-reader.mjs      # 阅读器：查过的词怎么记（日语原形）+ 看剧时认回来、AI 译文回答 / 缓存 / 删视频中途取消
+node pro/test-reader.mjs  # 阅读器：查过的词怎么记（日语原形）+ 看剧时认回来、AI 译文回答 / 缓存 / 删视频中途取消
 ```
 
 前端没有测试框架，逻辑自检就是根目录那几个 `node` 脚本（`test-tokenizer.js` / `test-flexible-case.js` 是早期的复制逻辑版，参考价值有限）。

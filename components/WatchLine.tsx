@@ -9,7 +9,7 @@ import { bareWord } from './BlurLine';
 // Watch mode's subtitle, laid over the picture. Shown: every word looks up on a
 // click. Blurred / hidden: a click shows this one line (the next line covers
 // again), then its words look up. Text only — never parsed as HTML. Words looked up
-// while reading this video's subtitles (components/ReaderPage.tsx) are underlined.
+// while reading this video's subtitles (pro/ReaderPage.tsx) are underlined.
 const WatchLine: React.FC<{
   videoId: string;
   ja: boolean; // the video is Japanese: words are keyed as the reader keyed them

@@ -129,7 +129,7 @@ export const forgetWatchPos = (videoId: string) => writeWatchPos(all => { delete
 // How subtitles show, whether each line pauses at its end, whether the
 // start-of-practice panel last chose "watch", whether the controls are pinned,
 // and whether the subtitle list is open and how wide (% of the window). The reader
-// (components/ReaderPage.tsx) keeps here how the panel last chose to read and whether
+// (pro/ReaderPage.tsx) keeps here how the panel last chose to read and whether
 // furigana shows and whether looking a word up also plays its line; choosing to read
 // is never kept as `chosen`.
 export type WatchSubs = 'show' | 'blur' | 'hide';

@@ -627,7 +627,7 @@ export const zh: Record<keyof typeof en, string> = {
   'watch.lookedBefore': '读字幕时查过 · 点一下查词',
   'watch.lookedBeforeGloss': '读字幕时查过：{word} · {gloss}（点一下看完整释义）',
 
-  // --- Reader (components/ReaderPage.tsx) ---
+  // --- Reader (pro/ReaderPage.tsx) ---
   'reader.sectionN': '第 {n} 段',
   'reader.sectionHead': '第 {n} 段 · {from} – {to}',
   'reader.kanaOn': '假名 · 显示',

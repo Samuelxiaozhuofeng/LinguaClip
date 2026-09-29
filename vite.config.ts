@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import os from 'os';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -11,7 +12,8 @@ const corsProxy: Plugin = {
     server.middlewares.use('/__proxy', async (req, res) => {
       const origin = req.headers.origin;
       const target = req.headers['x-proxy-url'];
-      if ((origin && !/^http:\/\/(localhost|127\.0\.0\.1):3000$/.test(origin)) || typeof target !== 'string') {
+      // Only the page this server itself serves, on whatever port it was handed.
+      if ((origin && origin !== `http://${req.headers.host}`) || typeof target !== 'string') {
         res.statusCode = 403;
         return res.end();
       }
@@ -65,6 +67,8 @@ export default defineConfig(({ command }) => {
       },
       resolve: {
         alias: {
+          // Pro build when pro/ is here (private repo), open-source build otherwise.
+          '@pro': path.resolve(__dirname, fs.existsSync(path.resolve(__dirname, 'pro/index.ts')) ? 'pro/index.ts' : 'utils/proStub.ts'),
           '@': path.resolve(__dirname, '.'),
           ...(browserDev && { '@tauri-apps/plugin-http': path.resolve(__dirname, 'dev/browserMock.ts') }),
         }

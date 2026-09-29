@@ -5,13 +5,14 @@ import { useT } from '../utils/i18n';
 import { parseSRT } from '../utils/srtParser';
 import { canCloze } from '../utils/aiDrills';
 import { CustomConfig, CustomPick, LEVELS, Level, LineLabel, MINUTE_CHOICES, PaceMode, pickCustom } from '../utils/customPick';
+import { Reader } from '@pro';
 import { getLevelJob, prepareLevels, readLevels, subscribeLevels } from '../utils/levelPrep';
 import { formatTimeCode, getCustomConfig, getCustomPos, getWatchPrefs, ReadBy, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
 
 // Asked before every practice session: section by section as before, or a
 // custom set — so many minutes, at a level, from where the last set stopped —
 // or just watching (components/WatchPage.tsx), or reading the subtitles first
-// (components/ReaderPage.tsx). The last way chosen comes back — never "read": that
+// (pro/ReaderPage.tsx). The last way chosen comes back — never "read": that
 // comes before practice, and the panel reopens after it to pick the practice.
 // Esc / clicking outside cancels; it never counts as a choice.
 
@@ -156,7 +157,7 @@ const CustomPanel: React.FC<{
               { value: 'all', label: t('custom.all') },
               { value: 'custom', label: t('custom.custom') },
               { value: 'watch', label: t('custom.watch') },
-              { value: 'read', label: t('custom.read') },
+              ...(Reader ? [{ value: 'read', label: t('custom.read') }] : []),
             ]} />
           </Row>
           {read && (

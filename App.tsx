@@ -7,7 +7,7 @@ import Shell from './components/Shell';
 import Studio from './components/Studio';
 import WatchPage from './components/WatchPage';
 import CustomPanel, { PanelChoice, nextPick, paceOf } from './components/CustomPanel';
-import ReaderPage from './components/ReaderPage';
+import { Reader } from '@pro';
 import type { ReadBy } from './utils/storage';
 import { DialogHost, dialog } from './components/Dialog';
 import { PracticeProvider } from './hooks/usePracticeContext';
@@ -377,9 +377,9 @@ export default function App() {
 
   const page = appState === AppState.WATCH && watching ? (
     <WatchPage key={watching.id} record={watching} onExit={() => { setWatching(null); setAppState(AppState.UPLOAD); }} />
-  ) : appState === AppState.READ && reading ? (
+  ) : appState === AppState.READ && reading && Reader ? (
     // Done reading: back to the panel to pick how to practise.
-    <ReaderPage key={reading.record.id} record={reading.record} by={reading.by}
+    <Reader key={reading.record.id} record={reading.record} by={reading.by}
       onExit={n => { setReading(null); setAppState(AppState.UPLOAD); setPanel({ record: reading.record, lm: reading.lm, read: n }); }} />
   ) : appState !== AppState.PRACTICE ? (
     <Shell active={appState} onNav={setAppState} hideAdd={appState === AppState.UPLOAD && homeEmpty} onAdd={() => { setAppState(AppState.UPLOAD); setAddAsked(true); }}>

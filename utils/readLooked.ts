@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { jaLemma, jaMorphs, jaReady } from './japanese';
 
-// What the reader (components/ReaderPage.tsx) keeps per video, in localStorage:
+// What the reader (pro/ReaderPage.tsx) keeps per video, in localStorage:
 // - `linguaclip_read_looked`: words looked up while reading, so the watch page can mark
 //   them on the subtitle. Word keys: Japanese in dictionary form (食べました → 食べる, and
 //   passive / causative dropped too: 頼まれた → 頼む, so 頼むから matches), other
