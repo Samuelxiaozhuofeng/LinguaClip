@@ -23,7 +23,8 @@ pub(crate) struct Asset {
   pub(crate) size: u64,
   pub(crate) sha256: &'static str,
   // Tried in order; a partial file carries over to the next one. From mainland
-  // China huggingface.co usually fails, hf-mirror.com usually works.
+  // China huggingface.co and github.com usually fail; hf-mirror.com and our
+  // own site (linguaclip-site/fetch-downloads.sh puts copies there) usually work.
   pub(crate) urls: &'static [&'static str],
 }
 
@@ -33,8 +34,10 @@ const WHISPER_CLI: Asset = Asset {
   name: "whisper-cli",
   size: 3_055_240,
   sha256: "09d672178dcc7daba8f5b36a2a0bab86a5de9cd8f0bcf699f2fc7f785274a80f",
-  // ponytail: GitHub only; add a mirror if users in China report this step failing.
-  urls: &["https://github.com/Samuelxiaozhuofeng/video_dictation_local/releases/download/whisper-cli-1.8.4/whisper-cli"],
+  urls: &[
+    "https://github.com/Samuelxiaozhuofeng/video_dictation_local/releases/download/whisper-cli-1.8.4/whisper-cli",
+    "https://linguaclipapp.com/download/parts/whisper-cli-1.8.4/whisper-cli",
+  ],
 };
 // Intel Mac: same script with ARCH=x86_64 (CPU only, no Metal), its own Release.
 #[cfg(all(not(windows), target_arch = "x86_64"))]
@@ -42,7 +45,10 @@ const WHISPER_CLI: Asset = Asset {
   name: "whisper-cli",
   size: 2_787_904,
   sha256: "bf75b0892780cec6435d99f08236f11aa736a62a2383bed53c117beea033cc96",
-  urls: &["https://github.com/Samuelxiaozhuofeng/video_dictation_local/releases/download/whisper-cli-1.8.4-x86_64/whisper-cli"],
+  urls: &[
+    "https://github.com/Samuelxiaozhuofeng/video_dictation_local/releases/download/whisper-cli-1.8.4-x86_64/whisper-cli",
+    "https://linguaclipapp.com/download/parts/whisper-cli-1.8.4-x86_64/whisper-cli",
+  ],
 };
 #[cfg(not(windows))]
 const WHISPER_EXE: &str = "whisper-cli";
@@ -53,7 +59,10 @@ const WHISPER_CLI: Asset = Asset {
   name: "whisper-bin-x64.zip",
   size: 4_078_768,
   sha256: "74f973345cb52ef5ba3ec9e7e7af8e48cc8c71722d1528603b80588a11f82e3e",
-  urls: &["https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip"],
+  urls: &[
+    "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip",
+    "https://linguaclipapp.com/download/parts/whisper-bin-x64.zip",
+  ],
 };
 #[cfg(windows)]
 const WHISPER_EXE: &str = "Release/whisper-cli.exe";
@@ -64,7 +73,10 @@ const WHISPER_VULKAN: Asset = Asset {
   name: "whisper-vulkan-x64.zip",
   size: 17_988_352,
   sha256: "11b8f84c9202f83cb6510bba2e92c9520b9c79990d6b25db12ca0cd46caebeaa",
-  urls: &["https://github.com/Samuelxiaozhuofeng/video_dictation_local/releases/download/whisper-vulkan-1.8.4/whisper-vulkan-x64.zip"],
+  urls: &[
+    "https://github.com/Samuelxiaozhuofeng/video_dictation_local/releases/download/whisper-vulkan-1.8.4/whisper-vulkan-x64.zip",
+    "https://linguaclipapp.com/download/parts/whisper-vulkan-x64.zip",
+  ],
 };
 #[cfg(windows)]
 const WHISPER_VULKAN_EXE: &str = "vulkan/whisper-cli.exe";
@@ -446,6 +458,23 @@ mod tests {
     assert_eq!(first, Some(100_000), "should resume, not restart");
     assert_eq!(std::fs::metadata(dir.join(VAD.name)).unwrap().len(), VAD.size);
     assert!(!dir.join(format!("{}.part", VAD.name)).exists());
+    std::fs::remove_dir_all(&dir).unwrap();
+  }
+
+  // GitHub unreachable (as from mainland China: the connection just hangs):
+  // whisper-cli still comes from the last URL, our site's copy, and verifies.
+  // Run with: cargo test --manifest-path src-tauri/Cargo.toml -- --ignored mirror
+  #[test]
+  #[ignore]
+  fn whisper_cli_falls_back_to_mirror() {
+    let dir = std::env::temp_dir().join(format!("lc-setup-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let urls: &'static [&'static str] =
+      Box::leak(vec!["https://10.255.255.1/whisper-cli", *WHISPER_CLI.urls.last().unwrap()].into_boxed_slice());
+    let asset = Asset { urls, ..WHISPER_CLI };
+    tokio::runtime::Runtime::new().unwrap().block_on(fetch(&asset, &dir, |_| {})).unwrap();
+    // fetch() only keeps a file whose sha256 matched (Windows: then unpacked).
+    assert!(dir.join(WHISPER_EXE).exists());
     std::fs::remove_dir_all(&dir).unwrap();
   }
 
