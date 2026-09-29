@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 两个仓库（开源版 / Pro 版）
 
 - 本机这份 = **私有仓库** `linguaclip-pro`（`origin`），所有开发都在这里。Pro 功能（目前是阅读器）的代码只放 `pro/`。
-- **公开仓库** `video_dictation_local` 不直接改：`scripts/sync-public.sh "说明"` 把已提交的代码去掉 `pro/` 和 `TASKS.md` 导到 `~/.cache/linguaclip-public`，在那里跑类型检查 + 打包，通过才提交；`--push` 才推上去（推送前要用户点头）。本机没有指向公开仓库的 remote，别加回来。
+- **公开仓库** `video_dictation_local` 不直接改：`scripts/sync-public.sh "说明"` 把已提交的代码去掉 `pro/`、`TASKS.md`、`docs/pricing.md`（收费策略）导到 `~/.cache/linguaclip-public`，在那里跑类型检查 + 打包，通过才提交；`--push` 才推上去（推送前要用户点头）。本机没有指向公开仓库的 remote，别加回来。
 - 免费代码只通过 `@pro` 用 Pro 功能：有 `pro/` 时指向 `pro/index.ts`，没有时指向 `utils/proStub.ts`（`vite.config.ts` / `tsconfig.json`）。两边导出同样的名字；Pro 功能不在时（如 `Reader` 为 null）入口要自己消失。**免费代码里不许直接 import `pro/` 下的文件**，同步脚本会拦。
 - 新增 Pro 功能：代码放 `pro/`，在 `pro/index.ts` 和 `utils/proStub.ts` 各加一个同名导出。
 

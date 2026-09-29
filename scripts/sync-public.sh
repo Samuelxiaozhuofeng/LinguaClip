@@ -10,7 +10,7 @@ set -euo pipefail
 PUBLIC=https://github.com/Samuelxiaozhuofeng/video_dictation_local.git
 ROOT=$(git rev-parse --show-toplevel)
 WORK="$HOME/.cache/linguaclip-public"
-EXCLUDE=(pro TASKS.md)
+EXCLUDE=(pro TASKS.md docs/pricing.md)
 
 if [ "${1:-}" = "--push" ]; then
   [ "$(git -C "$WORK" remote get-url origin)" = "$PUBLIC" ] || { echo "工作副本不是公开仓库：$WORK"; exit 1; }

@@ -5,7 +5,7 @@ import { useT } from '../utils/i18n';
 import { parseSRT } from '../utils/srtParser';
 import { canCloze } from '../utils/aiDrills';
 import { CustomConfig, CustomPick, LEVELS, Level, LineLabel, MINUTE_CHOICES, PaceMode, pickCustom } from '../utils/customPick';
-import { Reader } from '@pro';
+import { Reader, readerTrial } from '@pro';
 import { getLevelJob, prepareLevels, readLevels, subscribeLevels } from '../utils/levelPrep';
 import { formatTimeCode, getCustomConfig, getCustomPos, getWatchPrefs, ReadBy, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
 
@@ -47,6 +47,7 @@ const CustomPanel: React.FC<{
   const [watch, setWatch] = useState(() => getWatchPrefs().chosen);
   const [read, setRead] = useState(false);
   const [readBy, setReadBy] = useState<ReadBy>(() => getWatchPrefs().readBy);
+  const trial = readerTrial(record.id);
   const subs = useMemo(() => parseSRT(record.subtitleText), [record.subtitleText]);
   const [labels, setLabels] = useState<LineLabel[] | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -157,9 +158,14 @@ const CustomPanel: React.FC<{
               { value: 'all', label: t('custom.all') },
               { value: 'custom', label: t('custom.custom') },
               { value: 'watch', label: t('custom.watch') },
-              ...(Reader ? [{ value: 'read', label: t('custom.read') }] : []),
+              ...(Reader ? [{ value: 'read', label: trial.pro ? t('custom.read') : <>{t('custom.read')}<span className="ml-1.5 px-1 rounded bg-shade text-[10px] font-semibold text-mute align-middle">Pro</span></> }] : []),
             ]} />
           </Row>
+          {read && !trial.pro && (
+            <div className="text-xs text-mute" aria-live="polite">
+              {trial.mine ? t('pro.trialMine') : trial.used < trial.limit ? t('pro.trialLeft', { n: trial.limit - trial.used }) : t('pro.trialOver', { n: trial.limit })}
+            </div>
+          )}
           {read && (
             <Row label={t('custom.readBy')} hint={t(readBy === 'section' ? 'custom.readBySectionHint' : 'custom.readByAllHint')}>
               <Seg<ReadBy> size="sm" value={readBy} onChange={setReadBy} options={[

@@ -662,4 +662,15 @@ export const en = {
   'reader.resumed': 'Picking up where you left off, at {time}',
   'reader.fromTop': 'Start over',
   'reader.lookedEmpty': 'Click a word in the lines to look it up. It is kept here and underlined on the subtitle when you watch.',
+  // --- Pro trial (pro/license.ts) ---
+  'pro.trialOverTitle': 'Free trial used up ({n}/{n})',
+  'pro.trialOverBody': 'You can read the subtitles of {n} videos for free, and you have. Those {n} stay readable any time; to read new ones, upgrade to Pro: one purchase, every future Pro feature included.',
+  'pro.buy': 'Buy Pro',
+  'pro.later': 'Not now',
+  'pro.upgrade': 'Upgrade to Pro',
+  'pro.active': 'LinguaClip Pro is active. Thanks for your support ❤',
+  'pro.trialUsed': 'Pro free trial: {used}/{limit} videos read',
+  'pro.trialLeft': 'Free trial: {n} more new videos',
+  'pro.trialMine': 'This video is in your free trial, readable any time',
+  'pro.trialOver': 'Free trial used up ({n}/{n}); videos you read stay readable',
 } as const;

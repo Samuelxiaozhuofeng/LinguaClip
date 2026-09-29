@@ -663,4 +663,15 @@ export const zh: Record<keyof typeof en, string> = {
   'reader.resumed': '接着上次，从 {time} 开始',
   'reader.fromTop': '从头读',
   'reader.lookedEmpty': '点台词里的词就能查。查过的词会记在这里，看剧时字幕上也会标出来。',
+  // --- Pro trial (pro/license.ts) ---
+  'pro.trialOverTitle': '免费体验已用完（{n}/{n}）',
+  'pro.trialOverBody': '「先读字幕」可以免费读 {n} 个视频，你已经读满了。读过的那 {n} 个随时还能接着读；想读新的视频，升级 Pro 就行：一次买断，以后的 Pro 功能都包含。',
+  'pro.buy': '购买 Pro',
+  'pro.later': '以后再说',
+  'pro.upgrade': '升级 Pro',
+  'pro.active': 'LinguaClip Pro 已激活，感谢支持 ❤',
+  'pro.trialUsed': 'Pro 免费体验：已读 {used}/{limit} 个视频',
+  'pro.trialLeft': '免费体验：还能读 {n} 个新视频',
+  'pro.trialMine': '这个视频已在免费体验里，随时可读',
+  'pro.trialOver': '免费体验已用完（{n}/{n}），读过的视频照常能读',
 };

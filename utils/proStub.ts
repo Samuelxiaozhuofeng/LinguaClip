@@ -8,3 +8,8 @@ export type ProReader = React.FC<{ record: VideoRecord; by: ReadBy; onExit: (loo
 
 export const Reader: ProReader | null = null;
 export const cancelTrans = async (_id: string): Promise<void> => {};
+export type ReaderTrial = { pro: boolean; used: number; limit: number; mine: boolean };
+export const readerGate = async (_id: string): Promise<boolean> => false;
+export const readerTrial = (_id: string): ReaderTrial => ({ pro: false, used: 0, limit: 0, mine: false });
+// Bottom line of Settings; null = the sponsor link stays.
+export const ProFooter: React.FC | null = null;
