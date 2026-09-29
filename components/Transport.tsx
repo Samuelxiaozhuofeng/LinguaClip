@@ -1,9 +1,11 @@
 import React from 'react';
-import { Play, Pause, SkipBack, SkipForward, RotateCcw, Bookmark, PlusCircle, Volume2, VolumeX, Mic, Check, X, Loader2, MoreHorizontal, Keyboard } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, RotateCcw, Repeat, Bookmark, PlusCircle, Volume2, VolumeX, Mic, Check, X, Loader2, MoreHorizontal, Keyboard } from 'lucide-react';
 import { usePracticeContext } from '../hooks/usePracticeContext';
 import { Btn, Menu, MenuItem, Seg } from './ui';
 import { useT } from '../utils/i18n';
 import { formatCombo, useShortcuts, ActionId } from '../utils/shortcuts';
+import { useLoop, setLoopTimes, LOOP_TIMES } from '../utils/loop';
+import { LearningMode, BlurPlaybackMode } from '../types';
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5];
 
@@ -12,7 +14,9 @@ const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5];
 // plus whatever the page adds: cloze level, video size, breakdown, the key legend).
 const Transport: React.FC<{ menuItems: MenuItem[]; menuPanel?: React.ReactNode; pinned: boolean; onTogglePinned: () => void }> = ({ menuItems, menuPanel, pinned, onTogglePinned }) => {
   const t = useT();
-  const { video, saved, anki, actions } = usePracticeContext();
+  const { practice, video, saved, anki, actions } = usePracticeContext();
+  const loop = useLoop();
+  const noLoop = practice.learningMode === LearningMode.BLUR && practice.blurPlaybackMode === BlurPlaybackMode.CONTINUOUS;
   const { isPlaying, volume, playbackSpeed } = video;
   const { isCurrentSaved } = saved;
   const { ankiConfig, ankiStatus } = anki;
@@ -55,6 +59,12 @@ const Transport: React.FC<{ menuItems: MenuItem[]; menuPanel?: React.ReactNode; 
       <div className="flex items-center gap-2 shrink-0 text-ink">
         <Btn square flat onClick={() => actions.onSkip('prev')} title={withKey(t('transport.previousLine'), 'prev')} className="!text-ink"><SkipBack size={18} /></Btn>
         <Btn square flat onClick={() => actions.onReplayCurrent()} title={withKey(t('transport.replayLine'), 'replay')} className="!text-ink"><RotateCcw size={18} /></Btn>
+        <Btn square flat onClick={actions.onToggleLoop} disabled={noLoop} aria-pressed={loop.on && !noLoop}
+          title={noLoop ? t('transport.loopNo') : withKey(t(loop.on ? 'transport.loopOn' : 'transport.loopOff'), 'loop')}
+          className={`relative ${loop.on && !noLoop ? '!text-accent' : '!text-ink'}`}>
+          <Repeat size={18} />
+          {loop.on && !noLoop && loop.times > 0 && <span className="absolute right-0.5 bottom-0.5 text-[10px] font-semibold leading-none">{loop.times}</span>}
+        </Btn>
         <button type="button" onClick={e => { e.currentTarget.blur(); actions.onTogglePlay(); }} title={withKey(isPlaying ? t('transport.pauseSpace') : t('transport.playSpace'), 'play')}
           aria-label={isPlaying ? t('transport.pauseSpace') : t('transport.playSpace')}
           className="press w-12 h-12 rounded-full bg-accent text-white flex items-center justify-center">
@@ -72,6 +82,10 @@ const Transport: React.FC<{ menuItems: MenuItem[]; menuPanel?: React.ReactNode; 
           <div className="px-2.5 py-2 flex flex-col gap-2">
             <span className="text-xs text-mute">{t('transport.speed')}</span>
             <Seg size="sm" className="w-full [&>button]:flex-1" value={playbackSpeed} onChange={actions.onSetPlaybackSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
+          </div>
+          <div className="px-2.5 py-2 flex flex-col gap-2">
+            <span className="text-xs text-mute">{t('transport.loopTimes')}</span>
+            <Seg size="sm" className="w-full [&>button]:flex-1" value={loop.times} onChange={setLoopTimes} options={LOOP_TIMES.map(n => ({ value: n, label: n ? t('transport.loopN', { n }) : t('transport.loopForever') }))} />
           </div>
           {menuPanel}
           <div className="my-1.5 mx-1 border-t border-line" />

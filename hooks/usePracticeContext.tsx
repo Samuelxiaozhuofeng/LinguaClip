@@ -46,6 +46,7 @@ export interface PracticeContextActions {
   onToggleSavedList: (show: boolean) => void;
   onTogglePlay: () => void;
   onReplayCurrent: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number) => void;
+  onToggleLoop: () => void;
   onSetStepReplay: (play: (() => void) | null) => void; // non-null: replays call this instead
   onSkip: (direction: 'prev' | 'next') => void;
   onProgressSeek: (e: React.ChangeEvent<HTMLInputElement>) => void;

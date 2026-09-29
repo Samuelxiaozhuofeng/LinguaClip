@@ -16,6 +16,7 @@ import DefinitionPanel from './DefinitionPanel';
 import { useLookup } from '../hooks/useLookup';
 import { tokenizeText, getWordTokens } from '../utils/textTokenizer';
 import { useT } from '../utils/i18n';
+import { useLoop } from '../utils/loop';
 import { detectLang } from '../utils/dictionary';
 import { canCloze, pickBlanks } from '../utils/aiDrills';
 import { getClozeJob, prepareCloze, subscribeCloze } from '../utils/clozePrep';
@@ -35,6 +36,7 @@ const Studio: React.FC = () => {
   const { practice, video, saved, anki, actions } = usePracticeContext();
   const { videoId, subtitles, fullSubtitles, sections, currentSectionIndex, currentSubtitleIndex, mode, showSectionComplete, showComplete, learningMode, blurPlaybackMode, videoName, watch } = practice;
   const { videoRef, videoSrc, isPlaying } = video;
+  const loopOn = useLoop().on; // a looping line never stops by itself: keep the way on
   const { savedIds, showSavedList } = saved;
   const { ankiStatus } = anki;
 
@@ -334,7 +336,7 @@ const Studio: React.FC = () => {
               ) : isBlur ? (
                 <div className="flex flex-col items-center gap-5">
                   <BlurLine text={currentSub.text} onLookup={lookup} onReveal={() => record('blur')} />
-                  {isStep && !isPlaying && (
+                  {isStep && (!isPlaying || loopOn) && (
                     <Btn tone="accent" onClick={actions.onContinue}>{t('common.nextLine')} <ChevronRight size={16} /></Btn>
                   )}
                 </div>

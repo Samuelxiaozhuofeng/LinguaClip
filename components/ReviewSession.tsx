@@ -6,13 +6,14 @@ import { patchVideoRecord } from '../utils/videoStorage';
 import { getAudioPaddingConfig, getWordFront } from '../utils/storage';
 import { videoSrcFromPath, pickVideoPath } from '../utils/desktop';
 import { findSource, type Source } from '../utils/clips';
-import { Play, RotateCcw, X } from 'lucide-react';
+import { Play, Repeat, RotateCcw, X } from 'lucide-react';
 import { Btn } from './ui';
 import { IS_WINDOWS } from '../utils/platform';
 import DictationLine from './DictationLine';
 import DefinitionPanel from './DefinitionPanel';
 import { WordFace, GradeBar } from './WordReview';
-import { matches } from '../utils/shortcuts';
+import { matches, formatCombo, getCombo } from '../utils/shortcuts';
+import { useLoop, getLoop, setLoopOn, loopMore, holdPageLoop, LOOP_GAP_MS } from '../utils/loop';
 import { useLookup } from '../hooks/useLookup';
 import { detectLang } from '../utils/dictionary';
 import type { DeckLang } from '../utils/deckLang';
@@ -141,13 +142,50 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
     addWord({ videoId: card.videoId, videoName: card.videoName, videoPath, text: card.text, start: card.start, end: card.end }, word, definition, example).catch(console.error);
   };
 
+  // Line loop (docs/loop.md): a sentence card being typed replays after each play, until
+  // it has played enough times; a one-word play resumes the loop without counting.
+  const loop = useLoop();
+  const plays = useRef(0);
+  const loopTimer = useRef(0);
+  const loopable = useRef(false);
+  loopable.current = !!card && !isWord && mode === PracticeMode.INPUT;
+  const clearLoop = () => { window.clearTimeout(loopTimer.current); loopTimer.current = 0; };
+  useEffect(() => { plays.current = 0; clearLoop(); }, [card, mode]);
+  useEffect(() => { const release = holdPageLoop(); return () => { release(); clearLoop(); }; }, []);
+  const ended = (counted: boolean) => () => {
+    if (counted) plays.current++;
+    clearLoop();
+    const ok = () => loopable.current && loopMore(plays.current);
+    if (ok()) loopTimer.current = window.setTimeout(() => { if (ok() && clip.ref.current?.paused) playRef.current(); }, LOOP_GAP_MS);
+  };
+
   const playCard = (then?: () => void, fromRatio?: number, toRatio?: number) => {
     if (!card || !source) return;
+    clearLoop();
+    if (!then && !isWord) {
+      if (fromRatio === undefined) plays.current = 0; // a manual replay counts afresh
+      then = ended(fromRatio === undefined || toRatio === undefined);
+    }
     const [from, to] = clipOf(card);
     if (fromRatio === undefined) return clip.play(source, from, to, then);
     const [a, b] = playSpan(card.start, card.end, fromRatio, toRatio);
     clip.play(source, a, toRatio === undefined ? to : b, then);
   };
+
+  const playRef = useRef(() => {});
+  playRef.current = () => { const [from, to] = clipOf(card!); if (source) clip.play(source, from, to, ended(true)); };
+  const toggleLoop = () => {
+    const on = !getLoop().on;
+    setLoopOn(on);
+    if (on && loopable.current && clip.ref.current?.paused) playCard();
+  };
+  const loopBtn = (
+    <Btn square flat onClick={toggleLoop} aria-pressed={loop.on} title={`${t(loop.on ? 'transport.loopOn' : 'transport.loopOff')} (${formatCombo(getCombo('loop'))})`}
+      className={`relative ${loop.on ? '!text-accent' : '!text-ink'}`}>
+      <Repeat size={18} />
+      {loop.on && loop.times > 0 && <span className="absolute right-0.5 bottom-0.5 text-[10px] font-semibold leading-none">{loop.times}</span>}
+    </Btn>
+  );
 
   const timedWords = useTimedWords(card?.videoId, card?.start ?? 0, card?.end ?? 0);
 
@@ -228,8 +266,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
   // Enter takes the suggested grade; nothing reaches the page underneath.
   const defOpen = def.word !== null;
   const front0 = isWord && !turned && !!path && splitsReady && !done;
-  const keys = useRef({ onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard });
-  keys.current = { onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard };
+  const keys = useRef({ onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop });
+  keys.current = { onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return; // Esc / Enter inside a Japanese input method
@@ -238,6 +276,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
       const k = keys.current;
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (k.defOpen) k.closeDef(); else k.onClose(); return; }
       const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
+      if (!k.done && !k.defOpen && matches(e, 'loop')) { e.preventDefault(); e.stopPropagation(); k.toggleLoop(); return; }
       if (!typing && !k.done && !k.defOpen) {
         const hit = (run: () => void) => { e.preventDefault(); e.stopPropagation(); run(); };
         if (k.front0 && plain && e.code === 'Space') return hit(k.turn);
@@ -338,6 +377,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
         ) : !hidden && path && (
           <footer className="shrink-0 h-[76px] flex items-center justify-center gap-2 text-ink">
             <Btn square flat onClick={() => playCard()} title={t('transport.replayLine')} aria-label={t('transport.replayLine')} className="!text-ink"><RotateCcw size={18} /></Btn>
+            {!isWord && loopBtn}
             <button type="button" onClick={e => { e.currentTarget.blur(); playCard(); }} aria-label={t('transport.playSpace')}
               className="press w-12 h-12 rounded-full bg-accent text-white flex items-center justify-center"><Play size={19} fill="currentColor" className="ml-0.5" /></button>
             <Btn size="sm" flat onClick={next}>{t('session.skip')}</Btn>

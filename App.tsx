@@ -26,6 +26,7 @@ import { parseSRT } from './utils/srtParser';
 import { t, useLang } from './utils/i18n';
 import { markInterruptedJobs, startImportListener } from './utils/importJob';
 import { matches } from './utils/shortcuts';
+import { getLoop, setLoopOn, useLoop } from './utils/loop';
 import { countLine } from './utils/today';
 import { deleteCards, keepOrphans, orphanCards } from './utils/review';
 import { startClips } from './utils/clips';
@@ -128,6 +129,9 @@ export default function App() {
     else if (currentVideoId) saveProgress(currentVideoId, fullSubtitles.length, currentSectionIndex);
   }, [currentVideoId, fullSubtitles.length, currentSectionIndex, saveProgress]);
 
+  const loopOkRef = useRef<() => boolean>(() => true);
+  const toggleLoopRef = useRef(() => {});
+
   const {
     videoRef, videoSrc, setVideoSrc, isPlaying, volume, playbackSpeed, progress,
     setIsPlaying, setVolume, setPlaybackSpeed, togglePlay,
@@ -152,6 +156,7 @@ export default function App() {
       }
     },
     onShouldAutoAdvanceChange: setShouldAutoAdvance,
+    loopOk: () => loopOkRef.current(),
   });
 
   const {
@@ -324,6 +329,17 @@ export default function App() {
     if (stepReplayRef.current) stepReplayRef.current();
     else handleReplayCurrent(autoAdvanceAfter, fromRatio, toRatio);
   }, [handleReplayCurrent]);
+  // The line loop waits while a breakdown step or an Anki recording owns playback.
+  loopOkRef.current = () => !stepReplayRef.current && ankiStatus !== 'recording';
+  const blurContinuous = learningMode === LearningMode.BLUR && blurPlaybackMode === BlurPlaybackMode.CONTINUOUS;
+  // Turning it on while the line sits stopped plays it straight away.
+  const toggleLoop = () => {
+    if (blurContinuous) return;
+    const on = !getLoop().on;
+    setLoopOn(on);
+    if (on && !isPlaying && mode !== PracticeMode.FEEDBACK) replayCurrent();
+  };
+  toggleLoopRef.current = toggleLoop;
   const togglePlayOrStep = useCallback(() => {
     if (stepReplayRef.current && !isPlaying) stepReplayRef.current();
     else togglePlay();
@@ -364,14 +380,16 @@ export default function App() {
   // --- Keyboard ---
   // Recording an Anki clip plays the video itself: nothing may move or pause it meanwhile.
   const recording = ankiStatus === 'recording';
+  const loopOn = useLoop().on;
   const unlessRecording = <A extends unknown[]>(fn: (...a: A) => void) => (...a: A) => { if (!recording) fn(...a); };
   const inPractice = appState === AppState.PRACTICE && !showSectionComplete && !showComplete && !recording;
-  const blurStepPaused = learningMode === LearningMode.BLUR && blurPlaybackMode === BlurPlaybackMode.SENTENCE_BY_SENTENCE && !isPlaying;
+  const blurStepPaused = learningMode === LearningMode.BLUR && blurPlaybackMode === BlurPlaybackMode.SENTENCE_BY_SENTENCE && (!isPlaying || loopOn); // a looping line never stops by itself
 
   const keyboardShortcuts = useMemo(() => ([
     { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'replay'), handler: () => replayCurrent() },
     { code: 'Space', shiftKey: false, preventDefault: true, allowInEditable: false, condition: () => inPractice, handler: () => togglePlayOrStep() },
     { code: 'Enter', preventDefault: true, allowInEditable: false, condition: () => inPractice && (mode === PracticeMode.FEEDBACK || blurStepPaused), handler: () => handleContinue() },
+    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'loop'), handler: () => toggleLoopRef.current() },
     { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'prev'), handler: () => handleSkip('prev') },
     { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'next'), handler: () => handleSkip('next') },
     { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'skipLine'), handler: () => handleSkip('next') },
@@ -419,6 +437,7 @@ export default function App() {
         onToggleSavedList: setShowSavedList,
         onTogglePlay: unlessRecording(togglePlayOrStep),
         onReplayCurrent: unlessRecording(replayCurrent),
+        onToggleLoop: unlessRecording(toggleLoop),
         onSetStepReplay: setStepReplay,
         onSkip: unlessRecording(handleSkip),
         onProgressSeek: unlessRecording(handleProgressSeek),

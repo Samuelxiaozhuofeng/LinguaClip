@@ -14,6 +14,7 @@ export interface UseVideoControllerParams {
   onModeChange?: (mode: PracticeMode) => void;
   onAutoAdvance?: () => void;
   onShouldAutoAdvanceChange?: (value: boolean) => void;
+  loopOk?: () => boolean;
 }
 
 export interface UseVideoControllerReturn {
@@ -50,7 +51,8 @@ export function useVideoController(params: UseVideoControllerParams): UseVideoCo
     jumpGaps,
     onModeChange,
     onAutoAdvance,
-    onShouldAutoAdvanceChange
+    onShouldAutoAdvanceChange,
+    loopOk
   } = params;
 
   // Create video ref internally
@@ -84,7 +86,8 @@ export function useVideoController(params: UseVideoControllerParams): UseVideoCo
     jumpGaps,
     onModeChange,
     onAutoAdvance,
-    onShouldAutoAdvanceChange
+    onShouldAutoAdvanceChange,
+    loopOk
   });
 
   return {

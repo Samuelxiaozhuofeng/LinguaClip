@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Subtitle, PracticeMode, LearningMode, BlurPlaybackMode } from '../types';
 import { playSpan } from '../utils/wordTimes';
+import { loopMore, pageLoopHeld, LOOP_GAP_MS } from '../utils/loop';
 
 export interface UseVideoPlayerParams {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -18,6 +19,7 @@ export interface UseVideoPlayerParams {
   onModeChange?: (mode: PracticeMode) => void;
   onAutoAdvance?: () => void;
   onShouldAutoAdvanceChange?: (value: boolean) => void;
+  loopOk?: () => boolean; // false while something else owns playback (breakdown, Anki recording)
 }
 
 export interface UseVideoPlayerReturn {
@@ -48,7 +50,8 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
     onSubtitleEnded,
     onModeChange,
     onAutoAdvance,
-    onShouldAutoAdvanceChange
+    onShouldAutoAdvanceChange,
+    loopOk
   } = params;
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -62,6 +65,30 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
   // "Play just this word": pause here, not at the line's end. Any pause, seek or new line drops it.
   const stopAtRef = useRef<number | null>(null);
   useEffect(() => { if (!isPlaying) stopAtRef.current = null; }, [isPlaying]);
+
+  // Line loop (docs/loop.md): full plays of this line so far, and the pending replay.
+  const playsRef = useRef(0);
+  const loopTimer = useRef<number | null>(null);
+  const clearLoop = () => { if (loopTimer.current) window.clearTimeout(loopTimer.current); loopTimer.current = null; };
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const loopOkRef = useRef(loopOk);
+  loopOkRef.current = loopOk;
+  const playLineRef = useRef<() => void>(() => {});
+  // Stopped at the line's end (counted) or after a one-word play: replay the line in a moment.
+  // Checked again when it fires, so a play, a new line, a submit or turning it off meanwhile wins.
+  const scheduleLoop = (counted: boolean) => {
+    if (counted) playsRef.current++;
+    clearLoop();
+    const ok = () => loopMore(playsRef.current) && !pageLoopHeld() && modeRef.current !== PracticeMode.FEEDBACK && (loopOkRef.current?.() ?? true);
+    if (!ok()) return;
+    loopTimer.current = window.setTimeout(() => {
+      loopTimer.current = null;
+      if (videoRef.current?.paused && ok()) playLineRef.current();
+    }, LOOP_GAP_MS);
+  };
+  useEffect(() => { playsRef.current = 0; clearLoop(); }, [currentSubtitleIndex, subtitles]);
+  useEffect(() => clearLoop, []);
 
   // A new line list (next section, next custom set) counts as a new line even
   // when the index stays 0, or a one-line set would never advance.
@@ -88,6 +115,7 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
       stopAtRef.current = null;
       video.pause();
       setIsPlaying(false);
+      if (!shouldAutoAdvance) scheduleLoop(false);
     } else if (isPlaying) {
       if (video.currentTime >= currentSub.endTime) {
         if (isBlurContinuous || watching) {
@@ -104,6 +132,7 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
           setIsPlaying(false);
           video.currentTime = currentSub.endTime;
 
+          if (!shouldAutoAdvance) scheduleLoop(true);
           if (learningMode === LearningMode.BLUR) {
             // Sentence-by-sentence mode waits for user action between lines.
           } else {
@@ -186,8 +215,10 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
 
   // fromRatio / toRatio: where in the line to start and stop (0..1), for "play
   // from this word" and "play just this word"; without toRatio the line plays to its end.
-  const handleReplayCurrent = useCallback((autoAdvanceAfter: boolean = false, fromRatio: number = 0, toRatio?: number) => {
+  const handleReplayCurrent = useCallback((autoAdvanceAfter: boolean = false, fromRatio: number = 0, toRatio?: number, fromLoop = false) => {
     const sub = subtitles[currentSubtitleIndex];
+    clearLoop();
+    if (!fromLoop && fromRatio === 0 && toRatio === undefined) playsRef.current = 0; // a manual replay counts afresh
     if (videoRef.current && sub) {
       const [from, to] = playSpan(sub.startTime, sub.endTime, fromRatio, toRatio);
       videoRef.current.currentTime = from;
@@ -197,12 +228,14 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
       onShouldAutoAdvanceChange?.(autoAdvanceAfter);
     }
   }, [subtitles, currentSubtitleIndex, videoRef, onShouldAutoAdvanceChange]);
+  playLineRef.current = () => handleReplayCurrent(false, 0, undefined, true);
 
   const togglePlay = useCallback(() => {
     if (!videoRef.current) return;
 
     const isBlurContinuous = learningMode === LearningMode.BLUR && blurPlaybackMode === BlurPlaybackMode.CONTINUOUS;
 
+    clearLoop();
     if (isPlaying) {
       videoRef.current.pause();
       setIsPlaying(false);
@@ -236,6 +269,7 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
     if (videoRef.current && videoRef.current.duration) {
       const newTime = (Number(e.target.value) / 100) * videoRef.current.duration;
       stopAtRef.current = null;
+      clearLoop();
       videoRef.current.currentTime = newTime;
       setProgress(Number(e.target.value));
       
