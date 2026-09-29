@@ -2,18 +2,36 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 两个仓库（开源版 / Pro 版）
+## 免费 / Pro 与两个仓库
 
-- 本机这份 = **私有仓库** `linguaclip-pro`（`origin`），所有开发都在这里。Pro 功能（目前是阅读器）的代码只放 `pro/`。
-- **公开仓库** `video_dictation_local` 不直接改：`scripts/sync-public.sh "说明"` 把已提交的代码去掉 `pro/`、`TASKS.md`、`docs/pricing.md`（收费策略）导到 `~/.cache/linguaclip-public`，在那里跑类型检查 + 打包，通过才提交；`--push` 才推上去（推送前要用户点头）。本机没有指向公开仓库的 remote，别加回来。
-- 免费代码只通过 `@pro` 用 Pro 功能：有 `pro/` 时指向 `pro/index.ts`，没有时指向 `utils/proStub.ts`（`vite.config.ts` / `tsconfig.json`）。两边导出同样的名字；Pro 功能不在时（如 `Reader` 为 null）入口要自己消失。**免费代码里不许直接 import `pro/` 下的文件**，同步脚本会拦。
-- 新增 Pro 功能：代码放 `pro/`，在 `pro/index.ts` 和 `utils/proStub.ts` 各加一个同名导出。
+**本文件会同步到公开仓库**：别在这里写定价、收款、还没公开的功能计划，那些放 `docs/private/`。整个 `docs/` 只在私有仓库，同步时跳过。
+
+- **用户手上只有一个 App**：官方安装包 = 带 `pro/` 的构建。免费功能随便用；Pro 功能（目前是「先读字幕」阅读器）没激活时试用，激活后解锁。不存在「免费版 / Pro 版」两个下载。
+- **本机这份 = 私有仓库** `linguaclip-pro`（`origin`），所有开发都在这里；Pro 代码只放 `pro/`。
+- **公开仓库** `video_dictation_local`（AGPL，给自己编译的人）不直接改：`scripts/sync-public.sh "说明"` 把已提交的代码去掉 `pro/`、`TASKS.md`、`docs/` 导到 `~/.cache/linguaclip-public`，在那里跑类型检查 + 打包，通过才提交；`--push` 才推上去。本机没有指向公开仓库的 remote，别加回来；那个副本每次同步都会被整个覆盖，别在里面改。
+- 免费代码只通过 `@pro` 用 Pro 功能：有 `pro/` 时指向 `pro/index.ts`，没有时指向 `utils/proStub.ts`（`vite.config.ts` / `tsconfig.json`）。两边导出同样的名字；**免费代码里不许直接 import `pro/` 下的文件**，同步脚本会拦。
+
+### 新功能先问：放免费还是 Pro
+
+新功能 / 交互变化（过产品门那一类），动手前**和产品门一起问用户归哪边**，给推荐、用交互语言写后果，例如「放进 Pro：没激活的人在 X 看到灰色 Pro 标，试用名额用完弹购买 / 放进免费：所有人都能用，开源版里也有」。用户拍板前不动手。
+
+推荐时的默认判断（最终用户定）：
+- **倾向 Pro**：新的学习形态或新内容来源（如阅读器），AI 深度参与的高级增强，明显「多出来一层」的功能。
+- **倾向免费**：现有免费功能的改进和打磨、导入 / 转录 / 平台兼容等基础链路、Pro 功能也要用的公共能力（查词、分段、日语分词等放免费侧，Pro 调用）。
+- **不用问**：修 bug、改 Pro 功能本身（阅读器的改进默认 Pro）、改文案样式。
+
+Pro 功能落地清单：
+1. 代码放 `pro/`；在 `pro/index.ts` 和 `utils/proStub.ts` 各加同名导出（stub 给 null / 空函数）。开源版里入口要自己消失，不留 Pro 字样。
+2. 入口挂灰色小「Pro」标（激活后不显示），走 `pro/license.ts` 的试用：所有 Pro 功能**共用 3 个名额**（按记录 id，真打开才扣，用过的一直能用，删了不还）；要拦的入口先过 gate 再做别的（如先拦再让用户选文件），被拦后回到原来的面板。**价格不写进 App**。
+3. 文案 zh / en 都加（文案文件是公开的，同样别写定价）。
+4. 两种都验：浏览器里测 Pro；再跑一次 `scripts/sync-public.sh "说明"`（只准备不推）证明开源版能编译，入口变化大时在副本里起 dev 看一眼免费版。
+5. 碰了免费侧的改动做完、验完，问用户要不要同步开源版；推送（私有 / 公开）都要用户点头。
 
 ## 先读 docs/
 
-`docs/README.md` 是这个仓库的技术速览（目录表 + 本地数据结构），`docs/desktop.md` 是 Tauri 桌面版的运行时约定，`docs/import.md` 是自动生成字幕那条链路，`docs/watch.md` 是看剧模式。动手前读对应那份，别只靠代码猜。
+`docs/README.md` 是这个仓库的技术速览（目录表 + 本地数据结构），`docs/desktop.md` 是 Tauri 桌面版的运行时约定，`docs/import.md` 是自动生成字幕那条链路，`docs/watch.md` 是看剧模式；私有仓库另有 `docs/private/`（收费策略、试用规则、收款与激活方案，以及还没公开的功能规划），碰收费 / Pro 相关先读那里。动手前读对应那份，别只靠代码猜。（`docs/` 只在私有仓库；从公开仓库拿到代码的人没有这些文档。）
 
-根目录除 `README.md`（上游 AI Studio 模板，内容已过时）外的 `*_FIX.md` / `*_SUMMARY.md` / `拆分计划*.md` 是早期开发日志，不是当前规格。
+根目录除 `README.md`（面向用户的产品介绍，中英双语）外的 `*_FIX.md` / `*_SUMMARY.md` / `拆分计划*.md` 是早期开发日志，不是当前规格。
 
 ## 命令
 
@@ -21,7 +39,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npx tauri dev          # 桌面开发：自己拉起 vite:3000（Claude 验功能走浏览器，见「验证流程」）
 npx tsc --noEmit       # 类型检查
 npm run release        # tauri build --bundles app，然后装进 /Applications
-npm run release:public # 同一个包再压成 src-tauri/target/LinguaClip.zip，发 GitHub Release 用（包里不带任何 AI 密钥，AI 全靠用户在设置里自填）
+npm run release:public # 同一个包再压成 src-tauri/target/LinguaClip.zip，发 GitHub Release 用（在本机打 = 带 Pro + 试用的官方包；包里不带任何 AI 密钥，AI 全靠用户在设置里自填；激活码能真验证之前别外发）
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust 侧（import.rs 有单测）
 node test-resegment.mjs   # 切句逻辑自检（bundle 真模块，不是复制逻辑）
 node test-sections.mjs    # 分段逻辑自检（同上）
@@ -32,19 +50,26 @@ node test-japanese.mjs    # 日语切词组 + 假名判对 + AI 校对回答校�
 node test-custom.mjs      # 定制练习：挑句（水平区间、时长、照常播放 / 跳过、从头再挑）+ AI 分级回答 / 缓存校验
 node test-wordtimes.mjs   # 逐词时间：空格对到 words.json 的哪一段 + ⌘K / ⌘J 实际播放区间
 node test-watch.mjs       # 看剧：某一秒屏幕上是哪一句（lineAt）
+node test-review.mjs      # 复习卡：排期 + 匹配（utils/review.ts）
+node test-breakdown.mjs   # 拆句：AI 回答校验 + 步骤（utils/aiDrills.ts）
+node test-breakdown-prep.mjs # 拆句后台任务：批量回答解析、挑句、缓存（utils/breakdownPrep.ts）
+node test-ailimit.mjs     # 各类 AI 请求并发上限（utils/aiLimit.ts）
 node pro/test-reader.mjs  # 阅读器：查过的词怎么记（日语原形）+ 看剧时认回来、AI 译文回答 / 缓存 / 删视频中途取消
+node pro/test-license.mjs # Pro 试用：3 个不同视频、用过的一直能读、弹窗只有点「购买」才开网页、存储坏了不锁人
 ```
 
-前端没有测试框架，逻辑自检就是根目录那几个 `node` 脚本（`test-tokenizer.js` / `test-flexible-case.js` 是早期的复制逻辑版，参考价值有限）。
+前端没有测试框架，逻辑自检就是根目录和 `pro/` 里那几个 `node` 脚本（`test-tokenizer.js` / `test-flexible-case.js` 是早期的复制逻辑版，参考价值有限）。
 
 ## 验证流程（改完功能必须走）
 
-**Mac 正式包本机打；Windows 包只由 GitHub CI 打**（`.github/workflows/windows.yml`，只在用户说要打时手动触发：`gh workflow run windows.yml`，push 不会触发；先在 Windows 上跑一遍下载组件 + 转录的真链路，安装包挂在那次运行的 artifact 里），用户在 Windows 虚拟机里验。平台差异收口在 `src-tauri/src/paths.rs`（目录、起子进程）和 `utils/platform.ts`；Windows 抽声音用 `decode.rs`（symphonia），不用 afconvert。用户验收在正式包里；交给用户之前，Claude 先在浏览器里把改动走一遍，拿到真实运行证据。顺序：
+**Mac 正式包本机打；Windows 包只由 GitHub CI 打**（`.github/workflows/windows.yml`，只在用户说要打时手动触发：`gh workflow run windows.yml`，push 不会触发；现在会跑在私有仓库上，打出来带 Pro，但会消耗私有仓库的 GitHub Actions 免费额度（Windows 按 2 倍计、mac-intel 按 10 倍计），触发前跟用户说一声；先在 Windows 上跑一遍下载组件 + 转录的真链路，安装包挂在那次运行的 artifact 里），用户在 Windows 虚拟机里验。平台差异收口在 `src-tauri/src/paths.rs`（目录、起子进程）和 `utils/platform.ts`；Windows 抽声音用 `decode.rs`（symphonia），不用 afconvert。用户验收在正式包里；交给用户之前，Claude 先在浏览器里把改动走一遍，拿到真实运行证据。顺序：
 
 1. `npx tsc --noEmit` + 相关 `node test-*.mjs`（碰 Rust 再跑 `cargo test`）。
 2. **浏览器实测**：启 `npm run dev`（`.claude/launch.json` 的 `dev`），按用户会做的操作走一遍改动，外加改动碰过的原有操作；截图给用户当证据。**首选 Playwright**（后台无头跑、不占用户屏幕、脚本可重跑）；Chrome 插件（claude-in-chrome）只在要用用户已登录的账号、或用户想亲眼看着操作时用——实测它开在用户正在用的 Chrome 里、视频加载不出来、标签页会中途丢失。没有内置浏览器（`preview_start`）时也走 Playwright。
    - Playwright 不装进项目：在 scratchpad 里 `npm i playwright`，`chromium.launch({ channel: 'chrome' })` 用系统 Chrome（自带 H.264，样片 mp4 才能播），`newPage({ locale: 'zh-CN' })`。
-   - 按钮用 `getByRole('button', { name })` 找，名字照 `utils/i18n.zh.ts` 抄，别猜（如「添加视频」「选择本机视频」「选字幕文件」「开始练习」；开始练习后先弹「这次怎么练」面板，`getByRole('dialog', { name: '这次怎么练' })` 里点「开始练习」才进练习页；练法选 `radio` 「看剧」再点「开始看剧」进看剧页，面板会记住上次选的练法）。
+   - 按钮用 `getByRole('button', { name })` 找，名字照 `utils/i18n.zh.ts` 抄，别猜（如「添加视频」「选择本机视频」「选字幕文件」「开始练习」；开始练习后先弹「这次怎么练」面板，`getByRole('dialog', { name: '这次怎么练' })` 里点「开始练习」才进练习页；练法选 `radio` 「看剧」再点「开始看剧」进看剧页，面板会记住上次选的练法；「先读字幕」这个 radio 的名字里带「Pro」小标，用 `{ name: /先读字幕/ }` 找，点「开始阅读」进阅读页）。
+   - Pro 试用：名单在 localStorage `linguaclip_pro_trial`（记录 id 数组），`page.evaluate` 写成 3 个假 id 就能测「用完」；`linguaclip_pro_license` 写 `{"key":"x"}` 当已激活。通用弹窗按标题找：`getByRole('dialog', { name: /免费体验已用完/ })`。
+   - 同时起两个 vite（如私有这份 + 开源副本）会共用 `node_modules/.vite` 缓存互相覆盖，页面报 Invalid hook call：一次只起一个，换目录时加 `--force`。
    - 进听写：先 `page.evaluate` 设 `window.__MOCK__`（`jaDict` / `pick`），添加视频 → 开始练习 → `video.play()`，等 `section input` 出现（先放完一遍听、再切到输入）；`fill` 各格后按 Enter 交卷，答案行 `section p button` 可点查词，释义弹窗是 `[role=dialog]`。
 3. `npm run release` 打正式包装进 /Applications，给用户验收路径（打开哪里 → 做什么 → 应该看到什么），并写明哪些是浏览器验不到、需要真机确认的。
 
@@ -72,6 +97,7 @@ node pro/test-reader.mjs  # 阅读器：查过的词怎么记（日语原形）+
 - **导入任务的监听挂在 `App.tsx`，不是首页**：用户在练习页时首页已卸载，挂错地方会漏进度事件。
 - **文案两份都要改**：`utils/i18n.zh.ts` 和 `utils/i18n.en.ts`。
 - **视频扩展名收口在 `utils/desktop.ts`**：`PLAYABLE`（播放器直接能开的 mp4/mov/m4v，和 `src-tauri/src/convert.rs` 的 `plays_natively` 必须一致）+ `VIDEO_EXTS`（再加导入时自动转 mp4 的格式）。添加视频的选文件 / 拖入认全部；「重新选视频」只认 PLAYABLE。
+- **Tailwind 只扫 `tailwind.config.js` 的 `content` 里列的目录**（已含 `pro/`）：新建顶层代码目录要加进去，否则只在那里用的样式不生成、排版静默乱掉。
 - **UI 原语全在 `components/ui.tsx`**，风格是影院浮层（浅灰底 + 白面板、一个朱红主色 + 灰阶，别加第二种颜色；设计稿 https://claude.ai/artifact/14B5VBpJi7UJHrzwHeiMHB），新界面用这些原语，不要另起一套。
 
 ## 碰数据前
@@ -79,3 +105,5 @@ node pro/test-reader.mjs  # 阅读器：查过的词怎么记（日语原形）+
 IndexedDB `linguaclip_db`：`videos` 表是练习记录本体；`fileHandles` 表是网页时代遗留，已不读不写——**不要删表、不要动 DB_VERSION**。改记录用 `patchVideoRecord(id, {...})` 按字段更新，别整条覆盖。结构变更要先过设计门。
 
 复习卡片在另一个库 `linguaclip_review`（`utils/review.ts`，见 docs/README.md「本地数据」）。收藏 = 卡片的 `saved` 位，localStorage `linguaclip_saved_lines` 只读不写。复习库的写入一律不许挡住练习（fire-and-forget + catch）。
+
+Pro 试用 / 激活（`pro/license.ts`）：localStorage `linguaclip_pro_trial`（用过 Pro 功能的记录 id）、`linguaclip_pro_license`（激活状态，激活码做好后才写）。删视频**不许**清试用名单；读坏当空名单（不锁人）。以后「一码限 3 台电脑」的设备 id 要从 Rust 取硬件 UUID，不能存 localStorage。

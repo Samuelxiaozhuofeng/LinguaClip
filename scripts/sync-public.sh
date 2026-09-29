@@ -1,6 +1,6 @@
 #!/bin/bash
 # Syncs the open-source repo from this one (the private repo, linguaclip-pro):
-# the committed tree of HEAD, minus pro/ and TASKS.md, lands as one commit on the
+# the committed tree of HEAD, minus pro/, TASKS.md and docs/, lands as one commit on the
 # public repo's main. Uncommitted changes here are never exported.
 #
 #   scripts/sync-public.sh "说明"   prepare + check that the free build compiles, then commit (no push)
@@ -10,7 +10,7 @@ set -euo pipefail
 PUBLIC=https://github.com/Samuelxiaozhuofeng/video_dictation_local.git
 ROOT=$(git rev-parse --show-toplevel)
 WORK="$HOME/.cache/linguaclip-public"
-EXCLUDE=(pro TASKS.md docs/pricing.md)
+EXCLUDE=(pro TASKS.md docs)
 
 if [ "${1:-}" = "--push" ]; then
   [ "$(git -C "$WORK" remote get-url origin)" = "$PUBLIC" ] || { echo "工作副本不是公开仓库：$WORK"; exit 1; }
