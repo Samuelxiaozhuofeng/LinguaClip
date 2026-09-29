@@ -7,7 +7,7 @@ import Shell from './components/Shell';
 import Studio from './components/Studio';
 import WatchPage from './components/WatchPage';
 import CustomPanel, { PanelChoice, nextPick, paceOf } from './components/CustomPanel';
-import { Reader, readerGate } from '@pro';
+import { ProHost, Reader, readerGate } from '@pro';
 import type { ReadBy } from './utils/storage';
 import { DialogHost, dialog } from './components/Dialog';
 import { PracticeProvider } from './hooks/usePracticeContext';
@@ -449,6 +449,7 @@ export default function App() {
           onStart={choice => { setPanel(null); openPractice(panel.record, panel.lm, choice); }}
         />
       )}
+      {ProHost && <ProHost />}
       <DialogHost />
     </>
   );

@@ -34,6 +34,8 @@ const mock = {
   tools: { whisper: false, youtube: false },
   jaDict: false,
   convertTool: false,
+  // device_info: set another id to act as a second computer (license seats)
+  device: { id: 'browser-dev-device-0001', name: 'Browser (dev)' },
   clipFail: null as string | null, // set to make cut_clip fail with this message
   probe: { duration: 19, video: 'h264', audio: 'ac3', subtitles: [] as unknown[] },
   emit,
@@ -119,6 +121,8 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
       const file = args.model === 'light' ? 'ggml-small-q5_1.bin' : 'ggml-large-v3-turbo-q5_0.bin';
       return { dir, model: mock.tools.whisper ? `${dir}/${file}` : null };
     }
+    case 'device_info':
+      return mock.device;
     case 'trash_file':
       return null; // recorded in __MOCK__.calls; real files untouched
     case 'tts':

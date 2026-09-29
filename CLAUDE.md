@@ -2,13 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 开工先读 docs/progress.md
+
+每次会话开始（含上下文压缩后）先读 `docs/progress.md`：现在做到哪、在等用户什么、下一步。它代替全局规则里的 `TASKS.md`（这个项目不用 TASKS.md）。
+- 写给 AI 看：短句、不写背景和理由（理由在 docs 各专题文档或提交说明里），全文控制在 40 行内。
+- 状态一变就改：开始做、做完一步、转成等用户、用户拍板。长任务的步骤清单也写在这里，做完一项勾一项。
+- **做完收工的条目直接删掉**，不留历史（历史在 git log）。改完随这次改动一起提交。
+
 ## 免费 / Pro 与两个仓库
 
 **本文件会同步到公开仓库**：别在这里写定价、收款、还没公开的功能计划，那些放 `docs/private/`。整个 `docs/` 只在私有仓库，同步时跳过。
 
 - **用户手上只有一个 App**：官方安装包 = 带 `pro/` 的构建。免费功能随便用；Pro 功能（目前是「先读字幕」阅读器）没激活时试用，激活后解锁。不存在「免费版 / Pro 版」两个下载。
 - **本机这份 = 私有仓库** `linguaclip-pro`（`origin`），所有开发都在这里；Pro 代码只放 `pro/`。
-- **公开仓库** `video_dictation_local`（AGPL，给自己编译的人）不直接改：`scripts/sync-public.sh "说明"` 把已提交的代码去掉 `pro/`、`TASKS.md`、`docs/` 导到 `~/.cache/linguaclip-public`，在那里跑类型检查 + 打包，通过才提交；`--push` 才推上去。本机没有指向公开仓库的 remote，别加回来；那个副本每次同步都会被整个覆盖，别在里面改。
+- **公开仓库** `video_dictation_local`（AGPL，给自己编译的人）不直接改：`scripts/sync-public.sh "说明"` 把已提交的代码去掉 `pro/`、`docs/` 导到 `~/.cache/linguaclip-public`，在那里跑类型检查 + 打包，通过才提交；`--push` 才推上去。本机没有指向公开仓库的 remote，别加回来；那个副本每次同步都会被整个覆盖，别在里面改。
 - 免费代码只通过 `@pro` 用 Pro 功能：有 `pro/` 时指向 `pro/index.ts`，没有时指向 `utils/proStub.ts`（`vite.config.ts` / `tsconfig.json`）。两边导出同样的名字；**免费代码里不许直接 import `pro/` 下的文件**，同步脚本会拦。
 
 ### 新功能先问：放免费还是 Pro
@@ -29,7 +36,14 @@ Pro 功能落地清单：
 
 ## 先读 docs/
 
-`docs/README.md` 是这个仓库的技术速览（目录表 + 本地数据结构），`docs/desktop.md` 是 Tauri 桌面版的运行时约定，`docs/import.md` 是自动生成字幕那条链路，`docs/watch.md` 是看剧模式；私有仓库另有 `docs/private/`（收费策略、试用规则、收款与激活方案，以及还没公开的功能规划），碰收费 / Pro 相关先读那里。动手前读对应那份，别只靠代码猜。（`docs/` 只在私有仓库；从公开仓库拿到代码的人没有这些文档。）
+`docs/README.md` 是这个仓库的技术速览（目录表 + 本地数据结构），`docs/desktop.md` 是 Tauri 桌面版的运行时约定，`docs/import.md` 是自动生成字幕那条链路，`docs/watch.md` 是看剧模式；私有仓库另有 `docs/private/`（收费策略、试用规则、收款与激活方案，官网 / 激活服务器 / 域名的部署和密钥位置（`infra.md`），以及还没公开的功能规划），碰收费 / Pro 相关先读那里。动手前读对应那份，别只靠代码猜。（`docs/` 只在私有仓库；从公开仓库拿到代码的人没有这些文档。）
+
+### 文档先行（每个 AI 会话都要守）
+
+- **新功能 / 改行为：先写文档，再写代码。** 动手前把方案写进对应的 docs 文档（没有就新建一份，并在 `docs/README.md` 目录表加一行）：做成什么效果、数据存哪、接口 / 命令、「四个万一」怎么处理、怎么验收。要过产品门 / 设计门的，审的就是这份文档；用户拍板、门过了才开始写代码。
+- **代码和文档同一次提交**：做的过程中方案变了，先改文档再改代码；提交时文档必须跟代码说的是同一件事。实测发现的外部行为（如某接口真实返回和官方文档不一样）当场记进文档。
+- **进度写 `docs/progress.md`**，规格写专题文档，两边不重复。
+- 改文案 / 样式、修小 bug 不用写文档；修 bug 发现规格本身写错了，顺手改文档。
 
 根目录除 `README.md`（面向用户的产品介绍，中英双语）外的 `*_FIX.md` / `*_SUMMARY.md` / `拆分计划*.md` 是早期开发日志，不是当前规格。
 
@@ -39,7 +53,7 @@ Pro 功能落地清单：
 npx tauri dev          # 桌面开发：自己拉起 vite:3000（Claude 验功能走浏览器，见「验证流程」）
 npx tsc --noEmit       # 类型检查
 npm run release        # tauri build --bundles app，然后装进 /Applications
-npm run release:public # 同一个包再压成 src-tauri/target/LinguaClip.zip，发 GitHub Release 用（在本机打 = 带 Pro + 试用的官方包；包里不带任何 AI 密钥，AI 全靠用户在设置里自填；激活码能真验证之前别外发）
+npm run release:public # 同一个包再压成 src-tauri/target/LinguaClip.zip，发 GitHub Release 用（在本机打 = 带 Pro + 试用的官方包；包里不带任何 AI 密钥，AI 全靠用户在设置里自填；Creem 正式模式上线、正式码真激活过之前别外发）
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust 侧（import.rs 有单测）
 node test-resegment.mjs   # 切句逻辑自检（bundle 真模块，不是复制逻辑）
 node test-sections.mjs    # 分段逻辑自检（同上）
@@ -55,7 +69,7 @@ node test-breakdown.mjs   # 拆句：AI 回答校验 + 步骤（utils/aiDrills.t
 node test-breakdown-prep.mjs # 拆句后台任务：批量回答解析、挑句、缓存（utils/breakdownPrep.ts）
 node test-ailimit.mjs     # 各类 AI 请求并发上限（utils/aiLimit.ts）
 node pro/test-reader.mjs  # 阅读器：查过的词怎么记（日语原形）+ 看剧时认回来、AI 译文回答 / 缓存 / 删视频中途取消
-node pro/test-license.mjs # Pro 试用：3 个不同视频、用过的一直能读、弹窗只有点「购买」才开网页、存储坏了不锁人
+node pro/test-license.mjs # Pro 试用 + 激活：3 个不同视频、弹窗按钮、凭证规则（验签 / 本机 / 30 天 / 测试码）、出错不锁人、退款或被移除删记录、并发不写回旧凭证
 ```
 
 前端没有测试框架，逻辑自检就是根目录和 `pro/` 里那几个 `node` 脚本（`test-tokenizer.js` / `test-flexible-case.js` 是早期的复制逻辑版，参考价值有限）。
@@ -68,7 +82,7 @@ node pro/test-license.mjs # Pro 试用：3 个不同视频、用过的一直能�
 2. **浏览器实测**：启 `npm run dev`（`.claude/launch.json` 的 `dev`），按用户会做的操作走一遍改动，外加改动碰过的原有操作；截图给用户当证据。**首选 Playwright**（后台无头跑、不占用户屏幕、脚本可重跑）；Chrome 插件（claude-in-chrome）只在要用用户已登录的账号、或用户想亲眼看着操作时用——实测它开在用户正在用的 Chrome 里、视频加载不出来、标签页会中途丢失。没有内置浏览器（`preview_start`）时也走 Playwright。
    - Playwright 不装进项目：在 scratchpad 里 `npm i playwright`，`chromium.launch({ channel: 'chrome' })` 用系统 Chrome（自带 H.264，样片 mp4 才能播），`newPage({ locale: 'zh-CN' })`。
    - 按钮用 `getByRole('button', { name })` 找，名字照 `utils/i18n.zh.ts` 抄，别猜（如「添加视频」「选择本机视频」「选字幕文件」「开始练习」；开始练习后先弹「这次怎么练」面板，`getByRole('dialog', { name: '这次怎么练' })` 里点「开始练习」才进练习页；练法选 `radio` 「看剧」再点「开始看剧」进看剧页，面板会记住上次选的练法；「先读字幕」这个 radio 的名字里带「Pro」小标，用 `{ name: /先读字幕/ }` 找，点「开始阅读」进阅读页）。
-   - Pro 试用：名单在 localStorage `linguaclip_pro_trial`（记录 id 数组），`page.evaluate` 写成 3 个假 id 就能测「用完」；`linguaclip_pro_license` 写 `{"key":"x"}` 当已激活。通用弹窗按标题找：`getByRole('dialog', { name: /免费体验已用完/ })`。
+   - Pro 试用：名单在 localStorage `linguaclip_pro_trial`（记录 id 数组），`page.evaluate` 写成 3 个假 id 就能测「用完」；已激活要真走一遍激活：设置底部「输入激活码」输测试码（dev 下认测试模式的码，码和中转状态见私有文档），`window.__MOCK__.device = { id, name }` 换一台「电脑」；测完在「管理」里取消激活，别占着名额。通用弹窗按标题找：`getByRole('dialog', { name: /免费体验已用完/ })`。
    - 同时起两个 vite（如私有这份 + 开源副本）会共用 `node_modules/.vite` 缓存互相覆盖，页面报 Invalid hook call：一次只起一个，换目录时加 `--force`。
    - 进听写：先 `page.evaluate` 设 `window.__MOCK__`（`jaDict` / `pick`），添加视频 → 开始练习 → `video.play()`，等 `section input` 出现（先放完一遍听、再切到输入）；`fill` 各格后按 Enter 交卷，答案行 `section p button` 可点查词，释义弹窗是 `[role=dialog]`。
 3. `npm run release` 打正式包装进 /Applications，给用户验收路径（打开哪里 → 做什么 → 应该看到什么），并写明哪些是浏览器验不到、需要真机确认的。
@@ -106,4 +120,4 @@ IndexedDB `linguaclip_db`：`videos` 表是练习记录本体；`fileHandles` �
 
 复习卡片在另一个库 `linguaclip_review`（`utils/review.ts`，见 docs/README.md「本地数据」）。收藏 = 卡片的 `saved` 位，localStorage `linguaclip_saved_lines` 只读不写。复习库的写入一律不许挡住练习（fire-and-forget + catch）。
 
-Pro 试用 / 激活（`pro/license.ts`）：localStorage `linguaclip_pro_trial`（用过 Pro 功能的记录 id）、`linguaclip_pro_license`（激活状态，激活码做好后才写）。删视频**不许**清试用名单；读坏当空名单（不锁人）。以后「一码限 3 台电脑」的设备 id 要从 Rust 取硬件 UUID，不能存 localStorage。
+Pro 试用 / 激活（`pro/license.ts`）：localStorage `linguaclip_pro_trial`（用过 Pro 功能的记录 id）、`linguaclip_pro_license`（激活码 + 本机激活编号 + 中转签名的凭证）。删视频**不许**清试用名单；读坏当空名单（不锁人）。「是不是 Pro」只在 `pro/license.ts` 一处算：只认验签通过的凭证，网络错 / 服务器故障**绝不**当成没激活，只有签名过的非 active 才删记录。设备 id 从 Rust `device_info` 取（硬件 UUID 的 hash），读不到就报错，**不许**退回随机 id（每次重装会多占一个名额）。

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Btn, Card } from './ui';
 import { t } from '../utils/i18n';
 
@@ -34,6 +34,7 @@ export const dialog = {
 
 export const DialogHost: React.FC = () => {
   const [p, setP] = useState<Pending | null>(null);
+  const card = useRef<HTMLDivElement>(null); // this dialog's own buttons
 
   useEffect(() => {
     listener = setP;
@@ -50,6 +51,9 @@ export const DialogHost: React.FC = () => {
       e.stopPropagation(); // nothing underneath the dialog should react to keys
       if (e.key === 'Escape') dismiss();
       if (e.key === 'Enter') {
+        // A button tabbed to answers for itself (Tab to "Cancel" + Enter must not confirm).
+        const el = e.target as HTMLElement | null;
+        if (el?.tagName === 'BUTTON' && card.current?.contains(el)) return;
         if (!p.safeEnter) close(true);
         else { e.preventDefault(); dismiss(); }
       }
@@ -67,7 +71,7 @@ export const DialogHost: React.FC = () => {
           <h3 className="text-xl font-semibold leading-tight">{p.title}</h3>
         </div>
         {p.body && <p className="px-6 pb-5 text-sm text-mute leading-relaxed whitespace-pre-line">{p.body}</p>}
-        <div className="px-6 pt-2 pb-6 flex justify-end gap-3">
+        <div ref={card} className="px-6 pt-2 pb-6 flex justify-end gap-3">
           {p.kind === 'confirm' && <Btn onClick={() => close(false)}>{p.cancel}</Btn>}
           <Btn tone={p.kind === 'confirm' && p.tone === 'shade' ? 'ink' : 'accent'} onClick={() => close(true)} autoFocus={!p.safeEnter}>{p.ok}</Btn>
         </div>

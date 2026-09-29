@@ -13,3 +13,5 @@ export const readerGate = async (_id: string): Promise<boolean> => false;
 export const readerTrial = (_id: string): ReaderTrial => ({ pro: false, used: 0, limit: 0, mine: false });
 // Bottom line of Settings; null = the sponsor link stays.
 export const ProFooter: React.FC | null = null;
+// Activation / manage dialogs + license check at launch, mounted once at the root.
+export const ProHost: React.FC | null = null;

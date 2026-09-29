@@ -7,6 +7,7 @@ mod convert;
 #[cfg(test)]
 mod cloud_live_tests;
 mod decode;
+mod device;
 mod groq;
 mod import;
 mod ja_dict;
@@ -49,6 +50,7 @@ pub fn run() {
       clips::cut_clip,
       clips::sweep_clips,
       clips::clips_info,
+      device::device_info,
       trash_file
     ])
     .run(tauri::generate_context!())

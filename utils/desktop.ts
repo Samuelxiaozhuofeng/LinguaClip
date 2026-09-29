@@ -78,6 +78,9 @@ export const sweepClips = (keep: string[]) => invoke<number>('sweep_clips', { ke
 export const clipsInfo = () => invoke<{ dir: string; bytes: number }>('clips_info');
 export const clipPath = async (file: string) => join(await ownDir(), 'clips', file);
 
+// Stable per-computer id (hash of the hardware UUID) + display name, for license seats.
+export const deviceInfo = () => invoke<{ id: string; name: string }>('device_info');
+
 export type SubTrack = { index: number; lang: string | null; title: string | null; codec: string; text: boolean };
 export type VideoProbe = { duration: number | null; video: string | null; audio: string | null; subtitles: SubTrack[] };
 export const probeVideo = (path: string) => invoke<VideoProbe>('probe_video', { path });
