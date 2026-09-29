@@ -474,24 +474,49 @@ pub(crate) fn transcribe(
   wav: &Path,
   stem: &Path,
 ) -> Result<(), String> {
-  let model_s = model.to_str().ok_or_else(|| "transcribe:bad path".to_string())?;
-  let vad_s = vad.to_str().ok_or_else(|| "transcribe:bad path".to_string())?;
-  let wav_s = wav.to_str().ok_or_else(|| "transcribe:bad path".to_string())?;
-  let stem_s = stem.to_str().ok_or_else(|| "transcribe:bad path".to_string())?;
+  let speech = run_whisper(&mut on_pct, whisper, model, Some(vad), dtw, lang, wav, stem)?;
+  // Silero hears speech under a constant music bed (anime, variety shows) as
+  // background: a 25-minute episode came back with 40 s of "speech" and
+  // subtitles that stopped at minute 10. Too little speech for the length =
+  // run the whole audio through again, without VAD.
+  if let Some((speech, total)) = speech {
+    if speech < total * 0.2 {
+      log::error!("vad kept {speech:.0}s of {total:.0}s, transcribing without vad");
+      on_pct(0);
+      run_whisper(&mut on_pct, whisper, model, None, dtw, lang, wav, stem)?;
+    }
+  }
+  Ok(())
+}
+
+// Returns (speech seconds VAD kept, audio seconds) when VAD ran and said so.
+fn run_whisper(
+  on_pct: &mut impl FnMut(u32),
+  whisper: &Path,
+  model: &Path,
+  vad: Option<&Path>,
+  dtw: &str,
+  lang: &str,
+  wav: &Path,
+  stem: &Path,
+) -> Result<Option<(f64, f64)>, String> {
+  let path = |p: &Path| p.to_str().map(str::to_string).ok_or_else(|| "transcribe:bad path".to_string());
   let mut cmd = command(whisper);
   cmd.env("PATH", augmented_path());
   // whisper-cli defaults to at most 4 threads; use every core.
   let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).to_string();
+  cmd.args(["-t", &threads, "-m", &path(model)?, "-l", lang]);
+  match vad {
+    Some(v) => {
+      cmd.args(["--vad", "--vad-model", &path(v)?]);
+    }
+    // Over music and long silences whisper without VAD can loop on one line
+    // (seen: the same sentence 74 times); no carried-over context stops that.
+    None => {
+      cmd.args(["-mc", "0"]);
+    }
+  }
   cmd.args([
-    "-t",
-    &threads,
-    "-m",
-    model_s,
-    "-l",
-    lang,
-    "--vad",
-    "--vad-model",
-    vad_s,
     "-pp",
     // Token-level timestamps via DTW. It only runs with flash attention off,
     // and the aheads preset has to match the model (Tier::dtw).
@@ -499,18 +524,15 @@ pub(crate) fn transcribe(
     "--dtw",
     dtw,
     "-f",
-    wav_s,
+    &path(wav)?,
     "-osrt",
     "-oj",
     "-ojf",
     "-of",
-    stem_s,
+    &path(stem)?,
   ]);
-  // Windows runs on CPU only; whisper-cli defaults to 4 threads. Same output, ~1/3 faster.
-  // macOS uses the GPU, where threads don't matter, so it stays untouched.
-  #[cfg(windows)]
-  cmd.args(["-t", &std::thread::available_parallelism().map_or(4, |n| n.get()).to_string()]);
   let mut last_pct: Option<u32> = None;
+  let (mut speech, mut total) = (0.0, None);
   let (code, err_tail) = run_streaming(cmd, |line| {
     if let Some(pct) = parse_whisper_pct(line) {
       if last_pct != Some(pct) {
@@ -518,20 +540,46 @@ pub(crate) fn transcribe(
         on_pct(pct);
       }
     }
+    match parse_vad_line(line) {
+      Some(VadLine::Total(t)) => total = Some(t),
+      Some(VadLine::Segment(d)) => speech += d,
+      None => {}
+    }
   })
   .map_err(|e| format!("transcribe:{e}"))?;
   if code != 0 {
     return Err(format!("transcribe:{err_tail}"));
   }
-  Ok(())
+  Ok(total.map(|t| (speech, t)))
+}
+
+enum VadLine {
+  Total(f64),
+  Segment(f64),
+}
+
+// whisper's VAD log: "...: detecting speech timestamps in 23838912 samples"
+// (16 kHz) and one "...: VAD segment 3: start = 93.28, end = 93.89 (duration: 0.61)"
+// per kept stretch. No such lines (older build) = no verdict, keep the result.
+fn parse_vad_line(line: &str) -> Option<VadLine> {
+  if let Some(i) = line.find("detecting speech timestamps in ") {
+    let n: f64 = line[i..].split_whitespace().nth(4)?.parse().ok()?;
+    return Some(VadLine::Total(n / 16000.0));
+  }
+  if line.contains("VAD segment ") {
+    let i = line.rfind("(duration: ")?;
+    let d: f64 = line[i + 11..].trim_end_matches(|c: char| c == ')' || c.is_whitespace()).parse().ok()?;
+    return Some(VadLine::Segment(d));
+  }
+  None
 }
 
 // whisper emits sub-word tokens (" mer" + "cado"); a token that does not start
 // with a space continues the word before it. Punctuation rides along with its word.
 pub(crate) fn read_words(json_path: &Path) -> Result<Vec<Word>, String> {
-  let raw = std::fs::read_to_string(json_path).map_err(|e| format!("transcribe:{e}"))?;
+  let raw = std::fs::read(json_path).map_err(|e| format!("transcribe:{e}"))?;
   let doc: serde_json::Value =
-    serde_json::from_str(&raw).map_err(|e| format!("transcribe:{e}"))?;
+    serde_json::from_str(&stray_bytes_as_chars(&raw)).map_err(|e| format!("transcribe:{e}"))?;
   let segments = doc
     .get("transcription")
     .and_then(|v| v.as_array())
@@ -539,6 +587,11 @@ pub(crate) fn read_words(json_path: &Path) -> Result<Vec<Word>, String> {
 
   let mut words: Vec<Word> = Vec::new();
   for seg in segments {
+    // Bytes of a character whisper split across tokens, waiting for the rest,
+    // and the start time of the token they came in.
+    let mut pending: (Vec<u8>, u32) = (Vec::new(), 0);
+    // A segment's first word never joins the last one of the segment before.
+    let first_word_at = words.len();
     let Some(tokens) = seg.get("tokens").and_then(|v| v.as_array()) else {
       return Err("transcribe:segment without tokens".into());
     };
@@ -589,13 +642,21 @@ pub(crate) fn read_words(json_path: &Path) -> Result<Vec<Word>, String> {
       ) else {
         return Err("transcribe:token without offsets".into());
       };
-      let from = to_audio(raw_from).max(0) as u32;
+      let mut from = to_audio(raw_from).max(0) as u32;
       let to = to_audio(raw_to).max(0) as u32;
+      if pending.0.is_empty() {
+        pending.1 = from;
+      } else {
+        from = pending.1;
+      }
+      let text = take_complete_chars(&mut pending.0, text);
       let trimmed = text.trim();
       if trimmed.is_empty() {
         continue;
       }
-      if text.starts_with(' ') || words.is_empty() {
+      // Chinese and Japanese put no spaces between words, so every token there
+      // is a word of its own: one per character or kana run, each with its time.
+      if text.starts_with(' ') || words.len() == first_word_at || trimmed.starts_with(is_cjk) {
         words.push(Word { w: trimmed.to_string(), from, to });
       } else {
         let last = words.last_mut().expect("checked non-empty");
@@ -613,6 +674,68 @@ pub(crate) fn read_words(json_path: &Path) -> Result<Vec<Word>, String> {
     return Err("transcribe:word times out of order".into());
   }
   Ok(words)
+}
+
+// Han, kana and the long-vowel mark: scripts written without spaces between words.
+pub(crate) fn is_cjk(c: char) -> bool {
+  matches!(c, '\u{3005}' | '\u{3040}'..='\u{30FF}' | '\u{31F0}'..='\u{31FF}' | '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' | '\u{FF66}'..='\u{FF9F}')
+}
+
+// whisper cuts tokens on bytes, so one Japanese character can arrive as two
+// tokens, each holding half of it: not UTF-8, and the whole json would be
+// refused. Each stray byte becomes a private-use character (U+F780 + low 7
+// bits) that take_complete_chars turns back into the byte.
+fn stray_bytes_as_chars(raw: &[u8]) -> String {
+  let mut out = String::with_capacity(raw.len());
+  let mut rest = raw;
+  loop {
+    match std::str::from_utf8(rest) {
+      Ok(s) => {
+        out.push_str(s);
+        return out;
+      }
+      Err(e) => {
+        let (good, bad) = rest.split_at(e.valid_up_to());
+        out.push_str(std::str::from_utf8(good).expect("checked valid"));
+        let n = e.error_len().unwrap_or(bad.len());
+        out.extend(bad[..n].iter().map(|&b| char::from_u32(0xF700 + b as u32).expect("in range")));
+        rest = &bad[n..];
+      }
+    }
+  }
+}
+
+// Appends a token's bytes to what an earlier token left unfinished and returns
+// the whole characters; an unfinished tail waits in `pending` for the next token.
+fn take_complete_chars(pending: &mut Vec<u8>, text: &str) -> String {
+  for c in text.chars() {
+    match c as u32 {
+      b @ 0xF780..=0xF7FF => pending.push((b - 0xF700) as u8),
+      _ => pending.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
+    }
+  }
+  let mut out = String::new();
+  let mut rest = std::mem::take(pending);
+  loop {
+    match std::str::from_utf8(&rest) {
+      Ok(s) => {
+        out.push_str(s);
+        return out;
+      }
+      Err(e) => {
+        out.push_str(std::str::from_utf8(&rest[..e.valid_up_to()]).expect("checked valid"));
+        match e.error_len() {
+          // Cut off at the end: the rest of the character is in the next token.
+          None => {
+            *pending = rest[e.valid_up_to()..].to_vec();
+            return out;
+          }
+          // Not part of any character: drop it.
+          Some(n) => rest.drain(..e.valid_up_to() + n),
+        };
+      }
+    }
+  }
 }
 
 // Settings → Transcription: this machine (with a model size) or a cloud service.
@@ -921,6 +1044,49 @@ fn probe_sizes_blocking(url: String) -> Result<QualitySizes, String> {
 mod tests {
   use super::*;
 
+  // LC_WAV=/path/16k.wav [LC_LANG=ja] cargo test … -- --ignored transcribes_sample --nocapture
+  // Uses the Homebrew whisper-cli and ~/.cache/whisper.cpp models; writes next to the wav.
+  #[test]
+  #[ignore]
+  fn transcribes_sample() {
+    let wav = PathBuf::from(std::env::var("LC_WAV").expect("LC_WAV"));
+    let models = home_dir().unwrap().join(".cache/whisper.cpp");
+    let stem = wav.with_extension("");
+    transcribe(
+      |p| eprintln!("{p}%"),
+      Path::new("/opt/homebrew/bin/whisper-cli"),
+      &models.join("ggml-large-v3-turbo.bin"),
+      &models.join("ggml-silero-v5.1.2.bin"),
+      "large.v3.turbo",
+      &std::env::var("LC_LANG").unwrap_or("ja".into()),
+      &wav,
+      &stem,
+    )
+    .unwrap();
+    let srt = std::fs::read_to_string(stem.with_extension("srt")).unwrap();
+    eprintln!("cues: {}", srt.matches("-->").count());
+  }
+
+  // LC_JSON=/path/whisper.json cargo test … -- --ignored reads_sample_words --nocapture
+  #[test]
+  #[ignore]
+  fn reads_sample_words() {
+    let words = read_words(Path::new(&std::env::var("LC_JSON").expect("LC_JSON"))).unwrap();
+    eprintln!("words: {}", words.len());
+    eprintln!("{}", serde_json::to_string(&words).unwrap());
+  }
+
+  #[test]
+  fn reads_vad_log() {
+    let total = "whisper_vad_segments_from_samples: detecting speech timestamps in 23838912 samples";
+    assert!(matches!(parse_vad_line(total), Some(VadLine::Total(t)) if (t - 1489.932).abs() < 0.01));
+    let seg = "whisper_vad_segments_from_probs: VAD segment 3: start = 93.28, end = 93.89 (duration: 0.61)";
+    assert!(matches!(parse_vad_line(seg), Some(VadLine::Segment(d)) if (d - 0.61).abs() < 1e-9));
+    // The later "Including segment" lines repeat the same stretches; don't count them twice.
+    assert!(parse_vad_line("whisper_vad: Including segment 0: 82.47 - 84.13 (duration: 1.66)").is_none());
+    assert!(parse_vad_line("whisper_vad_detect_speech: detecting speech in 23838912 samples").is_none());
+  }
+
   #[test]
   fn reads_padded_whisper_progress() {
     assert_eq!(parse_whisper_pct("whisper_print_progress_callback: progress =  42%"), Some(42));
@@ -1009,6 +1175,42 @@ mod tests {
     assert_eq!(words[0].to, 430, "punctuation extends the word it belongs to");
     assert_eq!(words[1].w, "está");
     assert_eq!(words[1].from, 500);
+  }
+
+  // whisper cut 予 (e4 ba 88) into two tokens: raw bytes, not UTF-8. The json
+  // must still read, the halves join into one character, and Japanese comes
+  // out one word per token, punctuation riding on the word before it.
+  #[test]
+  fn japanese_tokens_with_split_characters() {
+    let tok = |text: &[u8], from: u32, to: u32| {
+      [&br#"{"text":""#[..], text, format!(r#"","offsets":{{"from":{from},"to":{to}}}}}"#).as_bytes()].concat()
+    };
+    let toks: Vec<Vec<u8>> = vec![
+      tok(b"[_BEG_]", 0, 0),
+      tok(b"\xe4\xba", 100, 200),
+      tok(b"\x88", 200, 300),
+      tok("告".as_bytes(), 300, 400),
+      tok("だよ".as_bytes(), 400, 500),
+      tok("。".as_bytes(), 500, 550),
+      tok(b" OK", 600, 700),
+      tok(b"\xff", 700, 720),
+    ];
+    let next = [tok("「".as_bytes(), 800, 850), tok(b"30", 850, 900), tok("分".as_bytes(), 900, 1000)];
+    let raw = [
+      &br#"{"transcription":[{"tokens":["#[..], &toks.join(&b","[..]),
+      br#"]},{"tokens":["#, &next.join(&b","[..]), br#"]}]}"#,
+    ].concat();
+    let dir = std::env::temp_dir().join(format!("ja-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("t.json");
+    std::fs::write(&path, &raw).unwrap();
+    let words = read_words(&path).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    let got: Vec<(&str, u32, u32)> = words.iter().map(|w| (w.w.as_str(), w.from, w.to)).collect();
+    // The stray 0xff belongs to no character and is dropped.
+    // The next segment opens with a bracket and a number: they start a word of
+    // their own, not the tail of "OK".
+    assert_eq!(got, [("予", 100, 300), ("告", 300, 400), ("だよ。", 400, 550), ("OK", 600, 700), ("「30", 800, 900), ("分", 900, 1000)]);
   }
 
   #[test]

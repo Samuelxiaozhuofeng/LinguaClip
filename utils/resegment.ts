@@ -159,10 +159,18 @@ export function buildSrt(words: Word[], starts: number[]): string {
   return blocks.join('\n');
 }
 
+// Chinese / Japanese words arrive one character or kana run each, so the model
+// cannot see where a word ends and cuts through the middle of them ("向か / おうよ").
+// whisper's own lines there are whole sentences already: keep them.
+const CJK = /[\u3005\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/u;
+export function mostlyCjk(words: Word[]): boolean {
+  return words.filter(w => CJK.test(w.w)).length * 2 > words.length;
+}
+
 // Returns null whenever anything at all goes wrong; the caller then keeps
 // whisper's own line breaks, which are usable, just longer.
 export async function resegment(words: Word[]): Promise<string | null> {
-  if (!canResegment() || words.length === 0) return null;
+  if (!canResegment() || words.length === 0 || mostlyCjk(words)) return null;
   try {
     const groups = batches(words);
     // An hour of speech is a dozen-odd calls at ~12s each; run them side by

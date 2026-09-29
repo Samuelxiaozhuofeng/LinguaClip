@@ -25,7 +25,7 @@ await build({
     },
   }],
 });
-const { buildSrt, resegment } = await import(out);
+const { buildSrt, mostlyCjk, resegment } = await import(out);
 
 const words = (...spec) => spec.map(([w, from, to]) => ({ w, from, to }));
 
@@ -53,6 +53,15 @@ const words = (...spec) => spec.map(([w, from, to]) => ({ w, from, to }));
   assert.equal(lengths.length, 1, 'buildSrt itself does not chop');
   // resegment applies the ceiling; with no router configured it bows out.
   assert.equal(await resegment(w), null, 'no router configured -> keep whisper lines');
+}
+
+// Japanese / Chinese keep whisper's own lines; a stray Latin word does not
+// change that, nor a Japanese name in a Spanish video.
+{
+  assert.equal(mostlyCjk(words(['大', 0, 1], ['人', 1, 2], ['OK', 2, 3])), true);
+  assert.equal(mostlyCjk(words(['今天', 0, 1], ['天气', 1, 2], ['很好。', 2, 3])), true);
+  assert.equal(mostlyCjk(words(['「好的', 0, 1], ['」「谢谢', 1, 2], ['OK', 2, 3])), true, 'opening quotes still count');
+  assert.equal(mostlyCjk(words(['Hoy', 0, 1], ['vamos', 1, 2], ['a', 2, 3], ['東京', 3, 4])), false);
 }
 
 // Hours are carried, not dropped, on a long video.

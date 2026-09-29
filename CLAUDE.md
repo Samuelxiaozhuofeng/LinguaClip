@@ -74,6 +74,11 @@ node pro/test-license.mjs # Pro 试用 + 激活：3 个不同视频、弹窗按�
 
 前端没有测试框架，逻辑自检就是根目录和 `pro/` 里那几个 `node` 脚本（`test-tokenizer.js` / `test-flexible-case.js` 是早期的复制逻辑版，参考价值有限）。
 
+## 推送与发版
+
+- 用户说「推送 / 更新一下」这类：推私有仓库，再 `scripts/sync-public.sh` 同步开源版并 `--push`。不发 Release，不动官网。
+- 用户说「**发版**」：按私有文档 `docs/private/infra.md`「发版」走完：打三个平台的包 → GitHub Release → 官网下载同步更新。缺一步都不算发完。
+
 ## 验证流程（改完功能必须走）
 
 **Mac 正式包本机打；Windows 包只由 GitHub CI 打**（`.github/workflows/windows.yml`，只在用户说要打时手动触发：`gh workflow run windows.yml`，push 不会触发；现在会跑在私有仓库上，打出来带 Pro，但会消耗私有仓库的 GitHub Actions 免费额度（Windows 按 2 倍计、mac-intel 按 10 倍计），触发前跟用户说一声；先在 Windows 上跑一遍下载组件 + 转录的真链路，安装包挂在那次运行的 artifact 里），用户在 Windows 虚拟机里验。平台差异收口在 `src-tauri/src/paths.rs`（目录、起子进程）和 `utils/platform.ts`；Windows 抽声音用 `decode.rs`（symphonia），不用 afconvert。用户验收在正式包里；交给用户之前，Claude 先在浏览器里把改动走一遍，拿到真实运行证据。顺序：

@@ -289,7 +289,8 @@ fn srt_time(ms: u64) -> String {
 // may be a single character. Walk the (punctuated) segment text alongside it:
 // each word takes its exact spelling from the text plus the punctuation around
 // it, and an entry not preceded by a space in the text continues the previous
-// word — the same rule the local engine uses for whisper's sub-word tokens.
+// word — the same rule the local engine uses for whisper's sub-word tokens —
+// except in Chinese / Japanese, where every entry is a word.
 // Segments are joined with a space, so a word never runs across two of them.
 fn punctuate(resp: &Resp, offset_ms: u64) -> Vec<Word> {
   let text: Vec<char> = resp
@@ -332,7 +333,8 @@ fn punctuate(resp: &Resp, offset_ms: u64) -> Vec<Word> {
     while b < text.len() && !text[b].is_whitespace() && !text[b].is_alphanumeric() {
       b += 1; // closing punctuation: , . ? ! "
     }
-    let joins = a > 0 && a == end && !text[a - 1].is_whitespace() && !out.is_empty();
+    // Chinese / Japanese have no spaces, yet each entry stays its own word, timed.
+    let joins = a > 0 && a == end && !text[a - 1].is_whitespace() && !out.is_empty() && !crate::import::is_cjk(text[letters[s].1]);
     let piece: String = text[a.max(end)..b].iter().collect();
     if joins {
       let last = out.last_mut().expect("checked non-empty");
@@ -380,11 +382,11 @@ mod tests {
   }
 
   #[test]
-  fn cjk_characters_merge_per_segment() {
+  fn cjk_entries_stay_separate_words() {
     let r = resp(&["今天天气很好。", "我们走吧！"], &[("今天", 0.0, 0.3), ("天气", 0.3, 0.6), ("很好", 0.6, 0.9), ("我们", 1.0, 1.2), ("走吧", 1.2, 1.5)]);
     let w = punctuate(&r, 0);
-    assert_eq!(texts(&w), ["今天天气很好。", "我们走吧！"]);
-    assert_eq!((w[1].from, w[1].to), (1000, 1500));
+    assert_eq!(texts(&w), ["今天", "天气", "很好。", "我们", "走吧！"]);
+    assert_eq!((w[4].from, w[4].to), (1200, 1500));
   }
 
   #[test]
