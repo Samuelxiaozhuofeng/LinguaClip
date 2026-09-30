@@ -8,18 +8,12 @@ export type ProReader = React.FC<{ record: VideoRecord; by: ReadBy; onExit: (loo
 
 export const Reader: ProReader | null = null;
 export const cancelTrans = async (_id: string): Promise<void> => {};
-export type ReaderTrial = { pro: boolean; used: number; limit: number; mine: boolean };
-export const readerGate = async (_id: string): Promise<boolean> => false;
-export const readerTrial = (_id: string): ReaderTrial => ({ pro: false, used: 0, limit: 0, mine: false });
 // Podcasts (docs/private/podcast.md): the add dialog / empty page, the listening page for
-// records with no picture, and their trial. null = no podcast tab, "watch" as before.
+// records with no picture. null = no podcast tab, "watch" as before.
 export type ProPodcastPicker = React.FC<{ onClose?: () => void; onOpen: (r: VideoRecord) => void }>;
 export const PodcastPicker: ProPodcastPicker | null = null;
 export type ProListen = React.FC<{ record: VideoRecord; onExit: () => void; onPractice: () => void; onOpen?: (r: VideoRecord) => void }>;
 export const Listen: ProListen | null = null;
-export const listenGate = async (_id: string): Promise<boolean> => false;
-export const listenTrial = (_id: string): ReaderTrial => ({ pro: false, used: 0, limit: 0, mine: false });
-export const refundListen = (_id: string): void => {};
 export const podcastRate = (_r: VideoRecord): string | null => null; // an episode card's speaking rate
 // Bottom line of Settings; null = the sponsor link stays.
 export const ProFooter: React.FC | null = null;

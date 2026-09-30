@@ -113,7 +113,7 @@ export type LocalImportOptions = {
   trashOriginal?: boolean;
 };
 
-// A podcast episode: its record id is picked first (the trial counts it before the import starts).
+// A podcast episode: its record id is picked first.
 export type PodcastImport = { id: string; title: string; audio: string; lang: string; podcast: NonNullable<VideoRecord['podcast']> };
 
 function pendingRecord(

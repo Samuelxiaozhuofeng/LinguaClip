@@ -5,7 +5,7 @@ import { useT } from '../utils/i18n';
 import { parseSRT } from '../utils/srtParser';
 import { canCloze } from '../utils/aiDrills';
 import { CustomConfig, CustomPick, LEVELS, Level, LineLabel, MINUTE_CHOICES, PaceMode, pickCustom } from '../utils/customPick';
-import { Listen, Reader, listenTrial, readerTrial } from '@pro';
+import { Listen, Reader } from '@pro';
 import { isAudioRecord } from '../utils/desktop';
 import { getLevelJob, prepareLevels, readLevels, subscribeLevels } from '../utils/levelPrep';
 import { formatTimeCode, getCustomConfig, getCustomPos, getWatchPrefs, ReadBy, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
@@ -51,10 +51,8 @@ const CustomPanel: React.FC<{
   const [watch, setWatch] = useState(() => (listen && !!record.podcast) || getWatchPrefs().chosen);
   // A podcast episode: intensive listening or dictation only (docs/private/podcast.md, 精听).
   const pod = listen && !!record.podcast;
-  const heard = listenTrial(record.id);
   const [read, setRead] = useState(false);
   const [readBy, setReadBy] = useState<ReadBy>(() => getWatchPrefs().readBy);
-  const trial = readerTrial(record.id);
   const subs = useMemo(() => parseSRT(record.subtitleText), [record.subtitleText]);
   const [labels, setLabels] = useState<LineLabel[] | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -164,20 +162,10 @@ const CustomPanel: React.FC<{
             }} options={[
               { value: 'all', label: t(pod ? 'custom.allListen' : 'custom.all') },
               ...(pod ? [] : [{ value: 'custom', label: t('custom.custom') }]),
-              { value: 'watch', label: !listen ? t('custom.watch') : heard.pro ? t('custom.listen') : <>{t('custom.listen')}<span className="ml-1.5 px-1 rounded bg-shade text-[10px] font-semibold text-mute align-middle">Pro</span></> },
-              ...(Reader && !pod ? [{ value: 'read', label: trial.pro ? t('custom.read') : <>{t('custom.read')}<span className="ml-1.5 px-1 rounded bg-shade text-[10px] font-semibold text-mute align-middle">Pro</span></> }] : []),
+              { value: 'watch', label: t(listen ? 'custom.listen' : 'custom.watch') },
+              ...(Reader && !pod ? [{ value: 'read', label: t('custom.read') }] : []),
             ]} />
           </Row>
-          {read && !trial.pro && (
-            <div className="text-xs text-mute" aria-live="polite">
-              {trial.mine ? t('pro.trialMine') : trial.used < trial.limit ? t('pro.trialLeft', { n: trial.limit - trial.used }) : t('pro.trialOver', { n: trial.limit })}
-            </div>
-          )}
-          {watch && listen && !heard.pro && (
-            <div className="text-xs text-mute" aria-live="polite">
-              {heard.mine ? t('pro.listenMine') : heard.used < heard.limit ? t('pro.listenLeft', { n: heard.limit - heard.used }) : t('pro.listenOver', { n: heard.limit })}
-            </div>
-          )}
           {read && (
             <Row label={t('custom.readBy')} hint={t(readBy === 'section' ? 'custom.readBySectionHint' : 'custom.readByAllHint')}>
               <Seg<ReadBy> size="sm" value={readBy} onChange={setReadBy} options={[

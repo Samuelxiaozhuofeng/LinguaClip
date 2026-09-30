@@ -13,14 +13,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **本文件会同步到公开仓库**：别在这里写定价、收款、还没公开的功能计划，那些放 `docs/private/`。整个 `docs/` 只在私有仓库，同步时跳过。
 
-- **用户手上只有一个 App**：官方安装包 = 带 `pro/` 的构建。免费功能随便用；Pro 功能（目前是「先读字幕」阅读器）没激活时试用，激活后解锁。不存在「免费版 / Pro 版」两个下载。
+- **用户手上只有一个 App**：官方安装包 = 带 `pro/` 的构建。目前**所有功能对所有人免费、不拦不计次**，Pro 功能（阅读器、播客）只是「不开源、只在官方包里」；激活码 = 支持者身份，不解锁任何功能。不存在「免费版 / Pro 版」两个下载。
 - **本机这份 = 私有仓库** `linguaclip-pro`（`origin`），所有开发都在这里；Pro 代码只放 `pro/`。
 - **公开仓库** `video_dictation_local`（AGPL，给自己编译的人）不直接改：`scripts/sync-public.sh "说明"` 把已提交的代码去掉 `pro/`、`docs/` 导到 `~/.cache/linguaclip-public`，在那里跑类型检查 + 打包，通过才提交；`--push` 才推上去。本机没有指向公开仓库的 remote，别加回来；那个副本每次同步都会被整个覆盖，别在里面改。
 - 免费代码只通过 `@pro` 用 Pro 功能：有 `pro/` 时指向 `pro/index.ts`，没有时指向 `utils/proStub.ts`（`vite.config.ts` / `tsconfig.json`）。两边导出同样的名字；**免费代码里不许直接 import `pro/` 下的文件**，同步脚本会拦。
 
 ### 新功能先问：放免费还是 Pro
 
-新功能 / 交互变化（过产品门那一类），动手前**和产品门一起问用户归哪边**，给推荐、用交互语言写后果，例如「放进 Pro：没激活的人在 X 看到灰色 Pro 标，试用名额用完弹购买 / 放进免费：所有人都能用，开源版里也有」。用户拍板前不动手。
+新功能 / 交互变化（过产品门那一类），动手前**和产品门一起问用户归哪边**，给推荐、用交互语言写后果，例如「放进 Pro：官方 App 里所有人都能用，但代码不开源，自己编译的开源版里没有 / 放进免费：官方 App 和开源版里都有」。用户拍板前不动手。
 
 推荐时的默认判断（最终用户定）：
 - **倾向 Pro**：新的学习形态或新内容来源（如阅读器），AI 深度参与的高级增强，明显「多出来一层」的功能。
@@ -29,7 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Pro 功能落地清单：
 1. 代码放 `pro/`；在 `pro/index.ts` 和 `utils/proStub.ts` 各加同名导出（stub 给 null / 空函数）。开源版里入口要自己消失，不留 Pro 字样。
-2. 入口挂灰色小「Pro」标（激活后不显示），走 `pro/license.ts` 的试用：所有 Pro 功能**共用 3 个名额**（按记录 id，真打开才扣，用过的一直能用，删了不还）；要拦的入口先过 gate 再做别的（如先拦再让用户选文件），被拦后回到原来的面板。**价格不写进 App**。
+2. 入口**不挂 Pro 标、不拦、不计次**（试用机制已删，以后真要收费得先和用户重新定规则）。**价格不写进 App**。
 3. 文案 zh / en 都加（文案文件是公开的，同样别写定价）。
 4. 两种都验：浏览器里测 Pro；再跑一次 `scripts/sync-public.sh "说明"`（只准备不推）证明开源版能编译，入口变化大时在副本里起 dev 看一眼免费版。
 5. 碰了免费侧的改动做完、验完，问用户要不要同步开源版；推送（私有 / 公开）都要用户点头。
@@ -71,7 +71,7 @@ node test-ailimit.mjs     # 各类 AI 请求并发上限（utils/aiLimit.ts）
 node test-localdict.mjs   # 本地词典：点的词查哪些候选、变位跳原形、Yomitan 排版转释义（读 dev/fixtures/dict-sample.json 真样本）
 node pro/test-reader.mjs  # 阅读器：查过的词怎么记（日语原形）+ 看剧时认回来、AI 译文回答 / 缓存 / 删视频中途取消
 node pro/test-podcast.mjs # 播客：粘贴框认链接、时长、下载文件名、转录语言、推荐节目单（每种语言三档）、语速、「听懂多少」→ 推荐换节目
-node pro/test-license.mjs # Pro 试用 + 激活：阅读器 3 个不同视频、播客另 3 集（导入时扣、没导完删了退回）、弹窗按钮、凭证规则（验签 / 本机 / 30 天 / 测试码）、出错不锁人、退款或被移除删记录、并发不写回旧凭证
+node pro/test-license.mjs # 支持者激活：凭证规则（验签 / 本机 / 30 天 / 测试码）、出错不锁人、退款或被移除删记录、并发不写回旧凭证
 ```
 
 前端没有测试框架，逻辑自检就是根目录和 `pro/` 里那几个 `node` 脚本（`test-tokenizer.js` / `test-flexible-case.js` 是早期的复制逻辑版，参考价值有限）。
@@ -88,8 +88,8 @@ node pro/test-license.mjs # Pro 试用 + 激活：阅读器 3 个不同视频、
 1. `npx tsc --noEmit` + 相关 `node test-*.mjs`（碰 Rust 再跑 `cargo test`）。
 2. **浏览器实测**：启 `npm run dev`（`.claude/launch.json` 的 `dev`），按用户会做的操作走一遍改动，外加改动碰过的原有操作；截图给用户当证据。**首选 Playwright**（后台无头跑、不占用户屏幕、脚本可重跑）；Chrome 插件（claude-in-chrome）只在要用用户已登录的账号、或用户想亲眼看着操作时用——实测它开在用户正在用的 Chrome 里、视频加载不出来、标签页会中途丢失。没有内置浏览器（`preview_start`）时也走 Playwright。
    - Playwright 不装进项目：在 scratchpad 里 `npm i playwright`，`chromium.launch({ channel: 'chrome' })` 用系统 Chrome（自带 H.264，样片 mp4 才能播），`newPage({ locale: 'zh-CN' })`。
-   - 按钮用 `getByRole('button', { name })` 找，名字照 `utils/i18n.zh.ts` 抄，别猜（如「添加视频」「选择本机视频」「选字幕文件」「开始练习」；开始练习后先弹「这次怎么练」面板，`getByRole('dialog', { name: '这次怎么练' })` 里点「开始练习」才进练习页；练法选 `radio` 「看剧」再点「开始看剧」进看剧页，面板会记住上次选的练法；「先读字幕」这个 radio 的名字里带「Pro」小标，用 `{ name: /先读字幕/ }` 找，点「开始阅读」进阅读页）。
-   - Pro 试用：名单在 localStorage `linguaclip_pro_trial`（记录 id 数组），`page.evaluate` 写成 3 个假 id 就能测「用完」；已激活要真走一遍激活：设置底部「输入激活码」输测试码（dev 下认测试模式的码，码和中转状态见私有文档），`window.__MOCK__.device = { id, name }` 换一台「电脑」；测完在「管理」里取消激活，别占着名额。通用弹窗按标题找：`getByRole('dialog', { name: /免费体验已用完/ })`。
+   - 按钮用 `getByRole('button', { name })` 找，名字照 `utils/i18n.zh.ts` 抄，别猜（如「添加视频」「选择本机视频」「选字幕文件」「开始练习」；开始练习后先弹「这次怎么练」面板，`getByRole('dialog', { name: '这次怎么练' })` 里点「开始练习」才进练习页；练法选 `radio` 「看剧」再点「开始看剧」进看剧页，面板会记住上次选的练法；练法选 radio「先读字幕」，点「开始阅读」进阅读页）。
+   - 支持者（激活）：设置底部两行（「成为支持者 · 输入激活码」+ 用户群）；已激活要真走一遍激活：设置底部「输入激活码」输测试码（dev 下认测试模式的码，码和中转状态见私有文档），`window.__MOCK__.device = { id, name }` 换一台「电脑」；测完在「管理」里取消激活，别占着名额。
    - 同时起两个 vite（如私有这份 + 开源副本）会共用 `node_modules/.vite` 缓存互相覆盖，页面报 Invalid hook call：一次只起一个，换目录时加 `--force`。
    - 进听写：先 `page.evaluate` 设 `window.__MOCK__`（`jaDict` / `pick`），添加视频 → 开始练习 → `video.play()`，等 `section input` 出现（先放完一遍听、再切到输入）；`fill` 各格后按 Enter 交卷，答案行 `section p button` 可点查词，释义弹窗是 `[role=dialog]`。
 3. `npm run release` 打正式包装进 /Applications，给用户验收路径（打开哪里 → 做什么 → 应该看到什么），并写明哪些是浏览器验不到、需要真机确认的。
@@ -127,4 +127,4 @@ IndexedDB `linguaclip_db`：`videos` 表是练习记录本体；`fileHandles` �
 
 复习卡片在另一个库 `linguaclip_review`（`utils/review.ts`，见 docs/README.md「本地数据」）。收藏 = 卡片的 `saved` 位，localStorage `linguaclip_saved_lines` 只读不写。复习库的写入一律不许挡住练习（fire-and-forget + catch）。
 
-Pro 试用 / 激活（`pro/license.ts`）：localStorage `linguaclip_pro_trial`（用过 Pro 功能的记录 id）、`linguaclip_pro_license`（激活码 + 本机激活编号 + 中转签名的凭证）。删视频**不许**清试用名单；读坏当空名单（不锁人）。「是不是 Pro」只在 `pro/license.ts` 一处算：只认验签通过的凭证，网络错 / 服务器故障**绝不**当成没激活，只有签名过的非 active 才删记录。设备 id 从 Rust `device_info` 取（硬件 UUID 的 hash），读不到就报错，**不许**退回随机 id（每次重装会多占一个名额）。
+支持者激活（`pro/license.ts`）：localStorage `linguaclip_pro_license`（激活码 + 本机激活编号 + 中转签名的凭证）；旧的试用名单 `linguaclip_pro_trial` / `linguaclip_pro_listen` 已不读不写。「是不是支持者」只在 `pro/license.ts` 一处算：只认验签通过的凭证，网络错 / 服务器故障**绝不**当成没激活，只有签名过的非 active 才删记录。设备 id 从 Rust `device_info` 取（硬件 UUID 的 hash），读不到就报错，**不许**退回随机 id（每次重装会多占一个名额）。

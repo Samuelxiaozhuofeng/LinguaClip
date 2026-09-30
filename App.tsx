@@ -7,7 +7,7 @@ import Shell from './components/Shell';
 import Studio from './components/Studio';
 import WatchPage from './components/WatchPage';
 import CustomPanel, { PanelChoice, nextPick, paceOf } from './components/CustomPanel';
-import { Listen, PodcastPicker, ProHost, Reader, listenGate, podcastRate, readerGate } from '@pro';
+import { Listen, PodcastPicker, ProHost, Reader, podcastRate } from '@pro';
 import type { ReadBy } from './utils/storage';
 import { DialogHost, dialog } from './components/Dialog';
 import { UpdateDialog } from './components/UpdateUI';
@@ -243,17 +243,6 @@ export default function App() {
     const launch = ++launchRef.current;
     const stale = () => launchRef.current !== launch;
     try {
-      // Pro trial used up: say so before asking for a missing video file, then
-      // back to the panel to pick another way.
-      // Listening is its own route. Do not reuse the video watch choice for
-      // sound-only records: that used to make the start button fall through to
-      // the old video player path when the record shape changed.
-      const listen = choice.kind === 'listen' && !!Listen && isAudioRecord(record);
-      if ((choice.kind === 'read' && !(await readerGate(record.id))) || (listen && !(await listenGate(record.id)))) {
-        if (!stale()) setPanel({ record, lm });
-        return;
-      }
-      if (stale()) return;
       let videoPath = record.videoPath;
       if (!videoPath || !(await pathExists(videoPath))) {
         const ok = await dialog.confirm(t('app.pickVideoTitle'), t('app.pickVideoBody', { name: record.videoFileName }), { ok: t('app.pickVideoOk') });

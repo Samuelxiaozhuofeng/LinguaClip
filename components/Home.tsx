@@ -17,7 +17,7 @@ import AddVideo from './AddVideo';
 import { canCloze } from '../utils/aiDrills';
 import { cancelPrep, getPrepJob, prepStatus, prepareBreakdowns, subscribePrep } from '../utils/breakdownPrep';
 import { cancelLevels } from '../utils/levelPrep';
-import { cancelTrans, refundListen } from '@pro';
+import { cancelTrans } from '@pro';
 import { forgetLooked } from '../utils/readLooked';
 import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribeCloze } from '../utils/clozePrep';
 import { cancelSegments, getSegJob, subscribeSeg } from '../utils/jaSegments';
@@ -233,9 +233,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
     try {
       await VideoStorage.deleteVideoRecord(v.id);
       // Still generating or waiting its turn: stop it, its events are ignored from here on.
-      // A podcast episode that never finished gives its trial slot back (it was never usable).
       if (v.importJob) cancelImport(v.id).catch(console.error);
-      if (v.importJob && v.podcast) refundListen(v.id);
       setVideos(prev => (prev ? prev.filter(x => x.id !== v.id) : prev));
       forgetCustomPos(v.id);
       forgetWatchPos(v.id);
