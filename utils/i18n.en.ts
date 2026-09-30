@@ -45,7 +45,7 @@ export const en = {
   'custom.readByAllHint': 'Every line on one page.',
   'custom.readBySectionHint': 'Part by part, as on the practice page: after each part, watch it before reading on.',
   'custom.startRead': 'Start reading',
-  'custom.justRead': 'Finished reading · {n} words looked up',
+  'custom.justRead': 'Finished reading · {n} words looked up this time',
   'custom.justReadHint': 'While watching, these words are underlined in red on the subtitle; point at one for a reminder.',
 
   // --- App.tsx ---
@@ -727,6 +727,14 @@ export const en = {
   'reader.listen': 'Hear this line',
   'reader.view': 'See this line',
   'reader.done': 'Done reading',
+  'reader.save': 'Save this line (sentence review)',
+  'reader.unsave': 'Unsave',
+  'reader.summaryTitle': 'This reading',
+  'reader.savedEmpty': 'Click the ☆ beside a line while reading to save it; you can dictate them from here.',
+  'reader.keepAll': 'Keep all as word cards ({n})',
+  'reader.keepNoMeaning': 'No meaning found; click the word to look it up again',
+  'reader.keepReading': 'Keep reading',
+  'reader.pickPractice': 'Choose how to practise',
   'reader.sectionDone': 'Part {n} read',
   'reader.allRead': 'All read',
   'reader.sectionInfo': '{n} lines',

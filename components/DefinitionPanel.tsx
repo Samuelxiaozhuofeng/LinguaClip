@@ -44,6 +44,14 @@ const placeBeside = (a: DOMRect | undefined): React.CSSProperties => {
 
 const aiHtml = (d: AI.WordDefinition) => `<b>${d.word}</b> <i>(${d.partOfSpeech})</i><br/>${d.definition}`;
 
+// What a word card gets when kept without opening the card (the reader's summary): the
+// first sense of the entry spelled `prefer` (else the first entry), else the AI's answer.
+export const keepFields = (def: DefinitionState, prefer: string | null): { definition: string; example: string } | null => {
+  const entry = def.dict?.find(e => e.word === prefer) ?? def.dict?.[0];
+  if (entry?.senses[0]) return senseToAnki(entry, entry.senses[0]);
+  return def.data ? { definition: aiHtml(def.data), example: '' } : null;
+};
+
 const SegText: React.FC<{ line: Seg[] }> = ({ line }) => (
   <>
     {line.map((p, k) => (typeof p === 'string'

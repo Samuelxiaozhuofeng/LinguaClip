@@ -252,6 +252,12 @@ export const savedStarts = async (videoId: string): Promise<Set<string>> =>
 
 // Schedules from the stored card (not the round's snapshot) and only touches the schedule
 // and path; a card deleted meanwhile stays deleted.
+// This video's sentence cards for these lines (with audio): what "dictate the ticked lines" opens.
+export const lineCardsFor = async (videoId: string, lines: { startTime: number }[]) => {
+  const starts = new Set(lines.map(s => s.startTime.toFixed(2)));
+  return (await getAllCards()).filter(c => c.deck === 'line' && c.videoId === videoId && starts.has(c.start.toFixed(2)) && hasAudio(c));
+};
+
 export const recordOutcome = (card: ReviewCard, o: Outcome | Grade, now = Date.now()) =>
   update(card.id, old => old ? { ...old, videoPath: card.videoPath ?? old.videoPath, fsrs: schedule(old, o, now).fsrs } : undefined);
 

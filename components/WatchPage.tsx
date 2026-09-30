@@ -14,7 +14,7 @@ import { lineAt, parseSRT } from '../utils/srtParser';
 import { isFullscreen, setFullscreen, videoSrcFromPath } from '../utils/desktop';
 import { detectLang } from '../utils/dictionary';
 import { settleSplits } from '../utils/jaSegments';
-import { addWord, getAllCards, hasAudio, ReviewCard } from '../utils/review';
+import { addWord, lineCardsFor, ReviewCard } from '../utils/review';
 import { formatTimeCode, getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos, WatchPrefs, WatchSubs } from '../utils/storage';
 import { formatCombo, matches, useShortcuts } from '../utils/shortcuts';
 import { IS_WINDOWS } from '../utils/platform';
@@ -231,9 +231,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     openSummary(true);
   };
   const startDrill = async (picked: Subtitle[]) => {
-    const starts = new Set(picked.map(s => s.startTime.toFixed(2)));
-    const cards = (await getAllCards().catch(() => [] as ReviewCard[]))
-      .filter(c => c.deck === 'line' && c.videoId === record.id && starts.has(c.start.toFixed(2)) && hasAudio(c));
+    const cards = await lineCardsFor(record.id, picked).catch(() => [] as ReviewCard[]);
     if (cards.length) setDrill(cards); else say('watch.drillMissing');
   };
 
@@ -476,11 +474,15 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
       )}
 
       {summary && (
-        <WatchSummary saved={savedItems} looked={looked} ended={summary.ended}
+        <WatchSummary title={t(summary.ended ? 'watch.summaryEnded' : 'watch.summaryTitle')} savedEmpty={t('watch.savedEmpty')}
+          saved={savedItems} looked={looked}
+          actions={<>
+            <Btn onClick={onExit}><ArrowLeft size={16} /> {t('studio.backToVideosBtn')}</Btn>
+            {summary.ended
+              ? <Btn onClick={() => { setSummary(null); seek(0, true); }}><RotateCcw size={16} /> {t('watch.restart')}</Btn>
+              : <Btn onClick={() => { setSummary(null); videoRef.current?.play().catch(() => {}); }}><Play size={16} /> {t('watch.keepWatching')}</Btn>}
+          </>}
           onClose={() => setSummary(null)}
-          onResume={() => { setSummary(null); videoRef.current?.play().catch(() => {}); }}
-          onRestart={() => { setSummary(null); seek(0, true); }}
-          onExit={onExit}
           onJump={line => { setSummary(null); seek(line.startTime, true); }}
           onWord={w => onWord(w.word, w.line, true)}
           onDrill={lines => { startDrill(lines).catch(console.error); }} />

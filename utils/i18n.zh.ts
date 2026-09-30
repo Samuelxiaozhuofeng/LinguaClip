@@ -46,7 +46,7 @@ export const zh: Record<keyof typeof en, string> = {
   'custom.readByAllHint': '所有台词在一页里排开。',
   'custom.readBySectionHint': '按练习页的分段来，读完一段先看这段画面，再读下一段。',
   'custom.startRead': '开始阅读',
-  'custom.justRead': '刚读完这一集 · 查过 {n} 个词',
+  'custom.justRead': '刚读完这一集 · 这次查过 {n} 个词',
   'custom.justReadHint': '看剧时，这些词在字幕上带红色虚线，鼠标移上去会提示。',
 
   // --- App.tsx ---
@@ -728,6 +728,14 @@ export const zh: Record<keyof typeof en, string> = {
   'reader.listen': '听这句原声',
   'reader.view': '看这句的画面',
   'reader.done': '读完了',
+  'reader.save': '收藏这句（进句子复习）',
+  'reader.unsave': '取消收藏',
+  'reader.summaryTitle': '这次读字幕',
+  'reader.savedEmpty': '读的时候点句子右边的 ☆ 收藏，这里就能挑来听写。',
+  'reader.keepAll': '全部加入单词卡（{n}）',
+  'reader.keepNoMeaning': '没查到释义，点词重查',
+  'reader.keepReading': '接着读',
+  'reader.pickPractice': '选怎么练',
   'reader.sectionDone': '第 {n} 段读完了',
   'reader.allRead': '全部读完了',
   'reader.sectionInfo': '{n} 句',
