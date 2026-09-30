@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **用户手上只有一个 App**：官方安装包 = 带 `pro/` 的构建。目前**所有功能对所有人免费、不拦不计次**，Pro 功能（阅读器、播客）只是「不开源、只在官方包里」；激活码 = 支持者身份，不解锁任何功能。不存在「免费版 / Pro 版」两个下载。
 - **本机这份 = 私有仓库** `linguaclip-pro`（`origin`），所有开发都在这里；Pro 代码只放 `pro/`。
-- **公开仓库** `video_dictation_local`（AGPL，给自己编译的人）不直接改：`scripts/sync-public.sh "说明"` 把已提交的代码去掉 `pro/`、`docs/` 导到 `~/.cache/linguaclip-public`，在那里跑类型检查 + 打包，通过才提交；`--push` 才推上去。本机没有指向公开仓库的 remote，别加回来；那个副本每次同步都会被整个覆盖，别在里面改。
+- **公开仓库** `LinguaClip`（AGPL，给自己编译的人）不直接改：`scripts/sync-public.sh "说明"` 把已提交的代码去掉 `pro/`、`docs/` 导到 `~/.cache/linguaclip-public`，在那里跑类型检查 + 打包，通过才提交；`--push` 才推上去。本机没有指向公开仓库的 remote，别加回来；那个副本每次同步都会被整个覆盖，别在里面改。
 - 免费代码只通过 `@pro` 用 Pro 功能：有 `pro/` 时指向 `pro/index.ts`，没有时指向 `utils/proStub.ts`（`vite.config.ts` / `tsconfig.json`）。两边导出同样的名字；**免费代码里不许直接 import `pro/` 下的文件**，同步脚本会拦。
 
 ### 新功能先问：放免费还是 Pro

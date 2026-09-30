@@ -7,7 +7,7 @@
 #   scripts/sync-public.sh --push  push what the last run committed
 set -euo pipefail
 
-PUBLIC=https://github.com/Samuelxiaozhuofeng/video_dictation_local.git
+PUBLIC=https://github.com/Samuelxiaozhuofeng/LinguaClip.git
 ROOT=$(git rev-parse --show-toplevel)
 WORK="$HOME/.cache/linguaclip-public"
 EXCLUDE=(pro docs)

@@ -35,7 +35,7 @@ const WHISPER_CLI: Asset = Asset {
   size: 3_055_240,
   sha256: "09d672178dcc7daba8f5b36a2a0bab86a5de9cd8f0bcf699f2fc7f785274a80f",
   urls: &[
-    "https://github.com/Samuelxiaozhuofeng/video_dictation_local/releases/download/whisper-cli-1.8.4/whisper-cli",
+    "https://github.com/Samuelxiaozhuofeng/LinguaClip/releases/download/whisper-cli-1.8.4/whisper-cli",
     "https://linguaclipapp.com/download/parts/whisper-cli-1.8.4/whisper-cli",
   ],
 };
@@ -46,7 +46,7 @@ const WHISPER_CLI: Asset = Asset {
   size: 2_787_904,
   sha256: "bf75b0892780cec6435d99f08236f11aa736a62a2383bed53c117beea033cc96",
   urls: &[
-    "https://github.com/Samuelxiaozhuofeng/video_dictation_local/releases/download/whisper-cli-1.8.4-x86_64/whisper-cli",
+    "https://github.com/Samuelxiaozhuofeng/LinguaClip/releases/download/whisper-cli-1.8.4-x86_64/whisper-cli",
     "https://linguaclipapp.com/download/parts/whisper-cli-1.8.4-x86_64/whisper-cli",
   ],
 };
@@ -74,7 +74,7 @@ const WHISPER_VULKAN: Asset = Asset {
   size: 17_988_352,
   sha256: "11b8f84c9202f83cb6510bba2e92c9520b9c79990d6b25db12ca0cd46caebeaa",
   urls: &[
-    "https://github.com/Samuelxiaozhuofeng/video_dictation_local/releases/download/whisper-vulkan-1.8.4/whisper-vulkan-x64.zip",
+    "https://github.com/Samuelxiaozhuofeng/LinguaClip/releases/download/whisper-vulkan-1.8.4/whisper-vulkan-x64.zip",
     "https://linguaclipapp.com/download/parts/whisper-vulkan-x64.zip",
   ],
 };
