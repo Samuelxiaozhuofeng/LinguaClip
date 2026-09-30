@@ -70,7 +70,7 @@ node test-breakdown-prep.mjs # 拆句后台任务：批量回答解析、挑句�
 node test-ailimit.mjs     # 各类 AI 请求并发上限（utils/aiLimit.ts）
 node test-localdict.mjs   # 本地词典：点的词查哪些候选、变位跳原形、Yomitan 排版转释义（读 dev/fixtures/dict-sample.json 真样本）
 node pro/test-reader.mjs  # 阅读器：查过的词怎么记（日语原形）+ 看剧时认回来、AI 译文回答 / 缓存 / 删视频中途取消
-node pro/test-podcast.mjs # 播客：粘贴框认链接、时长、下载文件名、转录语言、推荐节目单
+node pro/test-podcast.mjs # 播客：粘贴框认链接、时长、下载文件名、转录语言、推荐节目单（每种语言三档）、语速、「听懂多少」→ 推荐换节目
 node pro/test-license.mjs # Pro 试用 + 激活：阅读器 3 个不同视频、播客另 3 集（导入时扣、没导完删了退回）、弹窗按钮、凭证规则（验签 / 本机 / 30 天 / 测试码）、出错不锁人、退款或被移除删记录、并发不写回旧凭证
 ```
 
