@@ -84,7 +84,8 @@ export const useClip = () => {
 
 // `langOf` (from a library page): each card's language deck. Then lookups use the card's
 // own language, and "more" after the round stays in the deck the round came from.
-const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf?: (c: ReviewCard) => DeckLang; lang?: DeckLang | 'all' }> = ({ cards, onClose, langOf, lang = 'all' }) => {
+// onFinish: the done screen's button, when finishing leads on (the listening page's next section); quitting stays onClose.
+const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFinish?: () => void; langOf?: (c: ReviewCard) => DeckLang; lang?: DeckLang | 'all' }> = ({ cards, onClose, onFinish, langOf, lang = 'all' }) => {
   const t = useT();
   const [queue, setQueue] = useState(cards);
   const [round, setRound] = useState(0);
@@ -328,7 +329,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; langOf
                 <p className="text-sm text-mute leading-relaxed max-w-md">{t('session.doneBody', { n: new Set(queue.map(c => c.id)).size })}</p>
                 <div className="pt-4 flex gap-2.5">
                   {!!more?.length && <Btn onClick={again}>{t('session.doneMore', { n: more.length })}</Btn>}
-                  <Btn tone="accent" onClick={onClose} autoFocus>{t('session.back')}</Btn>
+                  <Btn tone="accent" onClick={onFinish ?? onClose} autoFocus>{t('session.back')}</Btn>
                 </div>
               </div>
             ) : path === null ? (

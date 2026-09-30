@@ -34,3 +34,13 @@ export const buildSections = (subtitles: Subtitle[], sectionLength: number): Vid
 
   return sections;
 };
+
+// Where a section starts (its first line), and the section a second falls in — the last one
+// starting at or before it; before the first, the first. Intensive listening starts again
+// from this section, and the podcast card names it (docs/private/podcast.md, 精听).
+export const sectionStart = (s: VideoSection): number => s.subtitles[0]?.startTime ?? s.startTime;
+export const sectionAt = (sections: VideoSection[], at: number): number => {
+  let i = 0;
+  while (i + 1 < sections.length && sectionStart(sections[i + 1]) <= at) i++;
+  return i;
+};

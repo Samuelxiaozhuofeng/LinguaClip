@@ -55,3 +55,16 @@ assert.equal(buildSections([subs[0]], 4).length, 1);
 assert.equal(buildSections([{ id: 1, startTime: 0, endTime: 0, text: 'a' }], 4).length, 1);
 
 console.log('sections: all checks passed');
+
+// sectionAt: the section a second falls in — before the first line → 0, in a gap → the one before, past the end → the last.
+{
+  const { sectionAt, sectionStart } = await import(out);
+  const secs = [0, 60, 120].map((s, i) => ({ id: i, startTime: s, subtitles: [{ startTime: s + 2 }] }));
+  assert.equal(sectionStart(secs[1]), 62);
+  assert.equal(sectionAt(secs, 0), 0);
+  assert.equal(sectionAt(secs, 61), 0);
+  assert.equal(sectionAt(secs, 62), 1);
+  assert.equal(sectionAt(secs, 999), 2);
+  assert.equal(sectionAt([], 5), 0);
+  console.log('ok sectionAt');
+}

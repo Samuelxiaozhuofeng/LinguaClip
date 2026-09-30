@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 // Shared primitives for the "cinema" look: light ground, white sheets, one vermilion accent.
 // Btn (pressable), Card (a raised surface), Stamp (small label), Seg (segmented switch),
-// Menu (the "…" popover).
+// Menu (the "…" popover), useToast (a note at the top that fades by itself).
 
 export type Tone = 'white' | 'accent' | 'accent-soft' | 'shade' | 'paper' | 'ink';
 
@@ -185,3 +185,21 @@ export const Menu: React.FC<{
     </div>
   );
 };
+
+// A short note at the top of a page ("saved", a switch flipped) that goes by itself after
+// 1.6 s; saying something again restarts it. `view` goes inside a relatively placed box.
+export function useToast() {
+  const [toast, setToast] = useState<{ text: string; n: number } | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const id = window.setTimeout(() => setToast(null), 1600);
+    return () => window.clearTimeout(id);
+  }, [toast]);
+  const say = useCallback((text: string) => setToast(s => ({ text, n: (s?.n ?? 0) + 1 })), []);
+  const view = toast && (
+    <div key={toast.n} className="absolute left-1/2 -translate-x-1/2 top-5 z-20 fade-in pointer-events-none">
+      <Stamp tone="ink" className="!px-3 !py-1.5 !text-sm shadow-card">{toast.text}</Stamp>
+    </div>
+  );
+  return { say, view };
+}

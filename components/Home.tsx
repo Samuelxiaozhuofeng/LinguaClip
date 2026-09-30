@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, MoreHorizontal, Loader2, Play } from 'lucide-react';
 import { LearningMode, VideoRecord } from '../types';
 import * as VideoStorage from '../utils/videoStorage';
-import { forgetCustomPos, forgetWatchPos, formatTimeCode, getCustomConfig, getCustomPos, getPracticeConfig } from '../utils/storage';
+import { forgetCustomPos, forgetWatchPos, formatTimeCode, getCustomConfig, getCustomPos, getPracticeConfig, getWatchPos } from '../utils/storage';
 import { parseSRT } from '../utils/srtParser';
-import { buildSections } from '../utils/sections';
+import { buildSections, sectionAt } from '../utils/sections';
 import { fileNameFromPath, isAudioRecord, isVideoFile, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
 import { cancelImport, canConvertRetry, formatImportError, isCookieError, openYouTubeLogin, retryImport, subscribeImportJobs } from '../utils/importJob';
 import { Btn, Menu, MenuItem, inputCls } from './ui';
@@ -37,7 +37,7 @@ interface HomeProps {
   onAddHandled?: () => void;
   // The podcast page (a Pro tab): the same shelf with only podcast episodes, its own
   // add dialog and empty state, no drops. Without it, the videos (and sound files).
-  podcasts?: { empty: React.ReactNode; add: (close: () => void) => React.ReactNode; rate?: (v: VideoRecord) => string | null };
+  podcasts?: { empty: React.ReactNode; add: (close: () => void) => React.ReactNode; rate?: (v: VideoRecord) => string | null; otherWay?: (v: VideoRecord) => void };
 }
 
 type PrepInfo = { eligible: number; missing: number };
@@ -78,7 +78,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   // Computed the same way the practice page cuts the video, so the two agree.
   const sectionLength = getPracticeConfig().sectionLength;
   const shelfPosition = useMemo(() => {
-    const byId = new Map<string, { part: number; parts: number; line: number; lines: number; customSec?: number; customPct?: number }>();
+    const byId = new Map<string, { part: number; parts: number; line: number; lines: number; customSec?: number; customPct?: number; listen?: boolean }>();
     // The start panel opens on custom when that was the last choice; the card then
     // shows where the custom sets reached, since that is where "start" goes on.
     const customOn = getCustomConfig().on;
@@ -90,6 +90,10 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
         const end = subs[subs.length - 1]?.endTime ?? 0;
         const sections = buildSections(subs, sectionLength);
         if (sections.length === 0) continue;
+        if (v.podcast) { // where intensive listening is (the section it starts again from), not dictation
+          byId.set(v.id, { part: sectionAt(sections, getWatchPos(v.id)), parts: sections.length, line: 0, lines: 0, listen: true });
+          continue;
+        }
         const part = Math.min(Math.max(v.currentSectionIndex, 0), sections.length - 1);
         const lines = sections[part].subtitles.length;
         byId.set(v.id, {
@@ -275,7 +279,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
 
   const modeName = (m: LearningMode) => (m === LearningMode.BLUR ? t('home.blur') : t('home.dictate'));
   const lastMode = (v: VideoRecord) => v.learningMode ?? LearningMode.DICTATION;
-  // What the card's button starts: on the podcast page the panel opens on 边听边读.
+  // What the card's button starts: on the podcast page, intensive listening.
   const cardMode = (v: VideoRecord) => (podcasts ? t('custom.listen') : modeName(lastMode(v)));
   const otherMode = (v: VideoRecord) => (lastMode(v) === LearningMode.BLUR ? LearningMode.DICTATION : LearningMode.BLUR);
 
@@ -283,6 +287,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   const where = (v: VideoRecord) => {
     const pos = shelfPosition.get(v.id);
     if (!pos) return { text: `${v.completionRate}%`, pct: v.completionRate };
+    if (pos.listen) return { text: t('home.listenAt', { current: pos.part + 1, total: pos.parts }), pct: (pos.part / pos.parts) * 100 };
     if (pos.customSec) return { text: t('home.customAt', { time: formatTimeCode(pos.customSec) }), pct: pos.customPct ?? 0 };
     const pct = pos.lines ? (pos.line / pos.lines) * 100 : 0;
     if (pos.parts > 1) return { text: t('home.partOf', { current: pos.part + 1, total: pos.parts }), pct };
@@ -321,7 +326,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   const menuFor = (v: VideoRecord): MenuItem[] => {
     const items: MenuItem[] = [];
     if (!v.importJob) {
-      items.push({ label: t('home.practiceAs', { mode: modeName(otherMode(v)) }), onClick: () => onResume(v, otherMode(v)) });
+      if (podcasts?.otherWay) items.push({ label: t('home.otherWay'), onClick: () => podcasts.otherWay?.(v) });
+      else items.push({ label: t('home.practiceAs', { mode: modeName(otherMode(v)) }), onClick: () => onResume(v, otherMode(v)) });
       if (hasAi) {
         const b = prepItem(getPrepJob(v.id), prep.get(v.id), 'Breakdown', () => prepareBreakdowns(v.id, v.subtitleText, lang));
         const c = prepItem(getClozeJob(v.id), cloze.get(v.id), 'Cloze', () => prepareCloze(v.id, linesOf(v.subtitleText)));
@@ -382,7 +388,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   // Where you are in this part: one tick per line when they fit, else a bar.
   const ticks = (v: VideoRecord) => {
     const pos = shelfPosition.get(v.id);
-    if (!pos || pos.customSec || pos.lines > 32) return <Line pct={where(v).pct} className="w-[160px]" />;
+    if (!pos || pos.customSec || pos.listen || pos.lines > 32) return <Line pct={where(v).pct} className="w-[160px]" />;
     return (
       <span className="flex gap-[3px]">
         {Array.from({ length: pos.lines }, (_, i) => (

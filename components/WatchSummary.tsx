@@ -26,13 +26,14 @@ const WatchSummary: React.FC<{
   words?: KeepWords;
   actions: React.ReactNode; // the buttons before "dictate"
   top?: React.ReactNode; // above the saved lines (the podcast page asks how much was understood)
+  pickAll?: boolean; // every saved line starts ticked, and with none there's no dictate button (intensive listening's step 4)
   onClose: () => void;
   onJump: (line: Subtitle) => void;
   onWord: (w: Looked) => void;
   onDrill: (lines: Subtitle[]) => void;
-}> = ({ title, savedEmpty, saved, looked, words, actions, top, onClose, onJump, onWord, onDrill }) => {
+}> = ({ title, savedEmpty, saved, looked, words, actions, top, pickAll, onClose, onJump, onWord, onDrill }) => {
   const t = useT();
-  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [picked, setPicked] = useState<Set<number>>(() => new Set(pickAll ? saved.map(s => s.id) : []));
   const toggle = (id: number) => setPicked(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const chosen = saved.filter(s => picked.has(s.id));
   const keepable = words ? looked.filter(w => words.can(w) && !words.kept(w)).length : 0;
@@ -87,9 +88,9 @@ const WatchSummary: React.FC<{
         </div>
         <div className="px-6 pt-4 pb-6 flex flex-wrap items-center justify-end gap-2.5">
           {actions}
-          <Btn tone="accent" disabled={chosen.length === 0} onClick={() => onDrill(chosen)} autoFocus title={chosen.length ? undefined : t('watch.pickHint')}>
+          {!(pickAll && saved.length === 0) && <Btn tone="accent" disabled={chosen.length === 0} onClick={() => onDrill(chosen)} autoFocus title={chosen.length ? undefined : t('watch.pickHint')}>
             <PenLine size={16} /> {chosen.length ? t('watch.drill', { n: chosen.length }) : t('watch.pickHint')}
-          </Btn>
+          </Btn>}
         </div>
       </Card>
     </div>

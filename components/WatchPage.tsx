@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Bookmark, Loader2, Maximize2, Minimize2, MoreHorizontal, Pause, Play, PlusCircle, RotateCcw, SkipBack, SkipForward, Check, X, Mic, Pin, PanelRight } from 'lucide-react';
 import { Subtitle, VideoRecord } from '../types';
-import { Btn, Menu, Seg, Stamp } from './ui';
+import { Btn, Menu, Seg, Stamp, useToast } from './ui';
 import WatchLine from './WatchLine';
 import WatchList from './WatchList';
 import WatchSummary, { Looked } from './WatchSummary';
@@ -27,7 +27,6 @@ import { DictKey, useT } from '../utils/i18n';
 
 const SPEEDS = [0.75, 0.9, 1, 1.25];
 const SUBS: WatchSubs[] = ['show', 'blur', 'hide'];
-const SEEK = 5; // ← / → seconds
 const IDLE_MS = 2500; // the pointer hides after this long still; both bars show this long on entry
 const TOP_ZONE = 88; // px from the top edge that bring the back button up
 const BOTTOM_ZONE = 44; // px from the bottom edge that bring the controls up: below the subtitle, so aiming at a word doesn't
@@ -46,7 +45,6 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   // The line on screen: `at` = last line started, `on` = still inside it (not in the gap after).
   const [cur, setCur] = useState({ at: -1, on: false });
   const [revealed, setRevealed] = useState<number | null>(null);
-  const [toast, setToast] = useState<{ text: string; n: number } | null>(null);
   const [summary, setSummary] = useState<{ ended: boolean } | null>(null);
   const [drill, setDrill] = useState<ReviewCard[] | null>(null);
   const [looked, setLooked] = useState<Looked[]>([]);
@@ -66,12 +64,8 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     setPrefsState(p => ({ ...p, ...patch }));
     saveWatchPrefs(patch);
   };
-  const say = (key: DictKey) => setToast(s => ({ text: t(key), n: (s?.n ?? 0) + 1 }));
-  useEffect(() => {
-    if (!toast) return;
-    const id = window.setTimeout(() => setToast(null), 1600);
-    return () => window.clearTimeout(id);
-  }, [toast]);
+  const toast = useToast();
+  const say = (key: DictKey) => toast.say(t(key));
 
   const { savedIds, savedItems, toggleSave } = useSavedLines({ videoId: record.id, fullSubtitles: lines, videoFileName: record.videoFileName });
   const { ankiConfig, ankiStatus, handleAddToAnki, handleWordToAnki } = useAnkiIntegration({ videoRef, videoFileName: record.videoFileName, videoId: record.id });
@@ -252,10 +246,9 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     let act: (() => void) | null = null;
     if (matches(e, 'replay')) act = replay;
     else if (e.code === 'Space' && plain) act = togglePlay;
-    else if ((mod && e.code === 'ArrowLeft') || matches(e, 'prev')) act = prev;
-    else if ((mod && e.code === 'ArrowRight') || matches(e, 'next')) act = next;
-    else if (plain && e.code === 'ArrowLeft') act = () => seek((videoRef.current?.currentTime ?? 0) - SEEK);
-    else if (plain && e.code === 'ArrowRight') act = () => seek((videoRef.current?.currentTime ?? 0) + SEEK);
+    // ← / → change lines — a learner's jump is by line, not by seconds (⌘ too, as before).
+    else if (((plain || mod) && e.code === 'ArrowLeft') || matches(e, 'prev')) act = prev;
+    else if (((plain || mod) && e.code === 'ArrowRight') || matches(e, 'next')) act = next;
     else if (plain && e.code === 'KeyS') act = save;
     else if (plain && e.code === 'KeyP') act = toggleAutoPause;
     else if (plain && e.code === 'KeyC') act = cycleSubs;
@@ -381,11 +374,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
         </button>
       </header>
 
-      {toast && (
-        <div key={toast.n} className="absolute left-1/2 -translate-x-1/2 top-5 z-20 fade-in pointer-events-none">
-          <Stamp tone="ink" className="!px-3 !py-1.5 !text-sm shadow-card">{toast.text}</Stamp>
-        </div>
-      )}
+      {toast.view}
       {recording && (
         <div className="absolute left-1/2 -translate-x-1/2 top-5 z-20 pointer-events-none">
           <Stamp tone="accent-soft" className="!px-3 !py-1.5 !text-sm blink">{t('transport.recordingBanner')}</Stamp>

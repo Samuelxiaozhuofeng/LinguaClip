@@ -49,6 +49,8 @@ const CustomPanel: React.FC<{
   });
   const listen = !!Listen && isAudioRecord(record);
   const [watch, setWatch] = useState(() => (listen && !!record.podcast) || getWatchPrefs().chosen);
+  // A podcast episode: intensive listening or dictation only (docs/private/podcast.md, 精听).
+  const pod = listen && !!record.podcast;
   const heard = listenTrial(record.id);
   const [read, setRead] = useState(false);
   const [readBy, setReadBy] = useState<ReadBy>(() => getWatchPrefs().readBy);
@@ -160,10 +162,10 @@ const CustomPanel: React.FC<{
               setWaiting(false); setRead(v === 'read'); setWatch(v === 'watch');
               if (v === 'all' || v === 'custom') set({ on: v === 'custom' });
             }} options={[
-              { value: 'all', label: t('custom.all') },
-              { value: 'custom', label: t('custom.custom') },
+              { value: 'all', label: t(pod ? 'custom.allListen' : 'custom.all') },
+              ...(pod ? [] : [{ value: 'custom', label: t('custom.custom') }]),
               { value: 'watch', label: !listen ? t('custom.watch') : heard.pro ? t('custom.listen') : <>{t('custom.listen')}<span className="ml-1.5 px-1 rounded bg-shade text-[10px] font-semibold text-mute align-middle">Pro</span></> },
-              ...(Reader ? [{ value: 'read', label: trial.pro ? t('custom.read') : <>{t('custom.read')}<span className="ml-1.5 px-1 rounded bg-shade text-[10px] font-semibold text-mute align-middle">Pro</span></> }] : []),
+              ...(Reader && !pod ? [{ value: 'read', label: trial.pro ? t('custom.read') : <>{t('custom.read')}<span className="ml-1.5 px-1 rounded bg-shade text-[10px] font-semibold text-mute align-middle">Pro</span></> }] : []),
             ]} />
           </Row>
           {read && !trial.pro && (

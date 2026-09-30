@@ -27,7 +27,8 @@ import { emit } from '@tauri-apps/api/event';
 declare const __DEV_HOME__: string;
 
 const FIXTURE = `${__DEV_HOME__}/Movies/LinguaClip/Me at the zoo [jNQXAC9IVRw]`;
-const fsUrl = (path: string) => '/@fs' + path.split('/').map(encodeURIComponent).join('/');
+// Commas stay as they are: vite's /@fs doesn't find a file whose name has an encoded one (%2C).
+const fsUrl = (path: string) => '/@fs' + path.split('/').map(p => encodeURIComponent(p).replace(/%2C/g, ',')).join('/');
 const cache = new Map<string, string>(); // write_cache stays in memory
 
 type Args = Record<string, any>;

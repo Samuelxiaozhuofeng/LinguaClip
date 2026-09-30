@@ -228,9 +228,12 @@ export default function App() {
     setAppState(AppState.PRACTICE);
   };
 
-  // Every way into practice lands here: ask how to practise first.
+  // Every way into practice lands here: ask how to practise first — except a podcast
+  // episode, which goes straight to intensive listening ("…" → another way opens the panel).
   const handleResume = (record: VideoRecord, lm: LearningMode) => {
-    if (!record.importJob) setPanel({ record, lm });
+    if (record.importJob) return;
+    if (record.podcast && Listen) openPractice(record, lm, { kind: 'listen' }).catch(console.error);
+    else setPanel({ record, lm });
   };
 
   // Only the latest start wins: two starts in quick succession must not mix one
@@ -438,6 +441,7 @@ export default function App() {
           empty: <PodcastPicker onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
           add: close => <PodcastPicker onClose={close} onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
           rate: podcastRate,
+          otherWay: r => setPanel({ record: r, lm: r.learningMode ?? LearningMode.DICTATION }),
         }} />
        ) :
        <Home key="videos" onResume={handleResume} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} />}
