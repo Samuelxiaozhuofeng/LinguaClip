@@ -180,6 +180,7 @@ const DefinitionPanel: React.FC<{
                 {e.phonetic && <span className="text-sm text-mute font-mono">{e.phonetic}</span>}
                 {ei === 0 && <Stamp tone="shade">{t(`dict.${e.source}`)}</Stamp>}
               </div>
+              {e.note && <p className="text-xs text-mute">{e.note}</p>}
               <ul className="space-y-1">
                 {e.senses.map((s, si) => {
                   const picked = ++n === pickIndex;

@@ -5,10 +5,10 @@ import { Btn, Field, Seg } from './ui';
 import { clipsInfo, revealInFolder } from '../utils/desktop';
 import { getClipProgress, retryClips, subscribeClips } from '../utils/clips';
 import { downloadConvertTool, loadConvertTool } from '../utils/convertTool';
-import { useT, Lang } from '../utils/i18n';
+import { useT, useLang, Lang } from '../utils/i18n';
 import { getPracticeConfig, getWordFront, savePracticeConfig } from '../utils/storage';
 import type { WordFront } from '../types';
-import { DICT_OPTIONS, DictLang, getDictChoice, saveDictChoice } from '../utils/dictionary';
+import { DictLang, dictOptions, getDictChoice, saveDictChoice } from '../utils/dictionary';
 import { JaDictRow } from './JaSetup';
 import ConvertToolRow from './ConvertToolRow';
 
@@ -24,17 +24,21 @@ interface SettingsGeneralProps {
 
 const DictionaryPicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
   const t = useT();
-  const [choice, setChoice] = useState(getDictChoice);
+  // Each interface language lists and keeps its own dictionaries (docs/dictionary.md).
+  const ui = useLang();
+  const options = dictOptions(ui);
+  const [, redraw] = useState(0);
+  const choice = getDictChoice(ui);
   return (
     <Field label={t('settingsGeneral.dictionary')} hint={t('settingsGeneral.dictionaryHint')}>
       <div className="space-y-2.5">
-        {(Object.keys(DICT_OPTIONS) as DictLang[]).map(lang => (
+        {(Object.keys(options) as DictLang[]).map(lang => (
           <div key={lang} className="flex items-center gap-4">
             <span className="w-20 text-sm text-mute">{t(`dict.${lang}`)}</span>
             <Seg
-              options={DICT_OPTIONS[lang].map(v => ({ value: v, label: t(`dict.${v}`) }))}
+              options={options[lang].map(v => ({ value: v, label: t(`dict.${v}`) }))}
               value={choice[lang]}
-              onChange={v => { saveDictChoice(lang, v); setChoice(getDictChoice()); onSaved(); }}
+              onChange={v => { saveDictChoice(lang, v, ui); redraw(n => n + 1); onSaved(); }}
             />
           </div>
         ))}

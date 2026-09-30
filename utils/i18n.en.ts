@@ -296,7 +296,11 @@ export const en = {
   'definition.noPick': 'AI found no meaning that fits exactly.',
   'definition.explaining': 'AI is finding the meaning used here…',
   'dict.youdao': 'Youdao',
-  'dict.cambridge': 'Cambridge',
+  'dict.cambridge': 'Cambridge EN–ZH',
+  'dict.cambridgeEn': 'Cambridge',
+  'dict.cambridgeBi': 'Cambridge',
+  'dict.wiktionary': 'Wiktionary',
+  'dict.jisho': 'Jisho',
   'dict.eudic': 'Eudic',
   'dict.en': 'English',
   'dict.es': 'Spanish',
@@ -304,7 +308,7 @@ export const en = {
   'dict.de': 'German',
   'dict.ja': 'Japanese',
   'settingsGeneral.dictionary': 'Dictionary',
-  'settingsGeneral.dictionaryHint': "Which dictionary to use when you click a word; the video's language is detected from its subtitles. Dictionaries give Chinese definitions, so with an English interface and AI set up, words go straight to AI.",
+  'settingsGeneral.dictionaryHint': "Which dictionary to use when you click a word; the video's language is detected from its subtitles. If the chosen one can't be reached or lacks the word, the first one is used. Languages without a dictionary go to AI when it's set up.",
 
   // --- BlurLine.tsx ---
   'blur.reveal': 'Reveal',

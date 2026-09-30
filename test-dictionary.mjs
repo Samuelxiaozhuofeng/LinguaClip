@@ -13,7 +13,10 @@ import { join } from 'node:path';
 
 const out = join(tmpdir(), `dictionary-${process.pid}.mjs`);
 await build({ entryPoints: ['utils/dictionary.ts'], bundle: true, format: 'esm', outfile: out });
-const { detectLang, parseYoudao, parseYoudaoJa, pickEudicTerms, senseToAnki, senseList, getDictChoice, saveDictChoice } = await import(out);
+const { detectLang, parseYoudao, parseYoudaoJa, pickEudicTerms, senseToAnki, senseList, getDictChoice, saveDictChoice, dictOptions } = await import(out);
+const enOut = join(tmpdir(), `dictionaryEn-${process.pid}.mjs`);
+await build({ entryPoints: ['utils/dictionaryEn.ts'], bundle: true, format: 'esm', outfile: enOut });
+const { parseWiktionary, parseJisho, htmlText } = await import(enOut);
 
 // --- language of a whole subtitle file ---
 assert.equal(detectLang(["All right, what's the plan?", 'I think we should go to the station and wait.', 'It is what it is.']), 'en');
@@ -125,16 +128,126 @@ assert.deepEqual(list.map(x => [x.entry, x.sense]), [[0, 0], [0, 1], [1, 0]]);
 assert.equal(list[0].line, '1. a<b | intr. | llegar a ser | 6. 实现，□： e.g. Llegó el armisticio. 停战了.');
 assert.equal(list[2].line, '3. casar | tr. | 娶 e.g. Se casó. 结婚了.');
 
-// --- Dictionary choice: Eudic by default for es/fr/de; only the touched language is stored ---
+// --- Dictionary choice (Chinese interface): Eudic by default for es/fr/de; only the touched language is stored ---
 const store = new Map();
 globalThis.localStorage = { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
-assert.deepEqual(getDictChoice(), { en: 'youdao', es: 'eudic', fr: 'eudic', de: 'eudic', ja: 'youdao' });
-saveDictChoice('en', 'cambridge');
+assert.deepEqual(getDictChoice('zh'), { en: 'youdao', es: 'eudic', fr: 'eudic', de: 'eudic', ja: 'youdao' });
+saveDictChoice('en', 'cambridge', 'zh');
 assert.deepEqual(JSON.parse(store.get('linguaclip_dict_choice')), { en: 'cambridge' });
-saveDictChoice('fr', 'youdao');
-assert.deepEqual(getDictChoice(), { en: 'cambridge', es: 'eudic', fr: 'youdao', de: 'eudic', ja: 'youdao' });
+saveDictChoice('fr', 'youdao', 'zh');
+assert.deepEqual(getDictChoice('zh'), { en: 'cambridge', es: 'eudic', fr: 'youdao', de: 'eudic', ja: 'youdao' });
 store.set('linguaclip_dict_choice', '{"es":"cambridge"}');
-assert.equal(getDictChoice().es, 'eudic', 'a source the language does not offer falls back');
+assert.equal(getDictChoice('zh').es, 'eudic', 'a source the language does not offer falls back');
+
+// --- English interface: only English dictionaries, its own choice, the Chinese one kept ---
+store.set('linguaclip_dict_choice', '{"en":"cambridge","es":"youdao"}');
+assert.deepEqual(getDictChoice('en'), { en: 'cambridgeEn', es: 'wiktionary', fr: 'wiktionary', de: 'wiktionary', ja: 'wiktionary' });
+assert.ok(Object.values(dictOptions('en')).flat().every(s => !['youdao', 'eudic', 'cambridge'].includes(s)), 'no Chinese dictionary in English');
+saveDictChoice('ja', 'jisho', 'en');
+assert.deepEqual(JSON.parse(store.get('linguaclip_dict_choice_en')), { ja: 'jisho' });
+assert.equal(getDictChoice('en').ja, 'jisho');
+assert.deepEqual(getDictChoice('zh'), { en: 'cambridge', es: 'youdao', fr: 'eudic', de: 'eudic', ja: 'youdao' }, 'switching back restores the Chinese choice');
+saveDictChoice('es', 'wiktionary', 'zh');
+assert.equal(getDictChoice('zh').es, 'wiktionary', 'the Chinese list offers the English ones too');
+store.set('linguaclip_dict_choice_en', 'not json');
+assert.equal(getDictChoice('en').en, 'cambridgeEn', 'a broken store reads as defaults');
+
+// --- Wiktionary (trimmed real answers, 2026-09-30) ---
+const formOf = (lemma, lang, name) => `<span class="form-of-definition use-with-mention"><a rel="mw:WikiLink" href="/wiki/Appendix:Glossary#first_person" title="Appendix:Glossary">first-person</a> <a href="/wiki/Appendix:Glossary#preterite">preterite</a> of <span class="form-of-definition-link"><i lang="${lang}"><a rel="mw:WikiLink" href="/wiki/${lemma}#${name}" title="${lemma}">${lemma}</a></i></span></span>`;
+const llegue = parseWiktionary({
+  es: [{ partOfSpeech: 'Verb', definitions: [{ definition: formOf('llegar', 'es', 'Spanish') }] }],
+  ca: [{ partOfSpeech: 'Verb', definitions: [{ definition: formOf('lleure', 'ca', 'Catalan') }] }],
+}, 'llegué', 'es');
+assert.equal(llegue.entry, null, 'a form only: no meanings of its own');
+assert.deepEqual(llegue.forms, [{ lemma: 'llegar', note: 'first-person preterite of llegar' }], 'the lemma of this language, not the Catalan one');
+const fue = parseWiktionary({ es: [{ partOfSpeech: 'Verb', definitions: [{ definition: formOf('ir', 'es', 'Spanish') }, { definition: formOf('ser', 'es', 'Spanish') }] }] }, 'fue', 'es');
+assert.deepEqual(fue.forms.map(f => f.lemma), ['ir', 'ser']);
+assert.equal(parseWiktionary({ en: [{ partOfSpeech: 'Noun', definitions: [{ definition: 'house' }] }] }, 'Casa', 'es'), null, 'no Spanish part: null, so the caller retries in lower case');
+const llegar = parseWiktionary({ es: [{ partOfSpeech: 'Verb', definitions: [
+  { definition: '<span class="usage-label-sense"></span> to <a rel="mw:WikiLink" href="/wiki/arrive" title="arrive">arrive</a>, <a href="/wiki/get">get</a> (to)',
+    parsedExamples: [{ example: 'Cuando <b>llegues</b> a casa, mándame un mensaje.', translation: 'When you get home, send me a message.' }] },
+  { definition: 'to be <a href="/wiki/sufficient">sufficient</a>; to be enough &amp; more', examples: ['Un solo día no <b>llega</b>.'] },
+  { definition: '' },
+] }] }, 'llegar', 'es');
+assert.deepEqual(llegar.entry, { word: 'llegar', phonetic: '', source: 'wiktionary', senses: [
+  { pos: 'Verb', text: ['to arrive, get (to)'], examples: [['Cuando llegues a casa, mándame un mensaje.\nWhen you get home, send me a message.']] },
+  { pos: 'Verb', text: ['to be sufficient; to be enough & more'], examples: [['Un solo día no llega.']] },
+] });
+const ki = parseWiktionary({ ja: [
+  { partOfSpeech: 'Noun', definitions: [
+    { definition: '<a href="/wiki/spirit">spirit</a>, <a href="/wiki/mood">mood</a>', parsedExamples: [{ translation: '<i><span class="e-transliteration tr">asobu <b>ki</b> manman</span></i>', example: '<span lang="ja"><a href="/wiki/遊ぶ#Japanese"><ruby>遊<rp>(</rp><rt>あそ</rt><rp>)</rp></ruby>ぶ</a><b><ruby>気<rp>(</rp><rt>き</rt><rp>)</rp></ruby></b>満々</span><link rel="mw:PageProp/Category" href="./Category:x">' }] },
+    { definition: '<i about="#mwt63">This term needs a translation to English. Please help out and <b>add a translation</b>, then remove the text <code><a rel="mw:WikiLink" href="/wiki/Template:rfdef" title="Template:rfdef">rfdef</a></code></i>' },
+  ] },
+  { partOfSpeech: 'Adverb', definitions: [{ definition: '<style data-mw-deduplicate="x">.mw-parser-output .object-usage-tag{font-style:italic}</style><span class="object-usage-tag">(colloquial)</span> somehow' }] },
+] }, '気', 'ja');
+assert.deepEqual(ki.entry.senses.map(s => [s.pos, s.text[0]]), [['Noun', 'spirit, mood'], ['Adverb', '(colloquial) somehow']], 'stubs and <style> dropped');
+assert.deepEqual(ki.entry.senses[0].examples, [['遊ぶ気満々\nasobu ki manman']], 'furigana dropped from the example');
+assert.equal(htmlText('&lt;b&gt; &#233;t&#xE9; &nbsp;x &bogus;'), '<b> été x &bogus;', 'entities decoded to text, never markup');
+assert.equal(htmlText('a &#99999999; b'), 'a &#99999999; b', 'an impossible code point stays as written instead of throwing');
+
+// --- Jisho (JMdict) ---
+const jisho = parseJisho({ data: [
+  { japanese: [{ word: '食べる', reading: 'たべる' }], senses: [
+    { english_definitions: ['to eat'], parts_of_speech: ['Ichidan verb', 'Transitive verb'] },
+    { english_definitions: ['to live on (e.g. a salary)', 'to live off'], parts_of_speech: [] },
+    { english_definitions: ['Taberu'], parts_of_speech: ['Wikipedia definition'] },
+  ] },
+  { japanese: [{ reading: 'たべる' }], senses: [{ english_definitions: [], parts_of_speech: ['Noun'] }] },
+  { japanese: [{ word: '食べるラー油', reading: 'たべるラーゆ' }], senses: [{ english_definitions: ['chili oil'], parts_of_speech: ['Noun'] }] },
+] }, '食べる');
+assert.deepEqual(jisho, [{ word: '食べる', phonetic: 'たべる', reading: 'たべる', source: 'jisho', senses: [
+  { pos: 'Ichidan verb, Transitive verb', text: ['to eat'], examples: [] },
+  { pos: 'Ichidan verb, Transitive verb', text: ['to live on (e.g. a salary); to live off'], examples: [] },
+] }], 'a sense with no part of speech shares the one before; Wikipedia and empty senses dropped');
+assert.deepEqual(parseJisho({ data: [
+  { japanese: [{ word: '来る', reading: 'きたる' }], senses: [{ english_definitions: ['next'], parts_of_speech: ['Pre-noun adjectival'] }] },
+  { japanese: [{ word: '来る', reading: 'くる' }], senses: [{ english_definitions: ['to come'], parts_of_speech: ['Kuru verb'] }] },
+] }, 'くる').map(e => e.phonetic), ['くる'], 'a kana query keeps the headword read that way');
+assert.deepEqual(parseJisho({ data: [{ japanese: [{ word: '走る', reading: 'はしる' }], senses: [{ english_definitions: ['to run'], parts_of_speech: ['Godan verb'] }] }, { japanese: [{ word: '走り', reading: 'はしり' }], senses: [{ english_definitions: ['running'], parts_of_speech: ['Noun'] }] }] }, 'はしっ').map(e => e.word), ['走る'], 'nothing exact: Jisho\'s first guess');
+assert.equal(parseJisho({ data: [] }, 'x'), null);
+assert.equal(parseJisho(null, 'x'), null);
+
+// --- Hand-over when a dictionary is unreachable or lacks the word (fake network) ---
+import { writeFileSync } from 'node:fs';
+const stub = join(tmpdir(), `http-stub-${process.pid}.mjs`);
+writeFileSync(stub, 'export const fetch = (...a) => globalThis.fakeFetch(...a);');
+const fbOut = join(tmpdir(), `dictionary-fb-${process.pid}.mjs`);
+await build({ entryPoints: ['utils/dictionary.ts'], bundle: true, format: 'esm', outfile: fbOut, alias: { '@tauri-apps/plugin-http': stub } });
+const fb = await import(fbOut);
+let hits;
+const reply = (status, body) => ({ ok: status < 400, status, json: async () => body, text: async () => body });
+const wikiLlegar = { es: [{ partOfSpeech: 'Verb', definitions: [{ definition: 'to arrive' }] }] };
+const net = {};
+globalThis.fakeFetch = async url => {
+  const host = new URL(url).host;
+  hits.push(host);
+  const r = net[host];
+  if (r === 'down') throw new Error('timed out');
+  return r ?? reply(404, {});
+};
+console.warn = () => {}; // the hand-over logs each unreachable dictionary
+const run = async (word, lang) => { hits = []; try { return (await fb.lookupWord(word, lang))?.map(e => e.source) ?? null; } catch { return 'offline'; } };
+// The English interface (node's navigator is en-US).
+store.clear();
+net['dictionary.cambridge.org'] = 'down';
+net['en.wiktionary.org'] = reply(200, wikiLlegar);
+assert.deepEqual(await run('llegar', 'es'), ['wiktionary'], 'the default answers');
+fb.saveDictChoice('es', 'cambridgeBi', 'en');
+assert.deepEqual(await run('llegar', 'es'), ['wiktionary'], 'chosen Cambridge unreachable → the default');
+net['dictionary.cambridge.org'] = reply(200, '<html></html>');
+globalThis.DOMParser = class { parseFromString() { return { querySelectorAll: () => [], querySelector: () => null }; } };
+assert.deepEqual(await run('llegar', 'es'), ['wiktionary'], 'chosen Cambridge without the word → the default');
+assert.deepEqual(hits, ['dictionary.cambridge.org', 'en.wiktionary.org']);
+net['dictionary.cambridge.org'] = 'down';
+net['en.wiktionary.org'] = reply(404, {});
+assert.equal(await run('zzz', 'es'), null, 'the default lacking the word is the answer, not offline');
+store.clear();
+assert.equal(await run('zzz', 'es'), null, 'default lacks it: no second try');
+assert.deepEqual(hits, ['en.wiktionary.org'], 'the default lacking the word: no second dictionary, no lower-case retry for a lower-case word');
+net['en.wiktionary.org'] = 'down';
+assert.equal(await run('llegar', 'es'), 'offline', 'default and second both unreachable → offline, not "not found"');
+net['dictionary.cambridge.org'] = reply(200, '<html></html>');
+assert.equal(await run('llegar', 'es'), null, 'default unreachable, second answers "not found"');
 
 console.log('test-dictionary: all passed');
 

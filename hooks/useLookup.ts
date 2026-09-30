@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import * as AI from '../utils/ai';
 import { DefinitionState, emptyDefinition } from '../components/DefinitionPanel';
-import { useT, getLang } from '../utils/i18n';
+import { useT } from '../utils/i18n';
 import { DictLang, lookupWord, senseList, DictEntry } from '../utils/dictionary';
 import { lookupJa } from '../utils/jaLookup';
 
 // Word lookup behind the definition popup, shared by the practice page and review.
 // Dictionary first. AI answers instead when the dictionary has nothing (or no
-// dictionary covers the language), and first when the UI is English, since
-// the dictionaries only give Chinese.
+// dictionary covers the language).
 export const useLookup = (dictLang: DictLang | null, currentContext: string) => {
   const t = useT();
   const [def, setDef] = useState<DefinitionState>(emptyDefinition);
@@ -36,7 +35,7 @@ export const useLookup = (dictLang: DictLang | null, currentContext: string) => 
     setDef({ ...emptyDefinition, word, anchor, loading: true });
     let dict: DictEntry[] | null = null;
     let offline = false;
-    if (dictLang && !(ai && getLang() === 'en')) {
+    if (dictLang) {
       try { dict = dictLang === 'ja' ? await lookupJa(word) : await lookupWord(word, dictLang); } catch (e) { offline = true; console.error('Dictionary lookup failed:', e); }
     }
     if (!mine()) return;

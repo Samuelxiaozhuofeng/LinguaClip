@@ -1,4 +1,6 @@
 import { fetch } from '@tauri-apps/plugin-http';
+import { getLang, type Lang } from './i18n';
+import { parseJisho, parseWiktionary } from './dictionaryEn';
 
 // Dictionary lookup without AI, after ODH (github.com/ninja33/ODH, MIT): the
 // same public dictionary pages it reads, fetched through the http plugin (no
@@ -7,7 +9,9 @@ import { fetch } from '@tauri-apps/plugin-http';
 // its parser, and the caller falls back to AI when it can.
 
 export type DictLang = 'en' | 'es' | 'fr' | 'de' | 'ja';
-export type DictSource = 'youdao' | 'cambridge' | 'eudic';
+// cambridge = English-Chinese, cambridgeEn = English-English, cambridgeBi =
+// Spanish / French / German-English. The English ones: docs/dictionary.md.
+export type DictSource = 'youdao' | 'cambridge' | 'eudic' | 'cambridgeEn' | 'cambridgeBi' | 'wiktionary' | 'jisho';
 
 // Eudic draws some Chinese characters as tiny images (anti-scraping), so a
 // definition is text interleaved with those glyph images.
@@ -15,44 +19,60 @@ export type Seg = string | { img: string };
 // One numbered meaning: what the user picks and sends to Anki on its own.
 // phrase = the set phrase it belongs to (Eudic, e.g. "llegar a ser").
 export interface Sense { pos: string; phrase?: string; text: Seg[]; examples: Seg[][] }
-// reading: the headword in kana (Japanese only).
-export interface DictEntry { word: string; phonetic: string; senses: Sense[]; source: DictSource; reading?: string }
+// reading: the headword in kana (Japanese only). note: the clicked word is a
+// form of this one ("first-person singular preterite of llegar").
+export interface DictEntry { word: string; phonetic: string; senses: Sense[]; source: DictSource; reading?: string; note?: string }
 
-// First option = the default. Youdao barely splits Spanish/French/German into
-// meanings and has no examples there, so Eudic leads for those.
-export const DICT_OPTIONS: Record<DictLang, DictSource[]> = {
-  en: ['youdao', 'cambridge'],
-  es: ['eudic', 'youdao'],
-  fr: ['eudic', 'youdao'],
-  de: ['eudic', 'youdao'],
-  ja: ['youdao'],
+// Which dictionaries each interface language lists; first option = the default.
+// Youdao barely splits Spanish/French/German into meanings and has no examples
+// there, so Eudic leads for those. An English interface lists only English ones.
+const OPTIONS: Record<Lang, Record<DictLang, DictSource[]>> = {
+  zh: {
+    en: ['youdao', 'cambridge', 'cambridgeEn', 'wiktionary'],
+    es: ['eudic', 'youdao', 'wiktionary', 'cambridgeBi'],
+    fr: ['eudic', 'youdao', 'wiktionary', 'cambridgeBi'],
+    de: ['eudic', 'youdao', 'wiktionary', 'cambridgeBi'],
+    ja: ['youdao', 'wiktionary', 'jisho'],
+  },
+  en: {
+    en: ['cambridgeEn', 'wiktionary'],
+    es: ['wiktionary', 'cambridgeBi'],
+    fr: ['wiktionary', 'cambridgeBi'],
+    de: ['wiktionary', 'cambridgeBi'],
+    ja: ['wiktionary', 'jisho'],
+  },
 };
 
-const STORAGE_KEY = 'linguaclip_dict_choice';
+export const dictOptions = (ui: Lang = getLang()) => OPTIONS[ui];
 
-const storedChoice = (): Record<string, unknown> => {
+// Each interface language keeps its own choice, so switching back restores it.
+// The Chinese one stays in the key older versions read.
+const storageKey = (ui: Lang) => (ui === 'zh' ? 'linguaclip_dict_choice' : 'linguaclip_dict_choice_en');
+
+const storedChoice = (ui: Lang): Record<string, unknown> => {
   try {
-    const v = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    const v = JSON.parse(localStorage.getItem(storageKey(ui)) || '{}');
     return v && typeof v === 'object' ? v : {};
   } catch {
     return {};
   }
 };
 
-export const getDictChoice = (): Record<DictLang, DictSource> => {
-  const stored = storedChoice();
+export const getDictChoice = (ui: Lang = getLang()): Record<DictLang, DictSource> => {
+  const stored = storedChoice(ui);
+  const options = OPTIONS[ui];
   const pick = {} as Record<DictLang, DictSource>;
-  for (const lang of Object.keys(DICT_OPTIONS) as DictLang[]) {
+  for (const lang of Object.keys(options) as DictLang[]) {
     const v = stored[lang] as DictSource;
-    pick[lang] = DICT_OPTIONS[lang].includes(v) ? v : DICT_OPTIONS[lang][0];
+    pick[lang] = options[lang].includes(v) ? v : options[lang][0];
   }
   return pick;
 };
 
 // Only the language the user touched is stored, so the others keep following
 // the default.
-export const saveDictChoice = (lang: DictLang, source: DictSource) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...storedChoice(), [lang]: source }));
+export const saveDictChoice = (lang: DictLang, source: DictSource, ui: Lang = getLang()) => {
+  localStorage.setItem(storageKey(ui), JSON.stringify({ ...storedChoice(ui), [lang]: source }));
 };
 
 // One word says little about its language (parler is also an English
@@ -161,12 +181,19 @@ export const parseYoudaoJa = (body: any): DictEntry[] | null => {
 
 const parseHtml = (html: string) => new DOMParser().parseFromString(html, 'text/html');
 
-export const parseCambridge = (html: string, word: string): DictEntry | null => {
+// English-Chinese and English-English pages hold entries in .entry-body__el; the
+// Spanish / French / German-English ones in .pr.di, where the English is the
+// translation (.trans) and leads, above the definition in the language itself.
+// Those two pages stack several dictionaries (learner's, American, business…):
+// only the first is read.
+export const parseCambridge = (html: string, word: string, source: DictSource = 'cambridge'): DictEntry | null => {
   const doc = parseHtml(html);
-  const entries = [...doc.querySelectorAll('.pr .entry-body__el')];
+  const bi = source === 'cambridgeBi';
+  const scope = source === 'cambridge' ? doc : doc.querySelector('.pr.dictionary') ?? doc;
+  const entries = [...scope.querySelectorAll(bi ? '.pr.di' : '.pr .entry-body__el')];
   const senses: Sense[] = [];
   for (const entry of entries) {
-    const pos = clean(entry.querySelector('.posgram')?.textContent);
+    const pos = clean(entry.querySelector('.posgram, .dpos-g')?.textContent);
     for (const block of entry.querySelectorAll('.def-block')) {
       const en = clean(block.querySelector('.ddef_h .def')?.textContent).replace(/:$/, '');
       const zh = clean(block.querySelector('.def-body > .trans')?.textContent);
@@ -175,13 +202,13 @@ export const parseCambridge = (html: string, word: string): DictEntry | null => 
         const tr = clean(x.querySelector('.trans')?.textContent);
         return [tr ? `${eg}\n${tr}` : eg];
       }).filter(x => x[0]);
-      if (en) senses.push({ pos, text: [zh ? `${en}\n${zh}` : en], examples });
+      if (bi ? zh : en) senses.push({ pos, text: [bi ? (en ? `${zh}\n${en}` : zh) : zh ? `${en}\n${zh}` : en], examples });
     }
   }
   if (senses.length === 0) return null;
   const first = entries[0];
   const ipa = clean(first?.querySelector('.us .ipa')?.textContent || first?.querySelector('.ipa')?.textContent);
-  return { word: clean(first?.querySelector('.headword')?.textContent) || word, phonetic: ipa ? `/${ipa}/` : '', senses, source: 'cambridge' };
+  return { word: clean(first?.querySelector('.headword, .dhw')?.textContent) || word, phonetic: ipa ? `/${ipa}/` : '', senses, source };
 };
 
 const EUDIC_HOST: Record<Exclude<DictLang, 'en' | 'ja'>, string> = {
@@ -304,19 +331,55 @@ export const parseEudic = (html: string): DictEntry | null => {
 
 // Origin '' drops the tauri://localhost Origin the http plugin adds by
 // default (needs its unsafe-headers feature): Youdao answers that with 400.
-const get = async (url: string): Promise<Response> => {
-  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', Origin: '' }, signal: AbortSignal.timeout(15_000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+// Wikimedia asks for a User-Agent that names the app; a 404 there = no such word.
+// Cambridge's bot check sometimes holds a request open rather than refusing it,
+// so it gets a shorter wait before the next dictionary takes over.
+const get = async (url: string, ua = 'Mozilla/5.0', ms = 15_000): Promise<Response> => {
+  const res = await fetch(url, { headers: { 'User-Agent': ua, Origin: '' }, signal: AbortSignal.timeout(ms) });
+  if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
   return res;
 };
 
+const WIKI_UA = 'LinguaClip (https://linguaclipapp.com; support@linguaclipapp.com)';
+const wiktionary = async (word: string, lang: DictLang) => {
+  try {
+    const body = await (await get(`https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(word)}`, WIKI_UA)).json();
+    return parseWiktionary(body, word, lang);
+  } catch (e) {
+    if ((e as { status?: number }).status === 404) return null;
+    throw e;
+  }
+};
+
+// The clicked word's own meanings lead; a word that is only a form of others
+// shows those (at most two: fue → ir, ser) with the grammar line as their note.
+// Sentence-initial capitals (Llegué) are retried in lower case, but only when
+// the page has nothing in this language: German Haus stays Haus.
+const lookupWiktionary = async (word: string, lang: DictLang): Promise<DictEntry[] | null> => {
+  let found = await wiktionary(word, lang);
+  if (!found && word !== word.toLowerCase()) found = await wiktionary(word.toLowerCase(), lang);
+  if (!found) return null;
+  const out: DictEntry[] = found.entry ? [found.entry] : [];
+  const forms = found.forms.filter((f, i, all) => all.findIndex(x => x.lemma === f.lemma) === i).slice(0, 2);
+  for (const [i, lemma] of (await Promise.all(forms.map(f => wiktionary(f.lemma, lang).catch(() => null)))).entries()) {
+    if (lemma?.entry) out.push({ ...lemma.entry, note: forms[i].note });
+  }
+  // Lemma pages unreachable or empty: the grammar lines are still worth showing.
+  if (out.length === 0 && forms.length) out.push({ word, phonetic: '', source: 'wiktionary', senses: forms.map(f => ({ pos: '', text: [f.note], examples: [] })) });
+  return out.length ? out : null;
+};
+
+const CAMBRIDGE_BI: Partial<Record<DictLang, string>> = { es: 'spanish-english', fr: 'french-english', de: 'german-english' };
+
 const fromSource = async (source: DictSource, word: string, lang: DictLang): Promise<DictEntry[] | null> => {
   const q = encodeURIComponent(word);
-  if (source === 'cambridge') {
-    const html = await (await get(`https://dictionary.cambridge.org/dictionary/english-chinese-simplified/${q}`)).text();
-    const entry = parseCambridge(html, word);
+  if (source === 'cambridge' || source === 'cambridgeEn' || (source === 'cambridgeBi' && CAMBRIDGE_BI[lang])) {
+    const path = source === 'cambridge' ? 'english-chinese-simplified' : source === 'cambridgeEn' ? 'english' : CAMBRIDGE_BI[lang];
+    const entry = parseCambridge(await (await get(`https://dictionary.cambridge.org/dictionary/${path}/${q}`, undefined, 8_000)).text(), word, source);
     return entry ? [entry] : null;
   }
+  if (source === 'wiktionary') return lookupWiktionary(word, lang);
+  if (source === 'jisho' && lang === 'ja') return parseJisho(await (await get(`https://jisho.org/api/v1/search/words?keyword=${q}`)).json(), word);
   if (source === 'eudic' && lang !== 'en' && lang !== 'ja') {
     const host = EUDIC_HOST[lang];
     const terms = pickEudicTerms(await (await get(`${host}/dicts/prefix/${q}`)).json(), word);
@@ -334,17 +397,23 @@ const fromSource = async (source: DictSource, word: string, lang: DictLang): Pro
 };
 
 // null = the dictionary has no such word; throws when it cannot be reached.
-// Cambridge sits behind a bot check that turns requests away now and then, so
-// an unreachable Cambridge or Eudic falls back to Youdao for that lookup.
+// Cambridge sits behind a bot check that turns requests away now and then, and
+// Cambridge's Spanish-English has no conjugated forms, so a chosen dictionary
+// that is unreachable or lacks the word hands over to the interface's default;
+// an unreachable default hands over to the second on the list.
 export const lookupWord = async (word: string, lang: DictLang): Promise<DictEntry[] | null> => {
-  const source = getDictChoice()[lang];
+  const ui = getLang();
+  const list = OPTIONS[ui][lang];
+  const source = getDictChoice(ui)[lang];
+  const next = source === list[0] ? list[1] : list[0];
   try {
-    return await fromSource(source, word, lang);
+    const found = await fromSource(source, word, lang);
+    if (found || source === list[0] || !next) return found;
   } catch (e) {
-    if (source === 'youdao') throw e;
-    console.warn(`Dictionary ${source} unreachable, using Youdao:`, e);
-    return fromSource('youdao', word, lang);
+    if (!next) throw e;
+    console.warn(`Dictionary ${source} unreachable, using ${next}:`, e);
   }
+  return fromSource(next, word, lang);
 };
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

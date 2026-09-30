@@ -297,7 +297,11 @@ export const zh: Record<keyof typeof en, string> = {
   'definition.noPick': 'AI 觉得没有一条完全对得上。',
   'definition.explaining': 'AI 正在找这句里是哪一条…',
   'dict.youdao': '有道',
-  'dict.cambridge': '剑桥',
+  'dict.cambridge': '剑桥英汉',
+  'dict.cambridgeEn': '剑桥英英',
+  'dict.cambridgeBi': '剑桥',
+  'dict.wiktionary': 'Wiktionary',
+  'dict.jisho': 'Jisho',
   'dict.eudic': '欧路',
   'dict.en': '英语',
   'dict.es': '西班牙语',
@@ -305,7 +309,7 @@ export const zh: Record<keyof typeof en, string> = {
   'dict.de': '德语',
   'dict.ja': '日语',
   'settingsGeneral.dictionary': '查词词典',
-  'settingsGeneral.dictionaryHint': '点字幕里的单词时用哪本词典，视频语言按字幕自动认。中文等没有词典，配了 AI 会直接问 AI。',
+  'settingsGeneral.dictionaryHint': '点字幕里的单词时用哪本词典，视频语言按字幕自动认；选的词典连不上或查不到时改查第一本。中文等没有词典，配了 AI 会直接问 AI。',
 
   // --- BlurLine.tsx ---
   'blur.reveal': '显示',
