@@ -12,6 +12,7 @@ mod dicts;
 mod dicts_import;
 mod groq;
 mod import;
+mod import_queue;
 mod ja_dict;
 mod paths;
 mod tts;
@@ -40,6 +41,7 @@ pub fn run() {
     })
     .invoke_handler(tauri::generate_handler![
       import::start_import,
+      import::cancel_import,
       import::open_youtube_login,
       import::probe_import_sizes,
       anki::anki_request,

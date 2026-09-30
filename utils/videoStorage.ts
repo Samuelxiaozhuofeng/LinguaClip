@@ -4,6 +4,7 @@
 
 import { VideoRecord, PracticeProgress, LearningMode, BlurPlaybackMode } from '../types';
 import * as FileSystemAccess from './fileSystemAccess';
+import { parseSRT } from './srtParser';
 
 const STORAGE_KEY_PROGRESS = 'linguaclip_video_progress';
 
@@ -56,15 +57,11 @@ export const createVideoRecord = async (
 /**
  * Get all video records
  */
+// Throws when the store can't be read: that is not the same as having no records.
 export const getAllVideoRecords = async (): Promise<VideoRecord[]> => {
-  try {
-    const records = await FileSystemAccess.getAllVideosFromDB();
-    // Sort by last practiced (most recent first)
-    return records.sort((a, b) => b.lastPracticed - a.lastPracticed);
-  } catch (error) {
-    console.error('Failed to get video records:', error);
-    return [];
-  }
+  const records = await FileSystemAccess.getAllVideosFromDB();
+  // Sort by last practiced (most recent first)
+  return records.sort((a, b) => b.lastPracticed - a.lastPracticed);
 };
 
 /**
@@ -78,6 +75,17 @@ export const getVideoRecord = async (id: string): Promise<VideoRecord | null> =>
     return null;
   }
 };
+
+/**
+ * Change one record in place: read and write happen in one transaction, so two
+ * updates at once (progress + a setting) can't roll each other back. `change`
+ * must be synchronous; return null to leave the record alone. A deleted record
+ * stays deleted. Resolves with what was written, or null.
+ */
+export const updateVideoWith = (
+  id: string,
+  change: (record: VideoRecord) => VideoRecord | null
+): Promise<VideoRecord | null> => FileSystemAccess.updateVideoInDB(id, change);
 
 /**
  * Update video record
@@ -113,20 +121,21 @@ export const updateProgress = async (
   absoluteIndex: number = currentSubtitleIndex // index across the whole video (sections restart at 0)
 ): Promise<void> => {
   try {
-    const record = await getVideoRecord(videoId);
-    if (!record) return;
-
-    // Update progress
-    record.currentSubtitleIndex = currentSubtitleIndex;
-    record.currentSectionIndex = currentSectionIndex;
-    record.lastPracticed = Date.now();
-    
-    // Calculate completion rate
-    if (record.totalSubtitles > 0) {
-      record.completionRate = Math.min(100, Math.round((absoluteIndex / record.totalSubtitles) * 100));
-    }
-
-    await updateVideoRecord(record);
+    await updateVideoWith(videoId, record => {
+      // Counted again: a record saved by an older parser may hold a different total.
+      const totalSubtitles = parseSRT(record.subtitleText).length || record.totalSubtitles;
+      return {
+        ...record,
+        currentSubtitleIndex,
+        currentSectionIndex,
+        lastPracticed: Date.now(),
+        totalSubtitles,
+        // Calculate completion rate
+        ...(totalSubtitles > 0 && {
+          completionRate: Math.min(100, Math.round((absoluteIndex / totalSubtitles) * 100)),
+        }),
+      };
+    });
   } catch (error) {
     console.error('Failed to update progress:', error);
   }
@@ -138,21 +147,6 @@ export const updateProgress = async (
 export const getSubtitleFileFromRecord = (record: VideoRecord): File => {
   const blob = new Blob([record.subtitleText], { type: 'text/plain' });
   return new File([blob], record.subtitleFileName, { type: 'text/plain' });
-};
-
-/**
- * Update total practice time
- */
-export const updatePracticeTime = async (videoId: string, additionalSeconds: number): Promise<void> => {
-  try {
-    const record = await getVideoRecord(videoId);
-    if (!record) return;
-
-    record.totalPracticeTime += additionalSeconds;
-    await updateVideoRecord(record);
-  } catch (error) {
-    console.error('Failed to update practice time:', error);
-  }
 };
 
 /**
@@ -187,15 +181,13 @@ export const formatLastPracticed = (timestamp: number): string => {
 /**
  * Remember the mode the user picked for this video (last-used wins).
  */
-// Re-reads the record before writing so a caller holding a stale copy can't roll back progress.
+// Merged into the stored record inside one transaction, so a caller holding a stale copy can't roll back progress.
 export const patchVideoRecord = async (
   videoId: string,
   patch: Partial<Pick<VideoRecord, 'learningMode' | 'blurPlaybackMode' | 'videoPath' | 'lastPracticed' | 'lang'>>
 ): Promise<void> => {
   try {
-    const record = await getVideoRecord(videoId);
-    if (!record) return;
-    await updateVideoRecord({ ...record, ...patch });
+    await updateVideoWith(videoId, record => ({ ...record, ...patch }));
   } catch (error) {
     console.error('Failed to patch video record:', error);
   }

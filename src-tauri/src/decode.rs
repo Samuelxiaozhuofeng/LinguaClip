@@ -43,6 +43,7 @@ pub fn to_wav(video: &Path, wav: &Path) -> Result<(), String> {
   let mut down = Downsampler::new(rate);
   let mut buf: Option<SampleBuffer<f32>> = None;
   loop {
+    crate::import_queue::check()?; // the card was deleted
     let packet = match format.next_packet() {
       Ok(p) => p,
       Err(Error::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,

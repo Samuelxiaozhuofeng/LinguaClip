@@ -1,35 +1,28 @@
 import { Subtitle } from '../types';
 
-// Helper to convert SRT timestamp (00:00:00,000) to seconds
+// "00:01:02,500", "00:01:02.5" or "01:02,500" to seconds; NaN when it is none of these.
 const timeToSeconds = (timeString: string): number => {
-  const [time, milliseconds] = timeString.split(',');
-  const [hours, minutes, seconds] = time.split(':').map(Number);
-  return hours * 3600 + minutes * 60 + seconds + Number(milliseconds) / 1000;
+  const m = timeString.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2})(?:[,.](\d{1,3}))?/);
+  if (!m) return NaN;
+  const [, h = '0', min, sec, ms = '0'] = m;
+  return Number(h) * 3600 + Number(min) * 60 + Number(sec) + Number(ms.padEnd(3, '0')) / 1000;
 };
 
 export const parseSRT = (data: string): Subtitle[] => {
-  // Normalize line endings
+  // Normalize line endings; a "blank" line holding spaces still ends a block
   const normalizedData = data.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const blocks = normalizedData.split('\n\n');
-  
+  const blocks = normalizedData.split(/\n[ \t\u00a0]*\n/);
+
   const subtitles: Subtitle[] = [];
-  let idCounter = 1;
 
   blocks.forEach((block) => {
     const lines = block.trim().split('\n');
     if (lines.length >= 2) {
       // Handle index (sometimes missing or weirdly formatted, so we rely on regex finding the timestamp)
-      let timeLineIndex = 0;
-      const timeMatch = lines.find((line, index) => {
-        if (line.includes('-->')) {
-          timeLineIndex = index;
-          return true;
-        }
-        return false;
-      });
+      const timeLineIndex = lines.findIndex(line => line.includes('-->'));
 
-      if (timeMatch) {
-        const [startStr, endStr] = timeMatch.split('-->').map((s) => s.trim());
+      if (timeLineIndex >= 0) {
+        const [startStr, endStr] = lines[timeLineIndex].split('-->');
         const startTime = timeToSeconds(startStr);
         const endTime = timeToSeconds(endStr);
 
@@ -40,18 +33,17 @@ export const parseSRT = (data: string): Subtitle[] => {
           .replace(/<[^>]*>/g, '') // Remove HTML tags like <i> or <b> often found in SRT
           .trim();
 
-        if (text && !isNaN(startTime) && !isNaN(endTime)) {
-          subtitles.push({
-            id: idCounter++,
-            startTime,
-            endTime,
-            text,
-          });
+        // A line that ends before it starts is broken: nothing to play.
+        if (text && !isNaN(startTime) && !isNaN(endTime) && endTime >= startTime) {
+          subtitles.push({ id: 0, startTime, endTime, text });
         }
       }
     }
   });
 
+  // Everything downstream (lineAt, sections, practice order) assumes start order.
+  subtitles.sort((a, b) => a.startTime - b.startTime);
+  subtitles.forEach((s, i) => { s.id = i + 1; });
   return subtitles;
 };
 

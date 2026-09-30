@@ -18,7 +18,7 @@ import { getAllVideosFromDB } from './fileSystemAccess';
 
 type ImportProgressPayload = {
   id: string;
-  stage: 'setup' | 'download' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'done' | 'error';
+  stage: 'queued' | 'setup' | 'download' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'done' | 'error';
   percent?: number;
   error?: string;
   videoPath?: string;
@@ -168,15 +168,18 @@ async function startImport(
   try {
     await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...jobArgs(record.importJob!) });
   } catch (err) {
-    const rec = await VideoStorage.getVideoRecord(id);
-    if (!rec?.importJob) return;
     const detail = err instanceof Error ? err.message : String(err);
-    await VideoStorage.updateVideoRecord({
-      ...rec,
-      importJob: { ...rec.importJob, error: formatImportError(detail) },
-    });
+    await VideoStorage.updateVideoWith(id, rec => rec.importJob
+      ? { ...rec, importJob: { ...rec.importJob, error: formatImportError(detail) } }
+      : null);
     notify();
   }
+}
+
+// Stops a queued or running import (the record is being deleted). Nothing to
+// stop is fine: the job may have just finished.
+export function cancelImport(id: string): Promise<void> {
+  return invoke('cancel_import', { id });
 }
 
 export function startUrlImport(url: string, lang: string, quality: ImportQuality = 1080): Promise<void> {
@@ -220,20 +223,21 @@ export async function retryImport(id: string, convert = false): Promise<void> {
   if (!reuse) delete next.converted;
   const source = reuse ? next.converted! : job.source;
   const args = reuse ? { convert: false, subs: jobArgs(next).subs } : jobArgs(next);
-  await VideoStorage.updateVideoRecord({ ...rec, importJob: next });
+  // Deleted while we looked for the converted file: nothing to retry.
+  const saved = await VideoStorage.updateVideoWith(id, r => r.importJob ? { ...r, importJob: next } : null)
+    .catch(err => { console.error(err); return null; });
+  if (!saved) {
+    retrying.delete(id);
+    return;
+  }
   notify();
   try {
     // Uses the engine picked in Settings now, not the one this card started
     // with: switching to the cloud after a failed download is a way out.
     await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...args });
   } catch (err) {
-    const fresh = await VideoStorage.getVideoRecord(id);
-    if (!fresh?.importJob) return;
     const detail = err instanceof Error ? err.message : String(err);
-    await VideoStorage.updateVideoRecord({
-      ...fresh,
-      importJob: { ...fresh.importJob, error: detail },
-    });
+    await VideoStorage.updateVideoWith(id, r => r.importJob ? { ...r, importJob: { ...r.importJob, error: detail } } : null);
     notify();
   } finally {
     retrying.delete(id);
@@ -271,30 +275,33 @@ async function applyProgress(payload: ImportProgressPayload): Promise<void> {
     if (!videoPath) return;
     // Last step of an import: re-cut whisper's lines into short, sensible ones.
     // It can fail (no router, model hiccup); then we keep what whisper gave us.
-    await VideoStorage.updateVideoRecord({
-      ...rec,
-      importJob: { ...rec.importJob, stage: 'segment', percent: undefined },
-    });
+    await VideoStorage.updateVideoWith(rec.id, r => r.importJob
+      ? { ...r, importJob: { ...r.importJob, stage: 'segment', percent: undefined } }
+      : null);
     notify();
     const recut = payload.words ? await resegment(payload.words) : null;
-    // The re-cut can take a minute; a record deleted meanwhile must stay deleted.
-    if (!(await VideoStorage.getVideoRecord(rec.id))) return;
     // Their own .srt came with the record and stays as it is.
     const own = rec.importJob.subs === 'own';
-    const subtitleText = own ? rec.subtitleText : recut ?? payload.subtitleText ?? '';
     const name = fileNameFromPath(videoPath);
-    const rest = { ...rec };
-    delete rest.importJob;
-    await VideoStorage.updateVideoRecord({
-      ...rest,
-      displayName: name,
-      videoFileName: name,
-      videoPath,
-      subtitleText,
-      subtitleFileName: own ? rec.subtitleFileName : srtNameFromVideo(videoPath),
-      totalSubtitles: parseSRT(subtitleText).length,
-      lastPracticed: Date.now(),
+    // The re-cut can take a minute; a record deleted meanwhile must stay deleted.
+    const finished = await VideoStorage.updateVideoWith(rec.id, r => {
+      if (!r.importJob) return null;
+      const subtitleText = own ? r.subtitleText : recut ?? payload.subtitleText ?? '';
+      const rest = { ...r };
+      delete rest.importJob;
+      return {
+        ...rest,
+        displayName: name,
+        videoFileName: name,
+        videoPath,
+        subtitleText,
+        subtitleFileName: own ? r.subtitleFileName : srtNameFromVideo(videoPath),
+        totalSubtitles: parseSRT(subtitleText).length,
+        lastPracticed: Date.now(),
+      };
     });
+    if (!finished) return;
+    const { subtitleText } = finished;
     if (rec.importJob.trashOriginal) await trashOriginal(rec.id, rec.importJob.source, videoPath);
     // Opted-in AI prep starts in the background; the shelf shows its progress.
     const ai = getAIConfig();
@@ -308,26 +315,23 @@ async function applyProgress(payload: ImportProgressPayload): Promise<void> {
   }
 
   if (payload.stage === 'error') {
-    await VideoStorage.updateVideoRecord({
-      ...rec,
-      importJob: {
-        ...rec.importJob,
-        error: payload.error ?? '',
-      },
-    });
+    await VideoStorage.updateVideoWith(rec.id, r => r.importJob
+      ? { ...r, importJob: { ...r.importJob, error: payload.error ?? '' } }
+      : null);
     return;
   }
 
-  await VideoStorage.updateVideoRecord({
-    ...rec,
+  const stage = payload.stage;
+  await VideoStorage.updateVideoWith(rec.id, r => r.importJob ? {
+    ...r,
     importJob: {
-      ...rec.importJob,
-      stage: payload.stage,
-      percent: payload.percent ?? rec.importJob.percent,
+      ...r.importJob,
+      stage,
+      percent: payload.percent ?? r.importJob.percent,
       // The last conversion event carries the new mp4.
-      ...(payload.stage === 'convert' && payload.videoPath && { converted: payload.videoPath }),
+      ...(stage === 'convert' && payload.videoPath && { converted: payload.videoPath }),
     },
-  });
+  } : null);
 }
 
 // Only once the whole import has succeeded, and never while any other record
@@ -369,10 +373,9 @@ export async function markInterruptedJobs(): Promise<void> {
   let changed = false;
   for (const rec of records) {
     if (!rec.importJob || rec.importJob.error) continue;
-    await VideoStorage.updateVideoRecord({
-      ...rec,
-      importJob: { ...rec.importJob, error: t('import.errorInterrupted') },
-    });
+    await VideoStorage.updateVideoWith(rec.id, r => r.importJob && !r.importJob.error
+      ? { ...r, importJob: { ...r.importJob, error: t('import.errorInterrupted') } }
+      : null);
     changed = true;
   }
   if (changed) notify();

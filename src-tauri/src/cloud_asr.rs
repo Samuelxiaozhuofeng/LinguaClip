@@ -73,6 +73,8 @@ pub(crate) fn transcribe_in_pieces(
   let mut words: Vec<Word> = Vec::new();
   let pieces: Vec<(u64, u64)> = cuts.windows(2).map(|w| (w[0], w[1])).collect();
   for (i, &(from, to)) in pieces.iter().enumerate() {
+    // The card was deleted: send no more pieces (each one costs the user's quota).
+    crate::import_queue::check()?;
     let audio = piece_audio(&mut file, data_at, from, to, stem, i)?;
     let resp = tauri::async_runtime::block_on(async {
       match provider {

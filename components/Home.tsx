@@ -6,7 +6,7 @@ import { forgetCustomPos, forgetWatchPos, formatTimeCode, getCustomConfig, getCu
 import { parseSRT } from '../utils/srtParser';
 import { buildSections } from '../utils/sections';
 import { fileNameFromPath, isVideoFile, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
-import { canConvertRetry, formatImportError, isCookieError, openYouTubeLogin, retryImport, subscribeImportJobs } from '../utils/importJob';
+import { cancelImport, canConvertRetry, formatImportError, isCookieError, openYouTubeLogin, retryImport, subscribeImportJobs } from '../utils/importJob';
 import { Btn, Menu, MenuItem, inputCls } from './ui';
 import { DECK_LANGS, langName, videoLang } from '../utils/deckLang';
 import type { DictLang } from '../utils/dictionary';
@@ -50,6 +50,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   const t = useT();
   const lang = useLang();
   const [videos, setVideos] = useState<VideoRecord[] | null>(null);
+  // The records could not be read (not the same as having none): shown only before any list loaded.
+  const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => { onEmptyChange?.(videos?.length === 0); }, [videos, onEmptyChange]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
@@ -100,7 +102,10 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   }, [videos, sectionLength]);
 
   const loadVideos = useCallback(() => {
-    VideoStorage.getAllVideoRecords().then(setVideos).catch(() => setVideos([]));
+    setLoadFailed(false);
+    VideoStorage.getAllVideoRecords()
+      .then(setVideos)
+      .catch(err => { console.error(err); setLoadFailed(true); });
   }, []);
   useEffect(() => {
     loadVideos();
@@ -217,6 +222,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
     await Promise.all([cancelPrep(v.id), cancelCloze(v.id), cancelSegments(v.id), cancelLevels(v.id), cancelTrans(v.id)]);
     try {
       await VideoStorage.deleteVideoRecord(v.id);
+      // Still generating or waiting its turn: stop it, its events are ignored from here on.
+      if (v.importJob) cancelImport(v.id).catch(console.error);
       setVideos(prev => (prev ? prev.filter(x => x.id !== v.id) : prev));
       forgetCustomPos(v.id);
       forgetWatchPos(v.id);
@@ -247,6 +254,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
 
   const jobLabel = (job: NonNullable<VideoRecord['importJob']>) => {
     const pct = job.percent ?? 0;
+    if (job.stage === 'queued') return t('import.stageQueued');
     if (job.stage === 'setup') return t('import.stageSetup', { pct });
     if (job.stage === 'convertSetup') return t('import.stageConvertSetup', { pct });
     if (job.stage === 'convert') return t('import.stageConvert', { pct });
@@ -383,7 +391,13 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
       )}
       {adding && <AddVideo initialPath={adding.path} initialSrt={adding.srt ?? null} onClose={closeAdd} onPractice={rec => onResume(rec, LearningMode.DICTATION)} />}
 
-      {videos === null ? (
+      {videos === null && loadFailed ? (
+        <div className="pt-28 flex flex-col items-center text-center">
+          <p className="text-2xl font-semibold">{t('home.loadFailTitle')}</p>
+          <p className="mt-3 text-sm text-mute max-w-sm leading-relaxed">{t('home.loadFailBody')}</p>
+          <Btn tone="accent" className="mt-6" onClick={loadVideos}>{t('home.loadRetry')}</Btn>
+        </div>
+      ) : videos === null ? (
         <div className="pt-24 flex justify-center text-mute"><Loader2 className="animate-spin" size={20} /></div>
       ) : videos.length === 0 ? (
         <div className="pt-28 flex flex-col items-center text-center">

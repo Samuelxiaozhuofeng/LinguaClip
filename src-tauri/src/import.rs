@@ -1,8 +1,10 @@
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 use crate::paths::{command, home_dir, own_dir as movies_dir};
@@ -300,9 +302,16 @@ fn parse_quality_sizes(json: &serde_json::Value) -> QualitySizes {
 pub(crate) fn run_streaming(mut cmd: Command, mut on_line: impl FnMut(&str)) -> Result<(i32, String), String> {
   cmd.stdout(Stdio::piped());
   cmd.stderr(Stdio::piped());
+  // Its own process group, so a cancel also stops helpers it starts (a
+  // single-file yt-dlp unpacks itself and runs as a child that holds our pipes).
+  #[cfg(unix)]
+  std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
   let mut child = cmd.spawn().map_err(|e| e.to_string())?;
   let stdout = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;
   let stderr = child.stderr.take().ok_or_else(|| "no stderr".to_string())?;
+  // Deleting the card kills it (only when this runs on an import's thread).
+  let child = Arc::new(Mutex::new(child));
+  crate::import_queue::watch(&child);
   let (tx, rx) = mpsc::channel::<(bool, String)>();
   let tx_out = tx.clone();
   thread::spawn(move || {
@@ -316,15 +325,35 @@ pub(crate) fn run_streaming(mut cmd: Command, mut on_line: impl FnMut(&str)) -> 
     }
   });
   let mut err_acc = String::new();
-  for (is_err, line) in rx {
-    on_line(&line);
-    if is_err {
-      err_acc.push_str(&line);
-      err_acc.push('\n');
+  loop {
+    match rx.recv_timeout(Duration::from_millis(200)) {
+      Ok((is_err, line)) => {
+        on_line(&line);
+        if is_err {
+          err_acc.push_str(&line);
+          err_acc.push('\n');
+        }
+      }
+      // Cancelled: don't wait for whatever still holds the pipes.
+      Err(RecvTimeoutError::Timeout) if crate::import_queue::check().is_err() => {
+        crate::import_queue::kill(&child);
+        break;
+      }
+      Err(RecvTimeoutError::Timeout) => {}
+      Err(RecvTimeoutError::Disconnected) => break,
     }
   }
-  let status = child.wait().map_err(|e| e.to_string())?;
-  let code = status.code().unwrap_or(-1);
+  // Polled, never held across a wait, so cancel_import can't block on this lock.
+  let status = loop {
+    match child.lock().unwrap_or_else(PoisonError::into_inner).try_wait() {
+      Ok(Some(status)) => break Ok(status),
+      Ok(None) => {}
+      Err(e) => break Err(e),
+    }
+    thread::sleep(Duration::from_millis(50));
+  };
+  crate::import_queue::unwatch();
+  let code = status.map_err(|e| e.to_string())?.code().unwrap_or(-1);
   // yt-dlp puts the useful part at the start of its last "ERROR:" line, so keep
   // the head of that line; other tools get the plain tail.
   let summary = match err_acc.rfind("ERROR:") {
@@ -421,6 +450,7 @@ pub(crate) fn extract_wav(video: &Path, wav: &Path, mut on_setup: impl FnMut(u32
   let video_s = video.to_str().ok_or_else(|| "extract:bad path".to_string())?;
   let wav_s = wav.to_str().ok_or_else(|| "extract:bad path".to_string())?;
   if let Err(first) = native_extract(video_s, wav_s) {
+    crate::import_queue::check()?;
     log::error!("native extract failed, trying ffmpeg: {first}");
     let mut downloaded = false;
     let ffmpeg = crate::convert::ensure(|pct| {
@@ -430,14 +460,13 @@ pub(crate) fn extract_wav(video: &Path, wav: &Path, mut on_setup: impl FnMut(u32
     if downloaded {
       on_setup(100);
     }
-    let output = command(ffmpeg)
-      .env("PATH", augmented_path())
-      .args(["-y", "-loglevel", "error", "-i", video_s, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav_s])
-      .output()
-      .map_err(|e| format!("extract:{e}"))?;
-    if !output.status.success() {
-      let err = String::from_utf8_lossy(&output.stderr);
-      return Err(format!("extract:{}", tail_chars(&err, 300)));
+    let mut cmd = command(ffmpeg);
+    cmd.env("PATH", augmented_path())
+      .args(["-y", "-loglevel", "error", "-i", video_s, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav_s]);
+    // run_streaming, so deleting the card stops it.
+    let (code, err) = run_streaming(cmd, |_| {}).map_err(|e| format!("extract:{e}"))?;
+    if code != 0 {
+      return Err(format!("extract:{err}"));
     }
   }
   if !wav.is_file() {
@@ -448,14 +477,12 @@ pub(crate) fn extract_wav(video: &Path, wav: &Path, mut on_setup: impl FnMut(u32
 
 #[cfg(target_os = "macos")]
 fn native_extract(video: &str, wav: &str) -> Result<(), String> {
-  let output = command("/usr/bin/afconvert")
-    .args(["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", video, wav])
-    .output()
-    .map_err(|e| e.to_string())?;
-  if output.status.success() {
-    Ok(())
-  } else {
-    Err(String::from_utf8_lossy(&output.stderr).into_owned())
+  let mut cmd = command("/usr/bin/afconvert");
+  cmd.args(["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", video, wav]);
+  // run_streaming, so deleting the card stops it.
+  match run_streaming(cmd, |_| {})? {
+    (0, _) => Ok(()),
+    (_, err) => Err(err),
   }
 }
 
@@ -784,6 +811,7 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
     )),
     Engine::Cloud { .. } => None,
   };
+  crate::import_queue::check()?;
 
   let video = if is_url(source) {
     if !is_youtube_url(source) {
@@ -802,6 +830,7 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
 
   // What the player cannot open becomes an mp4 in our folder first. Its path
   // goes out with the last progress event, so a retry can skip this step.
+  crate::import_queue::check()?;
   let mut track_text = None;
   let video = if convert || !crate::convert::plays_natively(&video) {
     let ffmpeg = crate::convert::ensure(|pct| emit(app, ImportProgress::stage(id, "convertSetup", Some(pct))))?;
@@ -843,20 +872,21 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
   srt_name.push(".srt");
   let srt = dir.join(srt_name);
 
+  crate::import_queue::check()?;
   emit(app, ImportProgress::stage(id, "extract", None));
   extract_wav(&video, &wav, |pct| {
     let stage = if pct < 100 { ImportProgress::stage(id, "convertSetup", Some(pct)) } else { ImportProgress::stage(id, "extract", Some(0)) };
     emit(app, stage);
   })?;
 
-  let result = match (&parts, engine) {
+  let result = crate::import_queue::check().and_then(|()| match (&parts, engine) {
     (Some((parts, tier)), _) => {
       emit(app, ImportProgress::stage(id, "transcribe", Some(0)));
       let on_pct = |pct| emit(app, ImportProgress::stage(id, "transcribe", Some(pct)));
       let run = |whisper: &Path| transcribe(on_pct, whisper, &parts.model, &parts.vad, tier.dtw(), lang, &wav, &work);
       // A graphics card whose driver cannot run it: same job again on the CPU.
       match (run(&parts.whisper), &parts.fallback) {
-        (Err(e), Some(cpu)) => {
+        (Err(e), Some(cpu)) if crate::import_queue::check().is_ok() => {
           log::error!("gpu transcribe failed, retrying on cpu: {e}");
           emit(app, ImportProgress::stage(id, "transcribe", Some(0)));
           run(cpu)
@@ -872,7 +902,7 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
       crate::cloud_asr::transcribe(on_pct, *provider, api_key, lang, &wav, &work).map(Some)
     }
     (None, Engine::Local(..)) => unreachable!("local engine without subtitles always has parts"),
-  }
+  })
   .and_then(|words| {
     std::fs::rename(work.with_extension("srt"), &srt).map_err(|e| format!("transcribe:{e}"))?;
     Ok(words)
@@ -885,6 +915,12 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
     let _ = std::fs::remove_file(work.with_extension("srt"));
   }
   let cloud_words = result?;
+  // Deleted while a cloud upload finished: its subtitles belong to no card.
+  if let Err(e) = crate::import_queue::check() {
+    let _ = std::fs::remove_file(&json);
+    let _ = std::fs::remove_file(&srt);
+    return Err(e);
+  }
 
   let subtitle_text = std::fs::read_to_string(&srt).map_err(|e| {
     let _ = std::fs::remove_file(&json);
@@ -962,8 +998,16 @@ pub fn start_import(
     _ => return Err("bad-engine".into()),
   };
   let convert = convert.unwrap_or(false);
+  // Their own .srt and a video the player opens: nothing heavy to do, no waiting.
+  let light = subs.is_some() && !convert && !is_url(&source) && crate::convert::plays_natively(Path::new(source.trim()));
   thread::spawn(move || {
-    if let Err(e) = run_import(&app, &id, &source, &lang, quality, &engine, convert, subs) {
+    let run = || run_import(&app, &id, &source, &lang, quality, &engine, convert, subs);
+    let result = if light {
+      run()
+    } else {
+      crate::import_queue::wait_turn(&id, || emit(&app, ImportProgress::stage(&id, "queued", None))).and_then(|_turn| run())
+    };
+    if let Err(e) = result {
       emit(
         &app,
         ImportProgress {
@@ -979,6 +1023,12 @@ pub fn start_import(
     }
   });
   Ok(())
+}
+
+// The card is being deleted: stop its import, queued or running.
+#[tauri::command]
+pub fn cancel_import(id: String) {
+  crate::import_queue::cancel(&id);
 }
 
 #[tauri::command]
