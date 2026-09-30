@@ -249,6 +249,53 @@ assert.equal(await run('llegar', 'es'), 'offline', 'default and second both unre
 net['dictionary.cambridge.org'] = reply(200, '<html></html>');
 assert.equal(await run('llegar', 'es'), null, 'default unreachable, second answers "not found"');
 
+// --- Online / local switches and order (docs/dictionary.md「查词顺序与开关」), local dictionaries faked ---
+const localStub = join(tmpdir(), `local-stub-${process.pid}.mjs`);
+writeFileSync(localStub, `export const localDictsReady = async () => {};
+export const localDictsFor = lang => globalThis.fakeLocal?.[lang] ? [{}] : [];
+export const lookupLocal = async (word, lang) => { globalThis.localHits?.push(word); return globalThis.fakeLocal?.[lang]?.[word] ?? null; };`);
+const swOut = join(tmpdir(), `dictionary-sw-${process.pid}.mjs`);
+await build({ entryPoints: ['utils/dictionary.ts'], bundle: true, format: 'esm', outfile: swOut, alias: { '@tauri-apps/plugin-http': stub },
+  plugins: [{ name: 'local', setup: b => b.onResolve({ filter: /\/localDict$/ }, () => ({ path: localStub })) }] });
+const sw = await import(swOut);
+const runSw = async (word, lang) => { hits = []; globalThis.localHits = []; try { return (await sw.lookupWord(word, lang))?.map(e => e.source) ?? null; } catch { return 'offline'; } };
+const L = [{ word: 'llegar', phonetic: '', senses: [], source: 'local' }];
+globalThis.fakeLocal = { es: { llegar: L } };
+store.clear();
+net['en.wiktionary.org'] = reply(404, {});
+assert.deepEqual(sw.getDictSources('en'), { online: true, local: true, localFirst: true }, 'defaults: English interface local first');
+assert.deepEqual(sw.getDictSources('zh'), { online: true, local: true, localFirst: false }, 'defaults: Chinese interface online first');
+sw.saveDictSources({ localFirst: false });
+assert.deepEqual(await runSw('llegar', 'es'), ['local'], 'online default lacks the word → local still asked');
+assert.deepEqual(hits, ['en.wiktionary.org']);
+net['en.wiktionary.org'] = reply(200, wikiLlegar);
+assert.deepEqual(await runSw('llegar', 'es'), ['wiktionary'], 'online answers first');
+assert.deepEqual(globalThis.localHits, [], 'local not asked once online answered');
+sw.saveDictSources({ localFirst: true });
+assert.deepEqual(await runSw('llegar', 'es'), ['local'], 'local first');
+assert.deepEqual(hits, [], 'online untouched when local answers first');
+sw.saveDictSources({ local: false });
+assert.deepEqual(await runSw('llegar', 'es'), ['wiktionary'], 'local off: online only');
+assert.deepEqual(globalThis.localHits, []);
+sw.saveDictSources({ local: true, online: false });
+assert.deepEqual(await runSw('llegar', 'es'), ['local'], 'online off: local only');
+assert.deepEqual(hits, []);
+assert.equal(await runSw('zzz', 'es'), null, 'online off, local lacks it');
+assert.deepEqual(hits, []);
+assert.equal(await sw.dictsOff('es'), null);
+assert.equal(await sw.dictsOff('fr'), 'noLocal', 'online off, no local dictionary for French');
+sw.saveDictSources({ local: false });
+assert.equal(await sw.dictsOff('es'), 'all');
+sw.saveDictSources({ online: true, localFirst: false });
+assert.equal(await sw.dictsOff('es'), null);
+net['en.wiktionary.org'] = 'down';
+net['dictionary.cambridge.org'] = 'down';
+sw.saveDictSources({ local: true });
+assert.deepEqual(await runSw('llegar', 'es'), ['local'], 'offline → local answers');
+assert.equal(await runSw('zzz', 'es'), 'offline', 'offline and local lacks it → still "unreachable"');
+store.set('linguaclip_dict_sources', '{bad');
+assert.deepEqual(sw.getDictSources('zh'), { online: true, local: true, localFirst: false }, 'unreadable → defaults, never all off');
+
 console.log('test-dictionary: all passed');
 
 // --- Youdao: Japanese `newjc` (kanji query, then a kana query whose real entry is in homonymD) ---

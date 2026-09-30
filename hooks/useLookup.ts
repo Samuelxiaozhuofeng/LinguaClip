@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as AI from '../utils/ai';
 import { DefinitionState, emptyDefinition } from '../components/DefinitionPanel';
 import { useT } from '../utils/i18n';
-import { DictLang, lookupWord, senseList, DictEntry } from '../utils/dictionary';
+import { DictLang, dictsOff, lookupWord, senseList, DictEntry } from '../utils/dictionary';
 import { lookupJa } from '../utils/jaLookup';
 
 // Word lookup behind the definition popup, shared by the practice page and review.
@@ -35,13 +35,15 @@ export const useLookup = (dictLang: DictLang | null, currentContext: string) => 
     setDef({ ...emptyDefinition, word, anchor, loading: true });
     let dict: DictEntry[] | null = null;
     let offline = false;
-    if (dictLang) {
+    // Dictionaries switched off in Settings → Look up: nothing to ask, say so if AI can't answer.
+    const off = dictLang && await dictsOff(dictLang);
+    if (dictLang && !off) {
       try { dict = dictLang === 'ja' ? await lookupJa(word) : await lookupWord(word, dictLang); } catch (e) { offline = true; console.error('Dictionary lookup failed:', e); }
     }
     if (!mine()) return;
     if (dict) return setDef({ ...emptyDefinition, word, anchor, dict, context });
     if (!ai) {
-      const error = t(offline ? 'definition.dictOffline' : dictLang ? 'definition.notFound' : 'definition.noDictLang');
+      const error = t(offline ? 'definition.dictOffline' : off === 'all' ? 'definition.dictsOff' : off === 'noLocal' ? 'definition.noLocalDict' : dictLang ? 'definition.notFound' : 'definition.noDictLang');
       return setDef({ ...emptyDefinition, word, anchor, failed: true, error });
     }
     try {

@@ -27,7 +27,6 @@ const SettingsLocalDict: React.FC = () => {
     // Not a <Field>: that is a <label>, and a click on its hint would flip the
     // first dictionary's switch. Same look, plain box.
     <section aria-label={t('localDict.label')}>
-      <p className="text-sm font-medium mb-1.5">{t('localDict.label')}</p>
       <div className="space-y-4 text-sm">
         {list.length === 0 && !job && <p className="text-mute">{t('localDict.empty')}</p>}
         {list.length > 0 && (

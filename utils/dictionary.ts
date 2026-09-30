@@ -47,28 +47,44 @@ const OPTIONS: Record<Lang, Record<DictLang, DictSource[]>> = {
   },
 };
 
-// "Local dictionaries" joins a language's list once one is on for it: last in a
-// Chinese interface (Youdao / Eudic stay the default), first in an English one.
-export const dictOptions = (ui: Lang = getLang()): Record<DictLang, DictSource[]> => {
-  const out = { ...OPTIONS[ui] };
-  for (const lang of Object.keys(out) as DictLang[]) {
-    if (localDictsFor(lang).length) out[lang] = ui === 'zh' ? [...out[lang], 'local'] : ['local', ...out[lang]];
+export const dictOptions = (ui: Lang = getLang()): Record<DictLang, DictSource[]> => OPTIONS[ui];
+
+// Online / local on or off and which goes first (docs/dictionary.md「查词顺序与开关」):
+// one copy for both interface languages. Unset or unreadable = on, on, local
+// first only in an English interface — the behaviour before these switches.
+export interface DictSources { online: boolean; local: boolean; localFirst: boolean }
+const SOURCES_KEY = 'linguaclip_dict_sources';
+const readObj = (key: string): Record<string, unknown> => {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) || '{}');
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
   }
-  return out;
+};
+const storedSources = () => readObj(SOURCES_KEY) as Partial<DictSources>;
+export const getDictSources = (ui: Lang = getLang()): DictSources => {
+  const v = storedSources();
+  return { online: v.online !== false, local: v.local !== false, localFirst: typeof v.localFirst === 'boolean' ? v.localFirst : ui === 'en' };
+};
+export const saveDictSources = (patch: Partial<DictSources>) => {
+  try { localStorage.setItem(SOURCES_KEY, JSON.stringify({ ...storedSources(), ...patch })); } catch { /* private mode: stays default */ }
+};
+// Why a click on a word in this language has no dictionary to go to: 'all' =
+// online and local both off, 'noLocal' = only local is on and none covers it.
+export const dictsOff = async (lang: DictLang): Promise<'all' | 'noLocal' | null> => {
+  const { online, local } = getDictSources();
+  if (online) return null;
+  await localDictsReady();
+  if (!local) return 'all';
+  return localDictsFor(lang).length ? null : 'noLocal';
 };
 
 // Each interface language keeps its own choice, so switching back restores it.
 // The Chinese one stays in the key older versions read.
 const storageKey = (ui: Lang) => (ui === 'zh' ? 'linguaclip_dict_choice' : 'linguaclip_dict_choice_en');
 
-const storedChoice = (ui: Lang): Record<string, unknown> => {
-  try {
-    const v = JSON.parse(localStorage.getItem(storageKey(ui)) || '{}');
-    return v && typeof v === 'object' ? v : {};
-  } catch {
-    return {};
-  }
-};
+const storedChoice = (ui: Lang) => readObj(storageKey(ui));
 
 export const getDictChoice = (ui: Lang = getLang()): Record<DictLang, DictSource> => {
   const stored = storedChoice(ui);
@@ -384,7 +400,6 @@ const lookupWiktionary = async (word: string, lang: DictLang): Promise<DictEntry
 const CAMBRIDGE_BI: Partial<Record<DictLang, string>> = { es: 'spanish-english', fr: 'french-english', de: 'german-english' };
 
 const fromSource = async (source: DictSource, word: string, lang: DictLang): Promise<DictEntry[] | null> => {
-  if (source === 'local') return lookupLocal(word, lang);
   const q = encodeURIComponent(word);
   if (source === 'cambridge' || source === 'cambridgeEn' || (source === 'cambridgeBi' && CAMBRIDGE_BI[lang])) {
     const path = source === 'cambridge' ? 'english-chinese-simplified' : source === 'cambridgeEn' ? 'english' : CAMBRIDGE_BI[lang];
@@ -410,33 +425,41 @@ const fromSource = async (source: DictSource, word: string, lang: DictLang): Pro
 };
 
 // null = the dictionary has no such word; throws when it cannot be reached.
-// Cambridge sits behind a bot check that turns requests away now and then, and
-// Cambridge's Spanish-English has no conjugated forms, so the dictionaries are
-// tried in turn: the chosen one, then the interface's default, then the rest of
-// the list. One that cannot be reached hands over to the next. One that lacks
-// the word hands over only if it is the chosen (non-default) one or the local
-// dictionaries — what an online default lacks, the others are not asked for.
-// Local ones sit on the list too (last in a Chinese interface), so with no
-// network they answer at the end; if nothing answers and something was
-// unreachable, that error stands ("unreachable", not "no such word").
+// Online: Cambridge sits behind a bot check that turns requests away now and
+// then, and Cambridge's Spanish-English has no conjugated forms, so they are
+// tried in turn: the chosen one, then the interface's default, then the rest.
+// One that cannot be reached hands over to the next. One that lacks the word
+// hands over only if it is the chosen (non-default) one — what an online
+// default lacks, the other online ones are not asked for. Local dictionaries
+// (when on) come after online whatever online said, or before it with "local
+// first". If nothing answers and something was unreachable, that error stands
+// ("unreachable", not "no such word").
 export const lookupWord = async (word: string, lang: DictLang): Promise<DictEntry[] | null> => {
   await localDictsReady();
   const ui = getLang();
+  const { online, local, localFirst } = getDictSources(ui);
   const list = dictOptions(ui)[lang];
   const source = getDictChoice(ui)[lang];
-  const queue = [...new Set([source, ...list])];
   let failure: unknown = null;
-  for (const s of queue) {
-    try {
-      const found = await fromSource(s, word, lang);
-      if (found) return found;
-      // A definite "no such word" from an online default ends it, even after a failure.
-      if (s !== 'local' && !(s === source && s !== list[0])) return null;
-    } catch (e) {
-      console.warn(`Dictionary ${s} unreachable:`, e);
-      failure ??= e;
+  const fromOnline = async () => {
+    if (!online) return null;
+    for (const s of [...new Set([source, ...list])]) {
+      try {
+        const found = await fromSource(s, word, lang);
+        if (found) return found;
+        // A definite "no such word" from the online default ends online, and the answer is
+        // "no such word" even after a failure.
+        if (!(s === source && s !== list[0])) { failure = null; return null; }
+      } catch (e) {
+        console.warn(`Dictionary ${s} unreachable:`, e);
+        failure ??= e;
+      }
     }
-  }
+    return null;
+  };
+  const fromLocal = () => (local ? lookupLocal(word, lang) : null);
+  const found = localFirst ? (await fromLocal()) ?? (await fromOnline()) : (await fromOnline()) ?? (await fromLocal());
+  if (found) return found;
   if (failure) throw failure;
   return null;
 };

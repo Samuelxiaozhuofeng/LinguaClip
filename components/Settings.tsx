@@ -177,7 +177,7 @@ const Settings: React.FC = () => {
       )}
 
       {tab === 'lookup' && (
-        <SettingsLookup onSaved={flashSaved}>
+        <SettingsLookup onSaved={flashSaved} aiReady={AI.aiReady()} goAI={goAI}>
           <AiPrompt
             aiReady={AI.aiReady() /* the same check word lookup makes: needs the main model */}
             goAI={goAI}

@@ -79,24 +79,30 @@ export const AiAfterImport: React.FC<{
 };
 
 // Settings → Look up: the prompt used when the dictionary has no entry.
+// Settings → Look up → ③ AI: the prompt stays folded — most never change it.
 export const AiPrompt: React.FC<{ aiReady: boolean; goAI: () => void; prompt: string; setPrompt: (v: string) => void }> = ({ aiReady, goAI, prompt, setPrompt }) => {
   const t = useT();
+  const [open, setOpen] = useState(false);
   return (
-    <Group title={t('settings.group.aiFallback')}>
-      <Field
-        label={t('settingsAI.promptTemplate')}
-        right={<Btn type="button" size="sm" flat onClick={() => setPrompt(AI.DEFAULT_PROMPT)}>{t('settingsAI.reset')}</Btn>}
-        hint={t('settingsAI.promptHint')}
-      >
-        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} className={`${inputCls} min-h-32 font-mono`} placeholder={t('settingsAI.promptPlaceholder')} />
-      </Field>
+    <>
       {!aiReady && (
         <span className="flex items-center gap-2 text-xs text-mute">
           {t('settings.promptNeedAi')}
           <Btn type="button" size="sm" flat onClick={goAI}>{t('settings.goAi')}</Btn>
         </span>
       )}
-    </Group>
+      {open ? (
+        <Field
+          label={t('settingsAI.promptTemplate')}
+          right={<Btn type="button" size="sm" flat onClick={() => setPrompt(AI.DEFAULT_PROMPT)}>{t('settingsAI.reset')}</Btn>}
+          hint={t('settingsAI.promptHint')}
+        >
+          <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} className={`${inputCls} min-h-32 font-mono`} placeholder={t('settingsAI.promptPlaceholder')} />
+        </Field>
+      ) : (
+        <Btn type="button" size="sm" flat onClick={() => setOpen(true)}>{t('settingsAI.editPrompt')}</Btn>
+      )}
+    </>
   );
 };
 

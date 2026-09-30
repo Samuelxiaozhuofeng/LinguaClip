@@ -1,4 +1,4 @@
-import { DictEntry, getDictChoice, lookupWord } from './dictionary';
+import { DictEntry, getDictChoice, getDictSources, lookupWord } from './dictionary';
 import { localDictsReady, lookupLocal } from './localDict';
 import { jaLemma, jaMorphs, kanaFold } from './japanese';
 import { JA_ALSO } from './jaPhrases';
@@ -30,27 +30,35 @@ export function rankJa(entries: DictEntry[], query: string): DictEntry[] {
 }
 
 export async function lookupJa(word: string): Promise<DictEntry[] | null> {
-  // Local dictionaries find the dictionary form themselves; what they lack goes
-  // the usual way below (the choice stays "local", so lookupWord moves on to the default).
-  await localDictsReady(); // until the list is read, "local" is not a choice yet
-  if (getDictChoice().ja === 'local') {
-    const local = await lookupLocal(word, 'ja');
-    if (local) return local;
+  // Local dictionaries find the dictionary form themselves from the clicked
+  // word; what they lack goes the usual way below (lookupWord asks local again
+  // for the lemma — cheap, and it may be all there is).
+  await localDictsReady(); // until the list is read, local dictionaries are not there yet
+  const { online, local, localFirst } = getDictSources();
+  if (local && localFirst) {
+    const found = await lookupLocal(word, 'ja');
+    if (found) return found;
   }
   const lemma = jaLemma(word);
   // Only a group of several words can be a phrase of its own; a lone kana word
   // would bring back the homophone its spelling fix avoids (くる「佝偻病」).
   const several = (jaMorphs(word)?.filter(m => !m.punct).length ?? 0) > 1;
-  const [whole, base] = await Promise.all([several && lemma !== word ? lookupWord(word, 'ja') : null, lookupWord(lemma, 'ja')]);
+  // Each lookup below is one of several: one that can't be reached must not throw
+  // away what the others found. "Unreachable" stands only when nothing was found.
+  let failure: unknown = null;
+  const ask = (w: string) => lookupWord(w, 'ja').catch(e => { failure ??= e; return null; });
+  const [whole, base] = await Promise.all([several && lemma !== word ? ask(word) : null, ask(lemma)]);
   const found = [...(whole ?? []).filter(e => e.word === word), ...rankJa(base ?? [], lemma)];
   // JA_ALSO patches Youdao's gaps and homophones; the other dictionaries don't need it.
-  const also = getDictChoice().ja === 'youdao' ? JA_ALSO[lemma] ?? [] : [];
-  for (const r of await Promise.all(also.map(v => lookupWord(v, 'ja')))) found.push(...(r ?? []));
+  const also = online && getDictChoice().ja === 'youdao' ? JA_ALSO[lemma] ?? [] : [];
+  for (const r of await Promise.all(also.map(ask))) found.push(...(r ?? []));
   // Katakana nouns in a row are grouped as one loanword (スマートフォン); two
   // words Youdao has no entry for together (フランスパリ) are looked up apart.
   const parts = jaMorphs(lemma)?.map(m => m.s) ?? [];
   if (found.length === 0 && parts.length > 1 && parts.every(p => /^[\p{Script=Katakana}ー]+$/u.test(p))) {
-    for (const r of await Promise.all(parts.map(p => lookupWord(p, 'ja')))) found.push(...(r ?? []));
+    for (const r of await Promise.all(parts.map(ask))) found.push(...(r ?? []));
   }
-  return found.length ? found : null;
+  if (found.length) return found;
+  if (failure) throw failure;
+  return null;
 }
