@@ -242,7 +242,10 @@ export default function App() {
     try {
       // Pro trial used up: say so before asking for a missing video file, then
       // back to the panel to pick another way.
-      const listen = choice.kind === 'watch' && !!Listen && isAudioRecord(record);
+      // Listening is its own route. Do not reuse the video watch choice for
+      // sound-only records: that used to make the start button fall through to
+      // the old video player path when the record shape changed.
+      const listen = choice.kind === 'listen' && !!Listen && isAudioRecord(record);
       if ((choice.kind === 'read' && !(await readerGate(record.id))) || (listen && !(await listenGate(record.id)))) {
         if (!stale()) setPanel({ record, lm });
         return;
@@ -258,7 +261,7 @@ export default function App() {
         await VideoStorage.patchVideoRecord(record.id, { videoPath });
       }
 
-      if (choice.kind === 'watch' || choice.kind === 'read') {
+      if (choice.kind === 'watch' || choice.kind === 'listen' || choice.kind === 'read') {
         if (stale()) return;
         if (parseSRT(record.subtitleText).length === 0) {
           dialog.alert(t('app.noSubtitlesTitle'), t('app.noSubtitlesBody', { name: record.videoFileName }));
@@ -272,7 +275,7 @@ export default function App() {
         }
         // Watching (or listening) moves the video up the shelf; its practice mode and progress stay.
         VideoStorage.patchVideoRecord(record.id, { lastPracticed: Date.now() }).catch(console.error);
-        if (listen) {
+        if (choice.kind === 'listen') {
           setListening({ record: { ...record, videoPath }, lm });
           setAppState(AppState.LISTEN);
           return;

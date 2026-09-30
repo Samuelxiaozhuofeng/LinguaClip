@@ -19,7 +19,7 @@ import { formatTimeCode, getCustomConfig, getCustomPos, getWatchPrefs, ReadBy, s
 // A record with no picture (a podcast episode, a sound file) listens instead of watching
 // (pro/ListenPage.tsx) where the Pro module is there; a podcast episode starts on it.
 
-export type PanelChoice = { kind: 'all' } | { kind: 'watch' } | { kind: 'read'; by: ReadBy } | { kind: 'custom'; cfg: CustomConfig; pick: CustomPick };
+export type PanelChoice = { kind: 'all' } | { kind: 'watch' } | { kind: 'listen' } | { kind: 'read'; by: ReadBy } | { kind: 'custom'; cfg: CustomConfig; pick: CustomPick };
 
 export const paceOf = (lm: LearningMode, bpm?: BlurPlaybackMode): PaceMode =>
   lm === LearningMode.DICTATION ? 'dictation' : bpm === BlurPlaybackMode.CONTINUOUS ? 'flow' : 'step';
@@ -86,7 +86,7 @@ const CustomPanel: React.FC<{
   const start = (timeOnly = false) => {
     if (read) { saveWatchPrefs({ readBy }); onStart({ kind: 'read', by: readBy }); return; }
     if (!record.podcast) saveWatchPrefs({ chosen: watch }); // a podcast's own default isn't the videos' last choice
-    if (watch) { onStart({ kind: 'watch' }); return; }
+    if (watch) { onStart({ kind: listen ? 'listen' : 'watch' }); return; }
     if (!cfg.on) { saveCustomConfig(cfg); onStart({ kind: 'all' }); return; }
     if (want && !labels && !timeOnly) { if (!failed) setWaiting(true); return; }
     const pick = pickWith(timeOnly);
