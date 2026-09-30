@@ -7,7 +7,7 @@ import Shell from './components/Shell';
 import Studio from './components/Studio';
 import WatchPage from './components/WatchPage';
 import CustomPanel, { PanelChoice, nextPick, paceOf } from './components/CustomPanel';
-import { Listen, PodcastPicker, ProHost, Reader, listenGate, readerGate } from '@pro';
+import { Listen, PodcastPicker, ProHost, Reader, listenGate, podcastRate, readerGate } from '@pro';
 import type { ReadBy } from './utils/storage';
 import { DialogHost, dialog } from './components/Dialog';
 import { UpdateDialog } from './components/UpdateUI';
@@ -419,7 +419,8 @@ export default function App() {
     <WatchPage key={watching.id} record={watching} onExit={() => { setWatching(null); goHome(); }} />
   ) : appState === AppState.LISTEN && listening && Listen ? (
     <Listen key={listening.record.id} record={listening.record} onExit={() => { setListening(null); goHome(); }}
-      onPractice={() => { setListening(null); goHome(); setPanel(listening); }} />
+      onPractice={() => { setListening(null); goHome(); setPanel(listening); }}
+      onOpen={r => { setListening(null); goHome(); handleResume(r, r.learningMode ?? LearningMode.DICTATION); }} />
   ) : appState === AppState.READ && reading && Reader ? (
     // Done reading: back to the panel to pick how to practise.
     <Reader key={reading.record.id} record={reading.record} by={reading.by}
@@ -433,6 +434,7 @@ export default function App() {
         <Home key="podcasts" onResume={handleResume} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} podcasts={{
           empty: <PodcastPicker onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
           add: close => <PodcastPicker onClose={close} onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
+          rate: podcastRate,
         }} />
        ) :
        <Home key="videos" onResume={handleResume} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} />}

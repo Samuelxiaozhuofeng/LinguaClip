@@ -15,11 +15,12 @@ export const readerTrial = (_id: string): ReaderTrial => ({ pro: false, used: 0,
 // records with no picture, and their trial. null = no podcast tab, "watch" as before.
 export type ProPodcastPicker = React.FC<{ onClose?: () => void; onOpen: (r: VideoRecord) => void }>;
 export const PodcastPicker: ProPodcastPicker | null = null;
-export type ProListen = React.FC<{ record: VideoRecord; onExit: () => void; onPractice: () => void }>;
+export type ProListen = React.FC<{ record: VideoRecord; onExit: () => void; onPractice: () => void; onOpen?: (r: VideoRecord) => void }>;
 export const Listen: ProListen | null = null;
 export const listenGate = async (_id: string): Promise<boolean> => false;
 export const listenTrial = (_id: string): ReaderTrial => ({ pro: false, used: 0, limit: 0, mine: false });
 export const refundListen = (_id: string): void => {};
+export const podcastRate = (_r: VideoRecord): string | null => null; // an episode card's speaking rate
 // Bottom line of Settings; null = the sponsor link stays.
 export const ProFooter: React.FC | null = null;
 // Activation / manage dialogs + license check at launch, mounted once at the root.

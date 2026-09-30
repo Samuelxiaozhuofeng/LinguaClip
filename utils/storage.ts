@@ -135,8 +135,8 @@ export const forgetWatchPos = (videoId: string) => writeWatchPos(all => { delete
 export type WatchSubs = 'show' | 'blur' | 'hide';
 export type ReadBy = 'all' | 'section';
 // listenSubs / podLang / listenThrough: the podcast page's (docs/private/podcast.md) — how much text shows, which
-// language's shows are listed, whether a section's end plays on.
-export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean; pin: boolean; list: boolean; listPct: number; readBy: ReadBy; kana: boolean; autoClip: boolean; listenSubs: WatchSubs; podLang: string; listenThrough: boolean };
+// language's shows are listed, whether a section's end plays on. listenPasses: each section heard three times.
+export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean; pin: boolean; list: boolean; listPct: number; readBy: ReadBy; kana: boolean; autoClip: boolean; listenSubs: WatchSubs; podLang: string; listenThrough: boolean; listenPasses: boolean };
 export const LIST_PCT = { min: 20, max: 50, def: 30 };
 
 export const getWatchPrefs = (): WatchPrefs => {
@@ -145,10 +145,10 @@ export const getWatchPrefs = (): WatchPrefs => {
     const pct = typeof v.listPct === 'number' && Number.isFinite(v.listPct) ? Math.min(LIST_PCT.max, Math.max(LIST_PCT.min, v.listPct)) : LIST_PCT.def;
     return {
       subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen === true, pin: v.pin === true, list: v.list === true, listPct: pct, readBy: v.readBy === 'section' ? 'section' : 'all', kana: v.kana !== false, autoClip: v.autoClip === true,
-      listenSubs: v.listenSubs === 'blur' || v.listenSubs === 'show' ? v.listenSubs : 'hide', podLang: typeof v.podLang === 'string' ? v.podLang : '', listenThrough: v.listenThrough === true,
+      listenSubs: v.listenSubs === 'blur' || v.listenSubs === 'show' ? v.listenSubs : 'hide', podLang: typeof v.podLang === 'string' ? v.podLang : '', listenThrough: v.listenThrough === true, listenPasses: v.listenPasses === true,
     };
   } catch {
-    return { subs: 'show', autoPause: false, chosen: false, pin: false, list: false, listPct: LIST_PCT.def, readBy: 'all', kana: true, autoClip: false, listenSubs: 'hide', podLang: '', listenThrough: false };
+    return { subs: 'show', autoPause: false, chosen: false, pin: false, list: false, listPct: LIST_PCT.def, readBy: 'all', kana: true, autoClip: false, listenSubs: 'hide', podLang: '', listenThrough: false, listenPasses: false };
   }
 };
 

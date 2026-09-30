@@ -259,6 +259,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     else if (plain && e.code === 'KeyS') act = save;
     else if (plain && e.code === 'KeyP') act = toggleAutoPause;
     else if (plain && e.code === 'KeyC') act = cycleSubs;
+    else if (plain && e.code === 'KeyV' && shown && prefs.subs !== 'show') act = () => setRevealed(shown.id); // = the ··· / blurred line's click
     else if (plain && e.code === 'KeyF') act = toggleFull;
     else if (matches(e, 'anki') && ankiReady) act = toAnki;
     if (!act) return;
@@ -352,6 +353,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     ['S', t('watch.keySave')],
     ['P', t('watch.autoPause')],
     ['C', t('watch.keySubs')],
+    ['V', t('watch.showLine')],
     ['F', t('watch.fullscreen')],
     ...(ankiReady ? [[formatCombo(combos.anki), t('keys.anki')] as [string, string]] : []),
   ];

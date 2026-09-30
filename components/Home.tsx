@@ -37,7 +37,7 @@ interface HomeProps {
   onAddHandled?: () => void;
   // The podcast page (a Pro tab): the same shelf with only podcast episodes, its own
   // add dialog and empty state, no drops. Without it, the videos (and sound files).
-  podcasts?: { empty: React.ReactNode; add: (close: () => void) => React.ReactNode };
+  podcasts?: { empty: React.ReactNode; add: (close: () => void) => React.ReactNode; rate?: (v: VideoRecord) => string | null };
 }
 
 type PrepInfo = { eligible: number; missing: number };
@@ -431,7 +431,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
                     <Play size={20} fill="currentColor" className="ml-1" />
                   </button>
                   <div className="min-w-0 flex-1">
-                    {lead.podcast && <p className="mb-0.5 text-xs text-mute truncate">{lead.podcast.show}</p>}
+                    {lead.podcast && <p className="mb-0.5 text-xs text-mute truncate">{[lead.podcast.show, podcasts?.rate?.(lead)].filter(Boolean).join(' · ')}</p>}
                     <p className="text-xl font-semibold leading-snug truncate" title={lead.displayName}>{lead.displayName}</p>
                     <div className="mt-2 flex items-center gap-3 text-[13px] text-mute min-w-0">
                       {ticks(lead)}
@@ -467,7 +467,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
                           </span>
                         )}
                       </VideoCover>
-                      {v.podcast && <p className="mt-2.5 -mb-2 text-xs text-mute truncate">{v.podcast.show}</p>}
+                      {v.podcast && <p className="mt-2.5 -mb-2 text-xs text-mute truncate">{[v.podcast.show, podcasts?.rate?.(v)].filter(Boolean).join(' · ')}</p>}
                       <p className={`mt-2.5 text-[13px] font-medium leading-snug truncate ${v.importJob ? 'text-mute' : ''}`} title={v.displayName}>{v.displayName}</p>
                     </button>
                     {v.importJob ? (

@@ -25,11 +25,12 @@ const WatchSummary: React.FC<{
   looked: Looked[];
   words?: KeepWords;
   actions: React.ReactNode; // the buttons before "dictate"
+  top?: React.ReactNode; // above the saved lines (the podcast page asks how much was understood)
   onClose: () => void;
   onJump: (line: Subtitle) => void;
   onWord: (w: Looked) => void;
   onDrill: (lines: Subtitle[]) => void;
-}> = ({ title, savedEmpty, saved, looked, words, actions, onClose, onJump, onWord, onDrill }) => {
+}> = ({ title, savedEmpty, saved, looked, words, actions, top, onClose, onJump, onWord, onDrill }) => {
   const t = useT();
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const toggle = (id: number) => setPicked(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -43,6 +44,7 @@ const WatchSummary: React.FC<{
           <h3 className="text-xl font-semibold leading-tight">{title}</h3>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-2 flex flex-col gap-5">
+          {top}
           <section className="flex flex-col gap-2">
             <p className="text-xs text-mute">{saved.length ? t('watch.savedHead', { n: saved.length }) : savedEmpty}</p>
             {saved.map(s => (
