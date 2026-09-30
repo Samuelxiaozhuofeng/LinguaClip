@@ -5,7 +5,7 @@ import { useT } from '../utils/i18n';
 import { deleteJa, downloadJa, loadJa, useJaState } from '../utils/japanese';
 
 // The Japanese word-splitting dictionary is a download of its own (utils/japanese.ts):
-// a banner on the practice page of a Japanese video, and a row in Settings → General.
+// a banner on the practice page of a Japanese video, and a row in Settings → Practice.
 
 const Progress: React.FC<{ pct: number }> = ({ pct }) => {
   const t = useT();

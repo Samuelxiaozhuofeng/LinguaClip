@@ -108,6 +108,14 @@ export const H: React.FC<{ children: React.ReactNode; sub?: React.ReactNode; bad
   </div>
 );
 
+// A titled group of settings fields.
+export const Group: React.FC<{ title: React.ReactNode; children: React.ReactNode }> = ({ title, children }) => (
+  <section className="space-y-6">
+    <h3 className="text-xs font-semibold tracking-wider text-mute uppercase">{title}</h3>
+    {children}
+  </section>
+);
+
 export const Field: React.FC<{ label: React.ReactNode; hint?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode; className?: string }> = ({
   label, hint, right, children, className = '',
 }) => (

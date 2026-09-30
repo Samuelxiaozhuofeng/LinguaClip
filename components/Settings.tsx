@@ -1,15 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AnkiConfig, AIConfig, AudioPaddingConfig, AnkiCardTemplateConfig } from '../types';
+import { AnkiConfig, AIConfig, AnkiCardTemplateConfig } from '../types';
 import * as Anki from '../utils/anki';
 import * as AI from '../utils/ai';
 import * as Storage from '../utils/storage';
 import { useAnkiConnection } from '../hooks/useAnkiConnection';
 import { Seg, Stamp } from './ui';
-import SettingsGeneral from './SettingsGeneral';
-import SettingsAI from './SettingsAI';
+import SettingsPractice from './SettingsPractice';
+import SettingsLookup from './SettingsLookup';
+import SettingsCards from './SettingsCards';
+import SettingsAI, { AiAfterImport, AiPrompt } from './SettingsAI';
 import SettingsAnki from './SettingsAnki';
 import SettingsShortcuts from './SettingsShortcuts';
 import SettingsTranscribe from './SettingsTranscribe';
+import { Languages } from 'lucide-react';
 import { useT, useLang, setLang, Lang } from '../utils/i18n';
 import { openExternal } from '../utils/desktop';
 import { ProFooter } from '@pro';
@@ -18,6 +21,14 @@ import { UpdateRow } from './UpdateUI';
 type DeckByLang = NonNullable<AnkiCardTemplateConfig['deckByLang']>;
 
 const SPONSOR_URL = 'https://afdian.com/a/SamuelXiao';
+
+// Always shown as "中文" / "English" in their own language, regardless of the current UI language.
+const LANG_OPTS: { value: Lang; label: string }[] = [
+  { value: 'zh', label: '中文' },
+  { value: 'en', label: 'English' },
+];
+
+type Tab = 'practice' | 'lookup' | 'cards' | 'import' | 'ai' | 'shortcuts';
 
 type AnkiPatch = {
   url?: string;
@@ -47,9 +58,8 @@ const Settings: React.FC = () => {
   const [aiLimits, setAiLimits] = useState<NonNullable<AIConfig['limits']>>({});
 
   const [sectionLength, setSectionLength] = useState(Storage.DEFAULT_SECTION_LENGTH);
-  const [audioPadding, setAudioPadding] = useState<AudioPaddingConfig>({ startPadding: 100, endPadding: 200 });
 
-  const [tab, setTab] = useState<'practice' | 'transcribe' | 'ai' | 'shortcuts' | 'anki'>('practice');
+  const [tab, setTab] = useState<Tab>('practice');
   const [savedFlash, setSavedFlash] = useState(false);
   const flashTimer = useRef<number>(0);
   const ankiConnection = useAnkiConnection();
@@ -90,8 +100,6 @@ const Settings: React.FC = () => {
     const savedPractice = Storage.getPracticeConfig();
     setSectionLength(savedPractice.sectionLength);
 
-    const savedAudioPadding = Storage.getAudioPaddingConfig();
-    setAudioPadding(savedAudioPadding);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -136,40 +144,80 @@ const Settings: React.FC = () => {
     flashSaved();
   };
 
+  const badAiKey = AI.isBadKey(aiApiKey);
+  const aiReady = !!(aiApiKey && !badAiKey && aiBaseUrl.trim() && (aiModel.trim() || aiSegmentModel.trim()));
+  const goAI = () => setTab('ai');
+
   return (
     <div>
-      <Seg<typeof tab> className="mb-8" value={tab} onChange={setTab} options={[
-        { value: 'practice', label: t('settings.practice') },
-        { value: 'transcribe', label: t('settings.transcribe') },
-        { value: 'ai', label: 'AI' },
-        { value: 'shortcuts', label: t('shortcuts.title') },
-        { value: 'anki', label: 'Anki' },
-      ]} />
+      <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
+        <Seg<Tab> className="flex-wrap" value={tab} onChange={setTab} options={[
+          { value: 'practice', label: t('settings.practice') },
+          { value: 'lookup', label: t('settings.lookup') },
+          { value: 'cards', label: t('settings.cards') },
+          { value: 'import', label: t('settings.import') },
+          { value: 'ai', label: 'AI' },
+          { value: 'shortcuts', label: t('shortcuts.title') },
+        ]} />
+        <div className="flex items-center gap-2 text-mute" title={t('settings.language')}>
+          <Languages size={16} aria-hidden />
+          <Seg<Lang> size="sm" value={lang} onChange={v => { setLang(v); flashSaved(); }} options={LANG_OPTS} />
+        </div>
+      </div>
 
       {tab === 'practice' && (
-        <SettingsGeneral
-          lang={lang}
-          setLang={(v: Lang) => {
-            setLang(v);
-            flashSaved();
-          }}
+        <SettingsPractice
           sectionLength={sectionLength}
           setSectionLength={(v) => {
             setSectionLength(v);
             Storage.savePracticeConfig({ ...Storage.getPracticeConfig(), sectionLength: v });
             flashSaved();
           }}
-          audioPadding={audioPadding}
-          setAudioPadding={(v) => {
-            setAudioPadding(v);
-            Storage.saveAudioPaddingConfig(v);
-            flashSaved();
-          }}
-          onSaved={flashSaved}
         />
       )}
 
-      {tab === 'transcribe' && <SettingsTranscribe onSaved={flashSaved} />}
+      {tab === 'lookup' && (
+        <SettingsLookup onSaved={flashSaved}>
+          <AiPrompt
+            aiReady={AI.aiReady() /* the same check word lookup makes: needs the main model */}
+            goAI={goAI}
+            prompt={aiPrompt}
+            setPrompt={(v) => {
+              setAiPrompt(v);
+              saveAI({ promptTemplate: v });
+            }}
+          />
+        </SettingsLookup>
+      )}
+
+      {tab === 'import' && (
+        <SettingsTranscribe onSaved={flashSaved}>
+          <AiAfterImport
+            aiReady={aiReady}
+            goAI={goAI}
+            segmentModel={aiSegmentModel}
+            setSegmentModel={(v) => {
+              setAiSegmentModel(v);
+              saveAI({ segmentModel: v });
+            }}
+            autoBreakdown={aiAutoBreakdown}
+            setAutoBreakdown={(v) => {
+              setAiAutoBreakdown(v);
+              saveAI({ autoBreakdown: v });
+            }}
+            autoCloze={aiAutoCloze}
+            setAutoCloze={(v) => {
+              setAiAutoCloze(v);
+              saveAI({ autoCloze: v });
+            }}
+            jaCheck={aiJaCheck}
+            setJaCheck={(v) => {
+              setAiJaCheck(v);
+              saveAI({ jaSegmentAi: v });
+            }}
+          />
+        </SettingsTranscribe>
+      )}
 
       {tab === 'shortcuts' && <SettingsShortcuts onSaved={flashSaved} />}
 
@@ -185,11 +233,6 @@ const Settings: React.FC = () => {
             setAiTemperature(v);
             saveAI({ temperature: v });
           }}
-          aiPrompt={aiPrompt}
-          setAiPrompt={(v) => {
-            setAiPrompt(v);
-            saveAI({ promptTemplate: v });
-          }}
           aiApiKey={aiApiKey}
           setAiApiKey={(v) => {
             setAiApiKey(v);
@@ -200,68 +243,51 @@ const Settings: React.FC = () => {
             setAiBaseUrl(v);
             saveAI({ baseUrl: v });
           }}
-          aiSegmentModel={aiSegmentModel}
-          setAiSegmentModel={(v) => {
-            setAiSegmentModel(v);
-            saveAI({ segmentModel: v });
-          }}
-          aiAutoBreakdown={aiAutoBreakdown}
-          setAiAutoBreakdown={(v) => {
-            setAiAutoBreakdown(v);
-            saveAI({ autoBreakdown: v });
-          }}
-          aiAutoCloze={aiAutoCloze}
-          setAiAutoCloze={(v) => {
-            setAiAutoCloze(v);
-            saveAI({ autoCloze: v });
-          }}
-          aiJaCheck={aiJaCheck}
-          setAiJaCheck={(v) => {
-            setAiJaCheck(v);
-            saveAI({ jaSegmentAi: v });
-          }}
           aiLimits={aiLimits}
           setAiLimits={(v) => {
             setAiLimits(v);
             saveAI({ limits: v });
           }}
+          goTab={setTab}
         />
       )}
 
-      {tab === 'anki' && (
-        <SettingsAnki
-          url={ankiConnection.url}
-          setUrl={(v) => {
-            ankiConnection.setUrl(v);
-            saveAnki({ url: v });
-          }}
-          status={ankiConnection.status}
-          error={ankiConnection.error}
-          onConnect={() => ankiConnection.connect()}
-          decks={ankiConnection.decks}
-          models={ankiConnection.models}
-          deckName={deckName}
-          setDeckName={(v) => {
-            setDeckName(v);
-            saveAnki({ deckName: v });
-          }}
-          modelName={modelName}
-          setModelName={(v) => {
-            setModelName(v);
-            saveAnki({ modelName: v });
-          }}
-          fieldMapping={fieldMapping}
-          setFieldMapping={setFieldMapping}
-          fetchModelFields={ankiConnection.fetchModelFields}
-          saveAnki={saveAnki}
-          createLinguaClip={createLinguaClip}
-          deckByLang={deckByLang}
-          setDeckByLang={(v) => {
-            setDeckByLang(v);
-            saveAnki({ deckByLang: v });
-          }}
-          refreshDecks={() => ankiConnection.connect()}
-        />
+      {tab === 'cards' && (
+        <SettingsCards onSaved={flashSaved}>
+          <SettingsAnki
+            url={ankiConnection.url}
+            setUrl={(v) => {
+              ankiConnection.setUrl(v);
+              saveAnki({ url: v });
+            }}
+            status={ankiConnection.status}
+            error={ankiConnection.error}
+            onConnect={() => ankiConnection.connect()}
+            decks={ankiConnection.decks}
+            models={ankiConnection.models}
+            deckName={deckName}
+            setDeckName={(v) => {
+              setDeckName(v);
+              saveAnki({ deckName: v });
+            }}
+            modelName={modelName}
+            setModelName={(v) => {
+              setModelName(v);
+              saveAnki({ modelName: v });
+            }}
+            fieldMapping={fieldMapping}
+            setFieldMapping={setFieldMapping}
+            fetchModelFields={ankiConnection.fetchModelFields}
+            saveAnki={saveAnki}
+            createLinguaClip={createLinguaClip}
+            deckByLang={deckByLang}
+            setDeckByLang={(v) => {
+              setDeckByLang(v);
+              saveAnki({ deckByLang: v });
+            }}
+            refreshDecks={() => ankiConnection.connect()}
+          />
+        </SettingsCards>
       )}
 
       <p className="mt-12 text-center text-xs text-mute">

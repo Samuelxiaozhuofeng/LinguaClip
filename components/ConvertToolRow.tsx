@@ -5,7 +5,7 @@ import { useT } from '../utils/i18n';
 import { revealInFolder } from '../utils/desktop';
 import { downloadConvertTool, loadConvertTool, useConvertTool } from '../utils/convertTool';
 
-// Settings → General: the video converter (utils/convertTool.ts). Download it
+// Settings → Import & transcribe: the video converter (utils/convertTool.ts). Download it
 // ahead of time, and see where it lives.
 const ConvertToolRow: React.FC = () => {
   const t = useT();

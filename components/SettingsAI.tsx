@@ -1,35 +1,12 @@
 import React, { useState } from 'react';
 import * as AI from '../utils/ai';
-import { Btn, Field, inputCls } from './ui';
+import { Btn, Field, Group, inputCls } from './ui';
 import { useT } from '../utils/i18n';
 import { AIConfig } from '../types';
 import { AiKind, LIMIT_DEFAULTS, LIMIT_MAX } from '../utils/aiLimit';
 
 type Limits = NonNullable<AIConfig['limits']>;
 const LIMIT_KINDS: AiKind[] = ['segment', 'breakdown', 'cloze'];
-
-interface SettingsAIProps {
-  aiModel: string;
-  setAiModel: (value: string) => void;
-  aiTemperature: number;
-  setAiTemperature: (value: number) => void;
-  aiPrompt: string;
-  setAiPrompt: (value: string) => void;
-  aiApiKey: string;
-  setAiApiKey: (value: string) => void;
-  aiBaseUrl: string;
-  setAiBaseUrl: (value: string) => void;
-  aiSegmentModel: string;
-  setAiSegmentModel: (value: string) => void;
-  aiAutoBreakdown: boolean;
-  setAiAutoBreakdown: (value: boolean) => void;
-  aiAutoCloze: boolean;
-  setAiAutoCloze: (value: boolean) => void;
-  aiJaCheck: boolean;
-  setAiJaCheck: (value: boolean) => void;
-  aiLimits: Limits;
-  setAiLimits: (value: Limits) => void;
-}
 
 const Check: React.FC<{ checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }> = ({ checked, onChange, label, disabled }) => (
   <label className={`flex items-center gap-2.5 text-sm ${disabled ? 'opacity-40' : 'cursor-pointer'}`}>
@@ -54,34 +31,98 @@ const ModelPicker: React.FC<{
   </select>
 );
 
+const NeedAi: React.FC<{ goAI: () => void }> = ({ goAI }) => {
+  const t = useT();
+  return (
+    <span className="flex items-center gap-2 mt-1.5 text-xs text-mute leading-relaxed">
+      {t('settingsAI.afterImportNeedAi')}
+      <Btn type="button" size="sm" flat onClick={goAI}>{t('settings.goAi')}</Btn>
+    </span>
+  );
+};
+
+// Settings → Import & transcribe: what the AI does with a fresh transcript.
+export const AiAfterImport: React.FC<{
+  aiReady: boolean;
+  goAI: () => void;
+  segmentModel: string;
+  setSegmentModel: (v: string) => void;
+  autoBreakdown: boolean;
+  setAutoBreakdown: (v: boolean) => void;
+  autoCloze: boolean;
+  setAutoCloze: (v: boolean) => void;
+  jaCheck: boolean;
+  setJaCheck: (v: boolean) => void;
+}> = ({ aiReady, goAI, segmentModel, setSegmentModel, autoBreakdown, setAutoBreakdown, autoCloze, setAutoCloze, jaCheck, setJaCheck }) => {
+  const t = useT();
+  return (
+    <Group title={t('settings.group.aiTidy')}>
+      <Field label={t('settingsAI.segmentModel')} hint={t('settingsAI.segmentModelHint')}>
+        <ModelPicker value={segmentModel} onChange={setSegmentModel} models={AI.getCachedModels()} emptyLabel={t('settingsAI.segmentModelPlaceholder')} />
+      </Field>
+
+      <div>
+        <span className="block text-sm font-medium mb-2.5">{t('settingsAI.afterImport')}</span>
+        <div className="space-y-2">
+          <Check checked={autoBreakdown} onChange={setAutoBreakdown} disabled={!aiReady} label={t('settingsAI.autoBreakdown')} />
+          <Check checked={autoCloze} onChange={setAutoCloze} disabled={!aiReady} label={t('settingsAI.autoCloze')} />
+        </div>
+        {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.afterImportHint')}</span> : <NeedAi goAI={goAI} />}
+      </div>
+
+      <div>
+        <Check checked={jaCheck} onChange={setJaCheck} disabled={!aiReady} label={t('settingsAI.jaCheck')} />
+        {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.jaCheckHint')}</span> : <NeedAi goAI={goAI} />}
+      </div>
+    </Group>
+  );
+};
+
+// Settings → Look up: the prompt used when the dictionary has no entry.
+export const AiPrompt: React.FC<{ aiReady: boolean; goAI: () => void; prompt: string; setPrompt: (v: string) => void }> = ({ aiReady, goAI, prompt, setPrompt }) => {
+  const t = useT();
+  return (
+    <Group title={t('settings.group.aiFallback')}>
+      <Field
+        label={t('settingsAI.promptTemplate')}
+        right={<Btn type="button" size="sm" flat onClick={() => setPrompt(AI.DEFAULT_PROMPT)}>{t('settingsAI.reset')}</Btn>}
+        hint={t('settingsAI.promptHint')}
+      >
+        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} className={`${inputCls} min-h-32 font-mono`} placeholder={t('settingsAI.promptPlaceholder')} />
+      </Field>
+      {!aiReady && (
+        <span className="flex items-center gap-2 text-xs text-mute">
+          {t('settings.promptNeedAi')}
+          <Btn type="button" size="sm" flat onClick={goAI}>{t('settings.goAi')}</Btn>
+        </span>
+      )}
+    </Group>
+  );
+};
+
+interface SettingsAIProps {
+  aiModel: string;
+  setAiModel: (value: string) => void;
+  aiTemperature: number;
+  setAiTemperature: (value: number) => void;
+  aiApiKey: string;
+  setAiApiKey: (value: string) => void;
+  aiBaseUrl: string;
+  setAiBaseUrl: (value: string) => void;
+  aiLimits: Limits;
+  setAiLimits: (value: Limits) => void;
+  goTab: (tab: 'lookup' | 'import') => void;
+}
+
+// Settings → AI: only "connect to an AI"; the features that use it live on their own tabs.
 const SettingsAI: React.FC<SettingsAIProps> = ({
-  aiModel,
-  setAiModel,
-  aiTemperature,
-  setAiTemperature,
-  aiPrompt,
-  setAiPrompt,
-  aiApiKey,
-  setAiApiKey,
-  aiBaseUrl,
-  setAiBaseUrl,
-  aiSegmentModel,
-  setAiSegmentModel,
-  aiAutoBreakdown,
-  setAiAutoBreakdown,
-  aiAutoCloze,
-  setAiAutoCloze,
-  aiJaCheck,
-  setAiJaCheck,
-  aiLimits,
-  setAiLimits,
+  aiModel, setAiModel, aiTemperature, setAiTemperature, aiApiKey, setAiApiKey, aiBaseUrl, setAiBaseUrl, aiLimits, setAiLimits, goTab,
 }) => {
   const t = useT();
   const [models, setModels] = useState<string[]>(() => AI.getCachedModels());
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState('');
   const badKey = AI.isBadKey(aiApiKey);
-  const aiReady = !!(aiApiKey && !badKey && aiBaseUrl.trim() && (aiModel.trim() || aiSegmentModel.trim()));
 
   const fetchModels = async () => {
     setFetching(true);
@@ -97,136 +138,113 @@ const SettingsAI: React.FC<SettingsAIProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      <Field
-        label={t('settingsAI.apiKey')}
-        hint={badKey ? <span className="text-ink">{t('settingsAI.apiKeyBad')}</span> : t('settingsAI.apiKeyHint')}
-      >
-        <input
-          type="password"
-          value={aiApiKey}
-          onChange={(e) => setAiApiKey(e.target.value)}
-          className={`${inputCls} font-mono`}
-          placeholder={t('settingsAI.apiKeyPlaceholder')}
-        />
-      </Field>
-
-      <Field label={t('settingsAI.baseUrl')} hint={t('settingsAI.baseUrlHint')}>
-        <input
-          type="text"
-          value={aiBaseUrl}
-          onChange={(e) => setAiBaseUrl(e.target.value)}
-          className={`${inputCls} font-mono`}
-          placeholder="https://api.openai.com/v1"
-        />
-      </Field>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="space-y-10">
+      <Group title={t('settings.group.aiConnect')}>
         <Field
-          label={t('settingsAI.model')}
-          right={
-            <Btn type="button" size="sm" flat disabled={!aiApiKey || badKey || !aiBaseUrl.trim() || fetching} onClick={() => void fetchModels()}>
-              {fetching ? t('settingsAI.fetching') : t('settingsAI.fetchModels')}
-            </Btn>
-          }
-          hint={
-            fetchError
-              ? `${t('settingsAI.fetchFailed')} ${fetchError}`
-              : models.length > 0
-                ? t('settingsAI.fetchedCount').replace('{n}', String(models.length))
-                : t('settingsAI.modelHint')
-          }
-        >
-          <ModelPicker
-            value={aiModel}
-            onChange={setAiModel}
-            models={models}
-            emptyLabel={models.length > 0 ? t('settingsAI.pickModel') : t('settingsAI.fetchFirst')}
-          />
-        </Field>
-
-        <Field
-          label={t('settingsAI.temperature')}
-          right={String(aiTemperature)}
-          hint={t('settingsAI.temperatureHint')}
+          label={t('settingsAI.apiKey')}
+          hint={badKey ? <span className="text-ink">{t('settingsAI.apiKeyBad')}</span> : t('settingsAI.apiKeyHint')}
         >
           <input
-            type="range"
-            min="0"
-            max="2"
-            step="0.1"
-            value={aiTemperature}
-            onChange={(e) => setAiTemperature(parseFloat(e.target.value))}
+            type="password"
+            value={aiApiKey}
+            onChange={(e) => setAiApiKey(e.target.value)}
+            className={`${inputCls} font-mono`}
+            placeholder={t('settingsAI.apiKeyPlaceholder')}
           />
         </Field>
-      </div>
 
-      <Field label={t('settingsAI.segmentModel')} hint={t('settingsAI.segmentModelHint')}>
-        <ModelPicker
-          value={aiSegmentModel}
-          onChange={setAiSegmentModel}
-          models={models}
-          emptyLabel={t('settingsAI.segmentModelPlaceholder')}
-        />
-      </Field>
+        <Field label={t('settingsAI.baseUrl')} hint={t('settingsAI.baseUrlHint')}>
+          <input
+            type="text"
+            value={aiBaseUrl}
+            onChange={(e) => setAiBaseUrl(e.target.value)}
+            className={`${inputCls} font-mono`}
+            placeholder="https://api.openai.com/v1"
+          />
+        </Field>
 
-      <div>
-        <span className="block text-sm font-medium mb-2.5">{t('settingsAI.afterImport')}</span>
-        <div className="space-y-2">
-          <Check checked={aiAutoBreakdown} onChange={setAiAutoBreakdown} disabled={!aiReady} label={t('settingsAI.autoBreakdown')} />
-          <Check checked={aiAutoCloze} onChange={setAiAutoCloze} disabled={!aiReady} label={t('settingsAI.autoCloze')} />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Field
+            label={t('settingsAI.model')}
+            right={
+              <Btn type="button" size="sm" flat disabled={!aiApiKey || badKey || !aiBaseUrl.trim() || fetching} onClick={() => void fetchModels()}>
+                {fetching ? t('settingsAI.fetching') : t('settingsAI.fetchModels')}
+              </Btn>
+            }
+            hint={
+              fetchError
+                ? `${t('settingsAI.fetchFailed')} ${fetchError}`
+                : models.length > 0
+                  ? t('settingsAI.fetchedCount').replace('{n}', String(models.length))
+                  : t('settingsAI.modelHint')
+            }
+          >
+            <ModelPicker
+              value={aiModel}
+              onChange={setAiModel}
+              models={models}
+              emptyLabel={models.length > 0 ? t('settingsAI.pickModel') : t('settingsAI.fetchFirst')}
+            />
+          </Field>
+
+          <Field
+            label={t('settingsAI.temperature')}
+            right={String(aiTemperature)}
+            hint={t('settingsAI.temperatureHint')}
+          >
+            <input
+              type="range"
+              min="0"
+              max="2"
+              step="0.1"
+              value={aiTemperature}
+              onChange={(e) => setAiTemperature(parseFloat(e.target.value))}
+            />
+          </Field>
         </div>
-        <span className="block mt-1.5 text-xs text-mute leading-relaxed">{aiReady ? t('settingsAI.afterImportHint') : t('settingsAI.afterImportNeedAi')}</span>
-      </div>
+      </Group>
 
-      <div>
-        <Check checked={aiJaCheck} onChange={setAiJaCheck} disabled={!aiReady} label={t('settingsAI.jaCheck')} />
-        <span className="block mt-1.5 text-xs text-mute leading-relaxed">{aiReady ? t('settingsAI.jaCheckHint') : t('settingsAI.afterImportNeedAi')}</span>
-      </div>
+      <Group title={t('settings.group.aiSpeed')}>
+        <div>
+          <span className="block text-sm font-medium mb-2.5">{t('settingsAI.limits')}</span>
+          <div className="grid grid-cols-3 gap-3">
+            {LIMIT_KINDS.map(kind => (
+              <label key={kind} className="block">
+                <span className="block text-xs text-mute mb-1">{t(`settingsAI.limit_${kind}`)}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={LIMIT_MAX}
+                  step={1}
+                  value={aiLimits[kind] ?? ''}
+                  placeholder={String(LIMIT_DEFAULTS[kind])}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    setAiLimits({ ...aiLimits, [kind]: Number.isFinite(n) ? Math.min(Math.max(n, 1), LIMIT_MAX) : undefined });
+                  }}
+                  className={`${inputCls} font-mono`}
+                />
+              </label>
+            ))}
+          </div>
+          <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.limitsHint', { max: LIMIT_MAX })}</span>
+        </div>
+      </Group>
 
-      <div>
-        <span className="block text-sm font-medium mb-2.5">{t('settingsAI.limits')}</span>
-        <div className="grid grid-cols-3 gap-3">
-          {LIMIT_KINDS.map(kind => (
-            <label key={kind} className="block">
-              <span className="block text-xs text-mute mb-1">{t(`settingsAI.limit_${kind}`)}</span>
-              <input
-                type="number"
-                min={1}
-                max={LIMIT_MAX}
-                step={1}
-                value={aiLimits[kind] ?? ''}
-                placeholder={String(LIMIT_DEFAULTS[kind])}
-                onChange={(e) => {
-                  const n = parseInt(e.target.value, 10);
-                  setAiLimits({ ...aiLimits, [kind]: Number.isFinite(n) ? Math.min(Math.max(n, 1), LIMIT_MAX) : undefined });
-                }}
-                className={`${inputCls} font-mono`}
-              />
-            </label>
+      <Group title={t('settings.group.aiUsedBy')}>
+        <div className="space-y-2 text-sm">
+          {([['lookup', 'settings.aiUsedByLookup', 'settings.lookup'], ['import', 'settings.aiUsedByImport', 'settings.import']] as const).map(([tab, what, where]) => (
+            <p key={tab} className="flex items-center justify-between gap-3">
+              <span>{t(what)}</span>
+              <Btn type="button" size="sm" flat onClick={() => goTab(tab)}>{t(where)} →</Btn>
+            </p>
           ))}
+          <p className="text-mute">{t('settings.aiUsedByPractice')}</p>
         </div>
-        <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.limitsHint', { max: LIMIT_MAX })}</span>
-      </div>
-
-      <Field
-        label={t('settingsAI.promptTemplate')}
-        right={
-          <Btn type="button" size="sm" flat onClick={() => setAiPrompt(AI.DEFAULT_PROMPT)}>
-            {t('settingsAI.reset')}
-          </Btn>
-        }
-        hint={t('settingsAI.promptHint')}
-      >
-        <textarea
-          value={aiPrompt}
-          onChange={(e) => setAiPrompt(e.target.value)}
-          className={`${inputCls} min-h-32 font-mono`}
-          placeholder={t('settingsAI.promptPlaceholder')}
-        />
-      </Field>
+      </Group>
     </div>
   );
 };
+
 
 export default SettingsAI;

@@ -8,7 +8,7 @@ import {
   setDictEnabled, setDictLang, useLocalDicts,
 } from '../utils/localDict';
 
-// Settings → General → local dictionaries (docs/yomitan.md): the installed ones
+// Settings → Look up → local dictionaries (docs/yomitan.md): the installed ones
 // (on/off, language, order, remove), import a zip, or download a recommended one.
 
 const LANGS: DictLang[] = ['en', 'es', 'fr', 'de', 'ja'];
