@@ -48,6 +48,7 @@ const SegText: React.FC<{ line: Seg[] }> = ({ line }) => (
   <>
     {line.map((p, k) => (typeof p === 'string'
       ? <React.Fragment key={k}>{p}</React.Fragment>
+      : 'ruby' in p ? <ruby key={k}>{p.ruby}<rt>{p.rt}</rt></ruby>
       : <img key={k} src={p.img} alt="" className="inline h-[1em] align-[-0.12em] mix-blend-multiply" />))}
   </>
 );
@@ -178,7 +179,8 @@ const DefinitionPanel: React.FC<{
               <div className="flex items-baseline gap-3 flex-wrap">
                 <h4 className="font-serif text-2xl leading-none break-words">{e.word}</h4>
                 {e.phonetic && <span className="text-sm text-mute font-mono">{e.phonetic}</span>}
-                {ei === 0 && <Stamp tone="shade">{t(`dict.${e.source}`)}</Stamp>}
+                {/* Local dictionaries each name themselves (their licences ask for credit). */}
+                {(ei === 0 || e.dictName !== def.dict![ei - 1].dictName) && <Stamp tone="shade">{e.dictName ?? t(`dict.${e.source}`)}</Stamp>}
               </div>
               {e.note && <p className="text-xs text-mute">{e.note}</p>}
               <ul className="space-y-1">

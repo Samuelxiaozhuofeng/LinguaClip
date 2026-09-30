@@ -1,6 +1,7 @@
 import { fetch } from '@tauri-apps/plugin-http';
 import { getLang, type Lang } from './i18n';
 import { parseJisho, parseWiktionary } from './dictionaryEn';
+import { localDictsFor, localDictsReady, lookupLocal } from './localDict';
 
 // Dictionary lookup without AI, after ODH (github.com/ninja33/ODH, MIT): the
 // same public dictionary pages it reads, fetched through the http plugin (no
@@ -11,17 +12,20 @@ import { parseJisho, parseWiktionary } from './dictionaryEn';
 export type DictLang = 'en' | 'es' | 'fr' | 'de' | 'ja';
 // cambridge = English-Chinese, cambridgeEn = English-English, cambridgeBi =
 // Spanish / French / German-English. The English ones: docs/dictionary.md.
-export type DictSource = 'youdao' | 'cambridge' | 'eudic' | 'cambridgeEn' | 'cambridgeBi' | 'wiktionary' | 'jisho';
+// local = the user's own imported dictionaries (docs/yomitan.md).
+export type DictSource = 'youdao' | 'cambridge' | 'eudic' | 'cambridgeEn' | 'cambridgeBi' | 'wiktionary' | 'jisho' | 'local';
 
 // Eudic draws some Chinese characters as tiny images (anti-scraping), so a
-// definition is text interleaved with those glyph images.
-export type Seg = string | { img: string };
+// definition is text interleaved with those glyph images. Local dictionaries
+// keep a word's reading over it (ruby).
+export type Seg = string | { img: string } | { ruby: string; rt: string };
 // One numbered meaning: what the user picks and sends to Anki on its own.
 // phrase = the set phrase it belongs to (Eudic, e.g. "llegar a ser").
 export interface Sense { pos: string; phrase?: string; text: Seg[]; examples: Seg[][] }
 // reading: the headword in kana (Japanese only). note: the clicked word is a
-// form of this one ("first-person singular preterite of llegar").
-export interface DictEntry { word: string; phonetic: string; senses: Sense[]; source: DictSource; reading?: string; note?: string }
+// form of this one ("first-person singular preterite of llegar"). dictName: which
+// local dictionary it came from, shown as its source.
+export interface DictEntry { word: string; phonetic: string; senses: Sense[]; source: DictSource; reading?: string; note?: string; dictName?: string }
 
 // Which dictionaries each interface language lists; first option = the default.
 // Youdao barely splits Spanish/French/German into meanings and has no examples
@@ -43,7 +47,15 @@ const OPTIONS: Record<Lang, Record<DictLang, DictSource[]>> = {
   },
 };
 
-export const dictOptions = (ui: Lang = getLang()) => OPTIONS[ui];
+// "Local dictionaries" joins a language's list once one is on for it: last in a
+// Chinese interface (Youdao / Eudic stay the default), first in an English one.
+export const dictOptions = (ui: Lang = getLang()): Record<DictLang, DictSource[]> => {
+  const out = { ...OPTIONS[ui] };
+  for (const lang of Object.keys(out) as DictLang[]) {
+    if (localDictsFor(lang).length) out[lang] = ui === 'zh' ? [...out[lang], 'local'] : ['local', ...out[lang]];
+  }
+  return out;
+};
 
 // Each interface language keeps its own choice, so switching back restores it.
 // The Chinese one stays in the key older versions read.
@@ -60,7 +72,7 @@ const storedChoice = (ui: Lang): Record<string, unknown> => {
 
 export const getDictChoice = (ui: Lang = getLang()): Record<DictLang, DictSource> => {
   const stored = storedChoice(ui);
-  const options = OPTIONS[ui];
+  const options = dictOptions(ui);
   const pick = {} as Record<DictLang, DictSource>;
   for (const lang of Object.keys(options) as DictLang[]) {
     const v = stored[lang] as DictSource;
@@ -252,7 +264,7 @@ const segs = (node: Node, skip?: string): Seg[] => {
   return merged;
 };
 
-const lineText = (line: Seg[]) => line.map(p => (typeof p === 'string' ? p : '□')).join('');
+const lineText = (line: Seg[]) => line.map(p => (typeof p === 'string' ? p : 'ruby' in p ? p.ruby : '□')).join('');
 const hasCjk = (line: Seg[]) => line.some(p => typeof p !== 'string' || CJK.test(p));
 
 // Seg run -> lines, split at <br>.
@@ -372,6 +384,7 @@ const lookupWiktionary = async (word: string, lang: DictLang): Promise<DictEntry
 const CAMBRIDGE_BI: Partial<Record<DictLang, string>> = { es: 'spanish-english', fr: 'french-english', de: 'german-english' };
 
 const fromSource = async (source: DictSource, word: string, lang: DictLang): Promise<DictEntry[] | null> => {
+  if (source === 'local') return lookupLocal(word, lang);
   const q = encodeURIComponent(word);
   if (source === 'cambridge' || source === 'cambridgeEn' || (source === 'cambridgeBi' && CAMBRIDGE_BI[lang])) {
     const path = source === 'cambridge' ? 'english-chinese-simplified' : source === 'cambridgeEn' ? 'english' : CAMBRIDGE_BI[lang];
@@ -398,27 +411,40 @@ const fromSource = async (source: DictSource, word: string, lang: DictLang): Pro
 
 // null = the dictionary has no such word; throws when it cannot be reached.
 // Cambridge sits behind a bot check that turns requests away now and then, and
-// Cambridge's Spanish-English has no conjugated forms, so a chosen dictionary
-// that is unreachable or lacks the word hands over to the interface's default;
-// an unreachable default hands over to the second on the list.
+// Cambridge's Spanish-English has no conjugated forms, so the dictionaries are
+// tried in turn: the chosen one, then the interface's default, then the rest of
+// the list. One that cannot be reached hands over to the next. One that lacks
+// the word hands over only if it is the chosen (non-default) one or the local
+// dictionaries — what an online default lacks, the others are not asked for.
+// Local ones sit on the list too (last in a Chinese interface), so with no
+// network they answer at the end; if nothing answers and something was
+// unreachable, that error stands ("unreachable", not "no such word").
 export const lookupWord = async (word: string, lang: DictLang): Promise<DictEntry[] | null> => {
+  await localDictsReady();
   const ui = getLang();
-  const list = OPTIONS[ui][lang];
+  const list = dictOptions(ui)[lang];
   const source = getDictChoice(ui)[lang];
-  const next = source === list[0] ? list[1] : list[0];
-  try {
-    const found = await fromSource(source, word, lang);
-    if (found || source === list[0] || !next) return found;
-  } catch (e) {
-    if (!next) throw e;
-    console.warn(`Dictionary ${source} unreachable, using ${next}:`, e);
+  const queue = [...new Set([source, ...list])];
+  let failure: unknown = null;
+  for (const s of queue) {
+    try {
+      const found = await fromSource(s, word, lang);
+      if (found) return found;
+      // A definite "no such word" from an online default ends it, even after a failure.
+      if (s !== 'local' && !(s === source && s !== list[0])) return null;
+    } catch (e) {
+      console.warn(`Dictionary ${s} unreachable:`, e);
+      failure ??= e;
+    }
   }
-  return fromSource(next, word, lang);
+  if (failure) throw failure;
+  return null;
 };
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const segsToHtml = (line: Seg[]) =>
-  line.map(p => (typeof p === 'string' ? esc(p).replace(/\n/g, '<br/>') : `<img src="${p.img}">`)).join('');
+  line.map(p => (typeof p === 'string' ? esc(p).replace(/\n/g, '<br/>')
+    : 'ruby' in p ? `<ruby>${esc(p.ruby)}<rt>${esc(p.rt)}</rt></ruby>` : `<img src="${p.img}">`)).join('');
 
 // One meaning as Anki fields: the definition (headword, pos, set phrase and
 // meaning) and its first two examples. Glyph images stay as <img>.

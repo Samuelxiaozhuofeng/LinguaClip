@@ -11,6 +11,11 @@
  *   default); its files are served from node_modules/kuromoji/dict.
  * - `window.__MOCK__.update = { version, body }` fakes a newer release (null = up to
  *   date, 'fail' = no connection); `updateFail = 'download' | 'install'` fakes that step failing.
+ * - Local dictionaries (docs/yomitan.md): `window.__MOCK__.localDicts` is the
+ *   installed list (empty by default). Importing / downloading adds a book from
+ *   dev/fixtures/dict-sample.json (rows cut from the real ones; a picked path
+ *   containing "nolang" adds one whose language is unknown); `dictFail = 'net'`
+ *   etc. makes the next import / download fail with that code.
  * - Rust commands are logged to `window.__MOCK__.calls`; fake import progress
  *   with `window.__MOCK__.emit('import-progress', {...})`.
  * - vite aliases @tauri-apps/plugin-http to this file, hence the `fetch` export;
@@ -42,12 +47,88 @@ const mock = {
   probe: { duration: 19, video: 'h264', audio: 'ac3', subtitles: [] as unknown[] },
   update: null as null | 'fail' | { version: string; body: string },
   updateFail: null as null | 'download' | 'install',
+  localDicts: [] as Args[],
+  dictFail: null as string | null,
   emit,
 };
 (window as any).__MOCK__ = mock;
 
+let dictFixture: Args | null = null;
+const fixture = async (): Promise<Args> => (dictFixture ??= await (await fetch('/dev/fixtures/dict-sample.json')).json());
+const dictJob = async (stages: ('download' | 'import')[]) => {
+  for (const stage of stages) {
+    for (let pct = 0; pct < 100; pct += 25) {
+      await emit('dict-import-progress', { stage, pct });
+      await new Promise(r => setTimeout(r, 250));
+    }
+  }
+  const fail = mock.dictFail;
+  mock.dictFail = null;
+  if (fail) throw fail;
+};
+const addDict = (d: Args) => {
+  const order = Math.max(-1, ...mock.localDicts.map(x => x.order)) + 1;
+  mock.localDicts = [...mock.localDicts, { ...d, id: `${d.id}-${Date.now()}`, order, enabled: true }];
+  return mock.localDicts;
+};
+// A mock book reads its rows from the fixture book of the same language.
+const rowsFor = (fx: Args, id: string) => {
+  const d = mock.localDicts.find(x => x.id === id);
+  const src = fx.dicts.find((x: Args) => x.lang === d?.lang);
+  return src ? { rows: fx.rows[src.id] as unknown[][], tags: fx.tags[src.id] as Args } : null;
+};
+
 async function handle(cmd: string, args: Args): Promise<unknown> {
   switch (cmd) {
+    case 'dict_list':
+      return [...mock.localDicts].sort((a, b) => a.order - b.order);
+    case 'dict_check': {
+      const fx = await fixture();
+      const d = fx.dicts.find((x: Args) => args.path.includes(x.title)) ?? fx.dicts[1];
+      return { title: d.title, revision: d.revision, same: mock.localDicts.find(x => x.title === d.title) ?? null };
+    }
+    case 'dict_import': {
+      const fx = await fixture();
+      await dictJob(['import']);
+      const d = fx.dicts.find((x: Args) => args.path.includes(x.title)) ?? fx.dicts[1];
+      if (args.replace) mock.localDicts = mock.localDicts.filter(x => x.id !== args.replace);
+      return addDict({ ...d, downloadUrl: null, lang: args.path.includes('nolang') ? null : d.lang });
+    }
+    case 'dict_download': {
+      const fx = await fixture();
+      await dictJob(['download', 'import']);
+      const url: string = args.urls[0];
+      const title = /\/([^/]+?)(?:-yomitan)?\.zip$/.exec(url)?.[1] ?? 'download';
+      const lang = /dict\/(\w\w)\//.exec(url)?.[1] ?? 'ja';
+      const like = fx.dicts.find((x: Args) => x.lang === lang);
+      return addDict({ ...like, id: `mock-${title}`, title, downloadUrl: url, bytes: like.bytes });
+    }
+    case 'dict_update':
+      mock.localDicts = mock.localDicts.map(d => (d.id !== args.id ? d : {
+        ...d, ...(args.enabled != null && { enabled: args.enabled }), ...(args.lang != null && { lang: args.lang }),
+      }));
+      return handle('dict_list', {});
+    case 'dict_move': {
+      const list = await handle('dict_list', {}) as Args[];
+      const at = list.findIndex(d => d.id === args.id), to = at + args.dirStep;
+      if (at >= 0 && to >= 0 && to < list.length) [list[at], list[to]] = [list[to], list[at]];
+      mock.localDicts = list.map((d, i) => ({ ...d, order: i }));
+      return mock.localDicts;
+    }
+    case 'dict_remove':
+      mock.localDicts = mock.localDicts.filter(d => d.id !== args.id);
+      return handle('dict_list', {});
+    case 'dict_lookup': {
+      const fx = await fixture();
+      const keys = new Set(args.keys as string[]);
+      return (args.ids as string[]).flatMap(id => {
+        const src = rowsFor(fx, id);
+        const rows = src?.rows.filter(r => keys.has(r[0] as string) || keys.has(r[1] as string)) ?? [];
+        if (!rows.length) return [];
+        const used = new Set(rows.flatMap(r => `${r[2] ?? ''} ${r[7] ?? ''}`.split(/\s+/)));
+        return [{ id, rows, tags: Object.fromEntries(Object.entries(src!.tags).filter(([k]) => used.has(k))) }];
+      });
+    }
     case 'plugin:dialog|open': {
       const exts: string[] = args.options?.filters?.[0]?.extensions ?? [];
       const pick = mock.pick ?? (exts.includes('srt') ? `${FIXTURE}.srt` : `${FIXTURE}.mp4`);

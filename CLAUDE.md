@@ -54,7 +54,7 @@ npx tauri dev          # 桌面开发：自己拉起 vite:3000（Claude 验功�
 npx tsc --noEmit       # 类型检查
 npm run release        # tauri build --bundles app，然后装进 /Applications
 npm run release:public # 发 GitHub Release 用：scripts/release-mac.sh 打包进 src-tauri/target/release-files/（有更新签名私钥时多出一键更新包，见 docs/update.md）（在本机打 = 带 Pro + 试用的官方包；包里不带任何 AI 密钥，AI 全靠用户在设置里自填；Creem 正式模式上线、正式码真激活过之前别外发）
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust 侧（import.rs 有单测）
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust 侧（import.rs、dicts.rs 有单测；dicts 的真词典导入是 --ignored，DICT_ZIP=路径 换词典）
 node test-resegment.mjs   # 切句逻辑自检（bundle 真模块，不是复制逻辑）
 node test-sections.mjs    # 分段逻辑自检（同上）
 node test-cloze.mjs       # 挖空逻辑 + 缓存自检（同上）
@@ -68,6 +68,7 @@ node test-review.mjs      # 复习卡：排期 + 匹配（utils/review.ts）
 node test-breakdown.mjs   # 拆句：AI 回答校验 + 步骤（utils/aiDrills.ts）
 node test-breakdown-prep.mjs # 拆句后台任务：批量回答解析、挑句、缓存（utils/breakdownPrep.ts）
 node test-ailimit.mjs     # 各类 AI 请求并发上限（utils/aiLimit.ts）
+node test-localdict.mjs   # 本地词典：点的词查哪些候选、变位跳原形、Yomitan 排版转释义（读 dev/fixtures/dict-sample.json 真样本）
 node pro/test-reader.mjs  # 阅读器：查过的词怎么记（日语原形）+ 看剧时认回来、AI 译文回答 / 缓存 / 删视频中途取消
 node pro/test-license.mjs # Pro 试用 + 激活：3 个不同视频、弹窗按钮、凭证规则（验签 / 本机 / 30 天 / 测试码）、出错不锁人、退款或被移除删记录、并发不写回旧凭证
 ```

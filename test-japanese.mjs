@@ -28,7 +28,11 @@ await build({
           export const installJaDict = async () => {}; export const removeJaDict = async () => {};
           export const onJaDictProgress = async () => () => {};
           export const readCacheText = async () => null; export const writeCacheText = async () => {};
-          export const fetch = globalThis.fetch; export const ankiRequest = async () => '';`,
+          export const fetch = globalThis.fetch; export const ankiRequest = async () => '';
+          export const dictList = async () => []; export const dictLookup = async () => []; export const pickDictZip = async () => null;
+          export const dictCheck = async () => null; export const dictImport = async () => []; export const dictDownload = async () => [];
+          export const dictUpdate = async () => []; export const dictMove = async () => []; export const dictRemove = async () => [];
+          export const onDictProgress = async () => () => {};`,
         resolveDir: process.cwd(),
       }));
     },

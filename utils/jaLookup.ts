@@ -1,4 +1,5 @@
 import { DictEntry, getDictChoice, lookupWord } from './dictionary';
+import { localDictsReady, lookupLocal } from './localDict';
 import { jaLemma, jaMorphs, kanaFold } from './japanese';
 import { JA_ALSO } from './jaPhrases';
 
@@ -29,6 +30,13 @@ export function rankJa(entries: DictEntry[], query: string): DictEntry[] {
 }
 
 export async function lookupJa(word: string): Promise<DictEntry[] | null> {
+  // Local dictionaries find the dictionary form themselves; what they lack goes
+  // the usual way below (the choice stays "local", so lookupWord moves on to the default).
+  await localDictsReady(); // until the list is read, "local" is not a choice yet
+  if (getDictChoice().ja === 'local') {
+    const local = await lookupLocal(word, 'ja');
+    if (local) return local;
+  }
   const lemma = jaLemma(word);
   // Only a group of several words can be a phrase of its own; a lone kana word
   // would bring back the homophone its spelling fix avoids (くる「佝偻病」).

@@ -68,6 +68,27 @@ export const installJaDict = () => invoke<void>('install_ja_dict');
 export const removeJaDict = () => invoke<void>('remove_ja_dict');
 export const onJaDictProgress = (fn: (pct: number) => void) => listen<number>('ja-dict-progress', e => fn(e.payload));
 
+// Local dictionaries (src-tauri/src/dicts.rs, docs/yomitan.md). Every change returns the new list.
+export type LocalDict = {
+  id: string; title: string; revision: string; lang: string | null; enabled: boolean; order: number;
+  bytes: number; attribution: string; downloadUrl: string | null; broken: boolean; needsReimport: boolean;
+};
+export type DictCheck = { title: string; revision: string; same: LocalDict | null };
+export type DictProgress = { stage: 'download' | 'import'; pct: number };
+export const dictList = () => invoke<LocalDict[]>('dict_list');
+export const dictCheck = (path: string) => invoke<DictCheck>('dict_check', { path });
+export const dictImport = (path: string, replace?: string) => invoke<LocalDict[]>('dict_import', { path, replace });
+export const dictDownload = (urls: string[], replace?: string) => invoke<LocalDict[]>('dict_download', { urls, replace });
+export const dictUpdate = (id: string, change: { enabled?: boolean; lang?: string }) => invoke<LocalDict[]>('dict_update', { id, ...change });
+export const dictMove = (id: string, dirStep: -1 | 1) => invoke<LocalDict[]>('dict_move', { id, dirStep });
+export const dictRemove = (id: string) => invoke<LocalDict[]>('dict_remove', { id });
+export const dictLookup = <R>(ids: string[], keys: string[]) => invoke<R[]>('dict_lookup', { ids, keys });
+export const onDictProgress = (fn: (p: DictProgress) => void) => listen<DictProgress>('dict-import-progress', e => fn(e.payload));
+export async function pickDictZip(): Promise<string | null> {
+  const selected = await open({ multiple: false, filters: [{ name: 'Yomitan', extensions: ['zip'] }] });
+  return typeof selected === 'string' ? selected : null;
+}
+
 // The video converter (ffmpeg): path = the one in use, null = not downloaded yet.
 export type ConvertToolStatus = { path: string | null; dir: string; bytes: number };
 export const convertToolStatus = () => invoke<ConvertToolStatus>('convert_tool_status');

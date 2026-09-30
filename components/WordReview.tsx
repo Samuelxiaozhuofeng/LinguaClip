@@ -11,8 +11,8 @@ import { useT } from '../utils/i18n';
 // every review card ends on.
 
 // A kept meaning is HTML (dictionary text we escaped, but also raw AI text and
-// glyph images from dictionary pages), so only <b> <i> <br> and http(s) <img>
-// get through; everything else is flattened to its text.
+// glyph images from dictionary pages), so only <b> <i> <br> <ruby> <rt> <rp> and
+// http(s) <img> get through; everything else is flattened to its text.
 const clean = (html: string): string => {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const walk = (n: Node): string => [...n.childNodes].map(c => {
@@ -22,7 +22,7 @@ const clean = (html: string): string => {
     if (tag === 'br') return '<br/>';
     if (tag === 'script' || tag === 'style') return '';
     if (tag === 'img') { const src = c.getAttribute('src') ?? ''; return /^https?:\/\//.test(src) ? `<img src="${src.replace(/"/g, '&quot;')}">` : ''; }
-    return tag === 'b' || tag === 'i' ? `<${tag}>${walk(c)}</${tag}>` : walk(c);
+    return ['b', 'i', 'ruby', 'rt', 'rp'].includes(tag) ? `<${tag}>${walk(c)}</${tag}>` : walk(c);
   }).join('');
   return walk(doc.body);
 };

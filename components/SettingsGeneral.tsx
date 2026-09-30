@@ -10,6 +10,8 @@ import { getPracticeConfig, getWordFront, savePracticeConfig } from '../utils/st
 import type { WordFront } from '../types';
 import { DictLang, dictOptions, getDictChoice, saveDictChoice } from '../utils/dictionary';
 import { JaDictRow } from './JaSetup';
+import SettingsLocalDict from './SettingsLocalDict';
+import { useLocalDicts } from '../utils/localDict';
 import ConvertToolRow from './ConvertToolRow';
 
 interface SettingsGeneralProps {
@@ -26,6 +28,7 @@ const DictionaryPicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
   const t = useT();
   // Each interface language lists and keeps its own dictionaries (docs/dictionary.md).
   const ui = useLang();
+  useLocalDicts(); // redraw once the local list is read: it adds "Local dictionaries" to the options
   const options = dictOptions(ui);
   const [, redraw] = useState(0);
   const choice = getDictChoice(ui);
@@ -174,6 +177,7 @@ const SettingsGeneral: React.FC<SettingsGeneralProps> = ({
       <WordFrontPicker onSaved={onSaved} />
       <ClipsRow onSaved={onSaved} />
       <DictionaryPicker onSaved={onSaved} />
+      <SettingsLocalDict />
       <JaDictRow />
       <ConvertToolRow />
 

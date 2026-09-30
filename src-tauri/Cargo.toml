@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["raw_value"] }
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.11.6", features = ["protocol-asset"] }
@@ -37,6 +37,11 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tokio = { version = "1", features = ["time"] }
 # Reads a video's audio track where macOS's afconvert is not around (decode.rs)
 symphonia = { version = "0.5", default-features = false, features = ["aac", "mp3", "pcm", "alac", "flac", "isomp4"] }
+
+# Local dictionaries (dicts.rs): Yomitan zips read in place, stored one SQLite file each
+zip = { version = "4", default-features = false, features = ["deflate"] }
+flate2 = "1"
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

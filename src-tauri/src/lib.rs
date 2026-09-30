@@ -8,6 +8,8 @@ mod convert;
 mod cloud_live_tests;
 mod decode;
 mod device;
+mod dicts;
+mod dicts_import;
 mod groq;
 mod import;
 mod ja_dict;
@@ -26,6 +28,7 @@ pub fn run() {
     .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_process::init())
     .setup(|app| {
+      dicts::sweep();
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
@@ -54,6 +57,14 @@ pub fn run() {
       clips::sweep_clips,
       clips::clips_info,
       device::device_info,
+      dicts::dict_list,
+      dicts::dict_check,
+      dicts::dict_import,
+      dicts::dict_download,
+      dicts::dict_update,
+      dicts::dict_move,
+      dicts::dict_remove,
+      dicts::dict_lookup,
       trash_file
     ])
     .run(tauri::generate_context!())
