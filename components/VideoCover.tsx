@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Film } from 'lucide-react';
+import { Film, Headphones } from 'lucide-react';
 import { videoSrcFromPath } from '../utils/desktop';
 
 // A shelf card's cover: one frame grabbed from the video itself, nothing saved
 // to disk. Frames are grabbed one video at a time and kept for this session.
+// Sound only (`audio`): no frame to grab — the podcast's own picture, else headphones.
 
 const frames = new Map<string, Promise<string | null>>();
 let queue: Promise<unknown> = Promise.resolve();
@@ -61,17 +62,23 @@ function coverOf(path: string): Promise<string | null> {
   return hit;
 }
 
-const VideoCover: React.FC<{ path?: string; className?: string; children?: React.ReactNode }> = ({ path, className = 'aspect-video rounded-xl', children }) => {
+const VideoCover: React.FC<{ path?: string; audio?: boolean; image?: string; className?: string; children?: React.ReactNode }> = ({ path, audio, image, className = 'aspect-video rounded-xl', children }) => {
   const [src, setSrc] = useState<string | null>(null);
+  const [art, setArt] = useState(true); // the podcast picture loaded (or is still loading)
   useEffect(() => {
     let live = true;
     setSrc(null);
-    if (path) coverOf(path).then(url => { if (live) setSrc(url); });
+    if (path && !audio) coverOf(path).then(url => { if (live) setSrc(url); });
     return () => { live = false; };
-  }, [path]);
+  }, [path, audio]);
+  useEffect(() => setArt(true), [image]);
   return (
-    <div className={`relative overflow-hidden bg-line flex items-center justify-center ${className}`}>
-      {src ? <img src={src} alt="" className="absolute inset-0 w-full h-full object-cover" /> : <Film size={22} className="text-mute" />}
+    <div className={`relative overflow-hidden ${audio ? 'bg-shade' : 'bg-line'} flex items-center justify-center ${className}`}>
+      {audio
+        ? image && art
+          ? <img src={image} alt="" onError={() => setArt(false)} className="h-[68%] aspect-square rounded-xl object-cover shadow-card" />
+          : <Headphones size={22} className="text-mute" />
+        : src ? <img src={src} alt="" className="absolute inset-0 w-full h-full object-cover" /> : <Film size={22} className="text-mute" />}
       {children}
     </div>
   );

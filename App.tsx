@@ -7,7 +7,7 @@ import Shell from './components/Shell';
 import Studio from './components/Studio';
 import WatchPage from './components/WatchPage';
 import CustomPanel, { PanelChoice, nextPick, paceOf } from './components/CustomPanel';
-import { ProHost, Reader, readerGate } from '@pro';
+import { Listen, PodcastPicker, ProHost, Reader, listenGate, readerGate } from '@pro';
 import type { ReadBy } from './utils/storage';
 import { DialogHost, dialog } from './components/Dialog';
 import { UpdateDialog } from './components/UpdateUI';
@@ -21,7 +21,7 @@ import { useVideoController } from './hooks/useVideoController';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { usePracticeActions } from './hooks/usePracticeActions';
 import * as VideoStorage from './utils/videoStorage';
-import { fileNameFromPath, pathExists, pickVideoPath, videoSrcFromPath } from './utils/desktop';
+import { fileNameFromPath, isAudioRecord, pathExists, pickVideoPath, videoSrcFromPath } from './utils/desktop';
 import { parseSRT } from './utils/srtParser';
 import { t, useLang } from './utils/i18n';
 import { markInterruptedJobs, startImportListener } from './utils/importJob';
@@ -85,6 +85,10 @@ export default function App() {
   }, []);
 
   const [appState, setAppState] = useState<AppState>(AppState.UPLOAD);
+  // Which shelf a page returns to: the videos, or the podcast tab.
+  const homeRef = useRef<AppState.UPLOAD | AppState.PODCASTS>(AppState.UPLOAD);
+  if (appState === AppState.UPLOAD || appState === AppState.PODCASTS) homeRef.current = appState;
+  const goHome = () => setAppState(homeRef.current);
   const [homeEmpty, setHomeEmpty] = useState(false); // no videos yet: the top bar drops its add button
   const [addAsked, setAddAsked] = useState(false); // the top bar's "+": Home opens its add dialog
   const [videoFileName, setVideoFileName] = useState<string | null>(null);
@@ -97,6 +101,7 @@ export default function App() {
   const [custom, setCustom] = useState<CustomSession | null>(null);
   const [watching, setWatching] = useState<VideoRecord | null>(null); // watch mode's video, its path checked
   const [reading, setReading] = useState<{ record: VideoRecord; lm: LearningMode; by: ReadBy } | null>(null); // the reader's, likewise
+  const [listening, setListening] = useState<{ record: VideoRecord; lm: LearningMode } | null>(null); // no picture: listen instead of watch
   const customRef = useRef<CustomSession | null>(null);
   // Every write of the record's section progress goes through here, so a custom
   // set can never move the shelf's "part 3 of 12" or where "continue" lands.
@@ -237,7 +242,8 @@ export default function App() {
     try {
       // Pro trial used up: say so before asking for a missing video file, then
       // back to the panel to pick another way.
-      if (choice.kind === 'read' && !(await readerGate(record.id))) {
+      const listen = choice.kind === 'watch' && !!Listen && isAudioRecord(record);
+      if ((choice.kind === 'read' && !(await readerGate(record.id))) || (listen && !(await listenGate(record.id)))) {
         if (!stale()) setPanel({ record, lm });
         return;
       }
@@ -264,8 +270,13 @@ export default function App() {
           setAppState(AppState.READ);
           return;
         }
-        // Watching moves the video up the shelf; its practice mode and progress stay.
+        // Watching (or listening) moves the video up the shelf; its practice mode and progress stay.
         VideoStorage.patchVideoRecord(record.id, { lastPracticed: Date.now() }).catch(console.error);
+        if (listen) {
+          setListening({ record: { ...record, videoPath }, lm });
+          setAppState(AppState.LISTEN);
+          return;
+        }
         setWatching({ ...record, videoPath });
         setAppState(AppState.WATCH);
         return;
@@ -345,7 +356,7 @@ export default function App() {
     else togglePlay();
   }, [togglePlay, isPlaying]);
 
-  const exitPractice = () => { setShowComplete(false); setAppState(AppState.UPLOAD); customRef.current = null; setCustom(null); };
+  const exitPractice = () => { setShowComplete(false); goHome(); customRef.current = null; setCustom(null); };
 
   // "Next set" on the custom done overlay: same choices, from where this set ended.
   const nextSet = async () => {
@@ -405,17 +416,26 @@ export default function App() {
   const currentSub = subtitles[currentSubtitleIndex];
 
   const page = appState === AppState.WATCH && watching ? (
-    <WatchPage key={watching.id} record={watching} onExit={() => { setWatching(null); setAppState(AppState.UPLOAD); }} />
+    <WatchPage key={watching.id} record={watching} onExit={() => { setWatching(null); goHome(); }} />
+  ) : appState === AppState.LISTEN && listening && Listen ? (
+    <Listen key={listening.record.id} record={listening.record} onExit={() => { setListening(null); goHome(); }}
+      onPractice={() => { setListening(null); goHome(); setPanel(listening); }} />
   ) : appState === AppState.READ && reading && Reader ? (
     // Done reading: back to the panel to pick how to practise.
     <Reader key={reading.record.id} record={reading.record} by={reading.by}
-      onExit={n => { setReading(null); setAppState(AppState.UPLOAD); setPanel({ record: reading.record, lm: reading.lm, read: n }); }} />
+      onExit={n => { setReading(null); goHome(); setPanel({ record: reading.record, lm: reading.lm, read: n }); }} />
   ) : appState !== AppState.PRACTICE ? (
-    <Shell active={appState} onNav={setAppState} hideAdd={appState === AppState.UPLOAD && homeEmpty} onAdd={() => { setAppState(AppState.UPLOAD); setAddAsked(true); }}>
+    <Shell active={appState} onNav={setAppState} podcasts={!!PodcastPicker} hideAdd={appState === homeRef.current && homeEmpty} onAdd={() => { setAppState(appState === AppState.PODCASTS ? AppState.PODCASTS : AppState.UPLOAD); setAddAsked(true); }}>
       {appState === AppState.SETTINGS ? <Settings /> :
        appState === AppState.LIBRARY ? <ReviewPage key="line" deck="line" /> :
        appState === AppState.CARDS ? <ReviewPage key="word" deck="word" /> :
-       <Home onResume={handleResume} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} />}
+       appState === AppState.PODCASTS && PodcastPicker ? (
+        <Home key="podcasts" onResume={handleResume} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} podcasts={{
+          empty: <PodcastPicker onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
+          add: close => <PodcastPicker onClose={close} onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
+        }} />
+       ) :
+       <Home key="videos" onResume={handleResume} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} />}
     </Shell>
   ) : (
     <PracticeProvider

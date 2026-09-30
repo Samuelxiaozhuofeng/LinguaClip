@@ -5,7 +5,8 @@ import { useT } from '../utils/i18n';
 import { parseSRT } from '../utils/srtParser';
 import { canCloze } from '../utils/aiDrills';
 import { CustomConfig, CustomPick, LEVELS, Level, LineLabel, MINUTE_CHOICES, PaceMode, pickCustom } from '../utils/customPick';
-import { Reader, readerTrial } from '@pro';
+import { Listen, Reader, listenTrial, readerTrial } from '@pro';
+import { isAudioRecord } from '../utils/desktop';
 import { getLevelJob, prepareLevels, readLevels, subscribeLevels } from '../utils/levelPrep';
 import { formatTimeCode, getCustomConfig, getCustomPos, getWatchPrefs, ReadBy, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
 
@@ -15,6 +16,8 @@ import { formatTimeCode, getCustomConfig, getCustomPos, getWatchPrefs, ReadBy, s
 // (pro/ReaderPage.tsx). The last way chosen comes back — never "read": that
 // comes before practice, and the panel reopens after it to pick the practice.
 // Esc / clicking outside cancels; it never counts as a choice.
+// A record with no picture (a podcast episode, a sound file) listens instead of watching
+// (pro/ListenPage.tsx) where the Pro module is there; a podcast episode starts on it.
 
 export type PanelChoice = { kind: 'all' } | { kind: 'watch' } | { kind: 'read'; by: ReadBy } | { kind: 'custom'; cfg: CustomConfig; pick: CustomPick };
 
@@ -44,7 +47,9 @@ const CustomPanel: React.FC<{
     const c = getCustomConfig();
     return hasAi ? c : { ...c, level: null };
   });
-  const [watch, setWatch] = useState(() => getWatchPrefs().chosen);
+  const listen = !!Listen && isAudioRecord(record);
+  const [watch, setWatch] = useState(() => (listen && !!record.podcast) || getWatchPrefs().chosen);
+  const heard = listenTrial(record.id);
   const [read, setRead] = useState(false);
   const [readBy, setReadBy] = useState<ReadBy>(() => getWatchPrefs().readBy);
   const trial = readerTrial(record.id);
@@ -80,7 +85,7 @@ const CustomPanel: React.FC<{
 
   const start = (timeOnly = false) => {
     if (read) { saveWatchPrefs({ readBy }); onStart({ kind: 'read', by: readBy }); return; }
-    saveWatchPrefs({ chosen: watch });
+    if (!record.podcast) saveWatchPrefs({ chosen: watch }); // a podcast's own default isn't the videos' last choice
     if (watch) { onStart({ kind: 'watch' }); return; }
     if (!cfg.on) { saveCustomConfig(cfg); onStart({ kind: 'all' }); return; }
     if (want && !labels && !timeOnly) { if (!failed) setWaiting(true); return; }
@@ -150,20 +155,25 @@ const CustomPanel: React.FC<{
               {justRead > 0 && <span className="block text-mute">{t('custom.justReadHint')}</span>}
             </div>
           )}
-          <Row label={t('custom.way')} hint={read ? t('custom.readHint') : watch ? t('custom.watchHint') : cfg.on ? undefined : t('custom.allHint')}>
+          <Row label={t('custom.way')} hint={read ? t('custom.readHint') : watch ? t(listen ? 'custom.listenHint' : 'custom.watchHint') : cfg.on ? undefined : t('custom.allHint')}>
             <Seg value={read ? 'read' : watch ? 'watch' : cfg.on ? 'custom' : 'all'} onChange={v => {
               setWaiting(false); setRead(v === 'read'); setWatch(v === 'watch');
               if (v === 'all' || v === 'custom') set({ on: v === 'custom' });
             }} options={[
               { value: 'all', label: t('custom.all') },
               { value: 'custom', label: t('custom.custom') },
-              { value: 'watch', label: t('custom.watch') },
+              { value: 'watch', label: !listen ? t('custom.watch') : heard.pro ? t('custom.listen') : <>{t('custom.listen')}<span className="ml-1.5 px-1 rounded bg-shade text-[10px] font-semibold text-mute align-middle">Pro</span></> },
               ...(Reader ? [{ value: 'read', label: trial.pro ? t('custom.read') : <>{t('custom.read')}<span className="ml-1.5 px-1 rounded bg-shade text-[10px] font-semibold text-mute align-middle">Pro</span></> }] : []),
             ]} />
           </Row>
           {read && !trial.pro && (
             <div className="text-xs text-mute" aria-live="polite">
               {trial.mine ? t('pro.trialMine') : trial.used < trial.limit ? t('pro.trialLeft', { n: trial.limit - trial.used }) : t('pro.trialOver', { n: trial.limit })}
+            </div>
+          )}
+          {watch && listen && !heard.pro && (
+            <div className="text-xs text-mute" aria-live="polite">
+              {heard.mine ? t('pro.listenMine') : heard.used < heard.limit ? t('pro.listenLeft', { n: heard.limit - heard.used }) : t('pro.listenOver', { n: heard.limit })}
             </div>
           )}
           {read && (
@@ -198,7 +208,7 @@ const CustomPanel: React.FC<{
         <div className="px-6 pt-2 pb-6 flex justify-end gap-3">
           <Btn onClick={onCancel}>{t('dialog.cancel')}</Btn>
           <Btn tone="accent" onClick={() => start()} disabled={!!empty || (want && failed) || waiting} autoFocus>
-            {waiting ? t('custom.waiting') : read ? t('custom.startRead') : watch ? t('custom.startWatch') : t('custom.start')}
+            {waiting ? t('custom.waiting') : read ? t('custom.startRead') : watch ? t(listen ? 'custom.startListen' : 'custom.startWatch') : t('custom.start')}
           </Btn>
         </div>
       </Card>

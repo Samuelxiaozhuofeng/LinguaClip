@@ -5,7 +5,7 @@ import * as VideoStorage from '../utils/videoStorage';
 import { forgetCustomPos, forgetWatchPos, formatTimeCode, getCustomConfig, getCustomPos, getPracticeConfig } from '../utils/storage';
 import { parseSRT } from '../utils/srtParser';
 import { buildSections } from '../utils/sections';
-import { fileNameFromPath, isVideoFile, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
+import { fileNameFromPath, isAudioRecord, isVideoFile, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
 import { cancelImport, canConvertRetry, formatImportError, isCookieError, openYouTubeLogin, retryImport, subscribeImportJobs } from '../utils/importJob';
 import { Btn, Menu, MenuItem, inputCls } from './ui';
 import { DECK_LANGS, langName, videoLang } from '../utils/deckLang';
@@ -17,7 +17,7 @@ import AddVideo from './AddVideo';
 import { canCloze } from '../utils/aiDrills';
 import { cancelPrep, getPrepJob, prepStatus, prepareBreakdowns, subscribePrep } from '../utils/breakdownPrep';
 import { cancelLevels } from '../utils/levelPrep';
-import { cancelTrans } from '@pro';
+import { cancelTrans, refundListen } from '@pro';
 import { forgetLooked } from '../utils/readLooked';
 import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribeCloze } from '../utils/clozePrep';
 import { cancelSegments, getSegJob, subscribeSeg } from '../utils/jaSegments';
@@ -35,6 +35,9 @@ interface HomeProps {
   onEmptyChange?: (empty: boolean) => void;
   addAsked?: boolean; // the top bar's "+" was pressed
   onAddHandled?: () => void;
+  // The podcast page (a Pro tab): the same shelf with only podcast episodes, its own
+  // add dialog and empty state, no drops. Without it, the videos (and sound files).
+  podcasts?: { empty: React.ReactNode; add: (close: () => void) => React.ReactNode };
 }
 
 type PrepInfo = { eligible: number; missing: number };
@@ -46,7 +49,7 @@ const Line: React.FC<{ pct: number; className?: string }> = ({ pct, className = 
   </div>
 );
 
-const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHandled }) => {
+const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHandled, podcasts }) => {
   const t = useT();
   const lang = useLang();
   const [videos, setVideos] = useState<VideoRecord[] | null>(null);
@@ -101,12 +104,13 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
     return byId;
   }, [videos, sectionLength]);
 
+  const onThisPage = useCallback((all: VideoRecord[]) => all.filter(v => !!v.podcast === !!podcasts), [!!podcasts]); // eslint-disable-line react-hooks/exhaustive-deps
   const loadVideos = useCallback(() => {
     setLoadFailed(false);
     VideoStorage.getAllVideoRecords()
-      .then(setVideos)
+      .then(all => setVideos(onThisPage(all)))
       .catch(err => { console.error(err); setLoadFailed(true); });
-  }, []);
+  }, [onThisPage]);
   useEffect(() => {
     loadVideos();
     return subscribeImportJobs(loadVideos);
@@ -115,6 +119,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   // The whole window takes a dropped video and/or .srt; it opens the add dialog
   // with them filled in, keeping whichever half is already there.
   useEffect(() => {
+    if (podcasts) return;
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     listenDragDrop({
@@ -203,7 +208,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
     const n = mine ? mine.length : -1;
     // Cards with their own clip get their own question next, so don't say here that they all go.
     const cardsNote = clipped ? '' : n > 0 ? ' ' + t('home.deleteHasCards', { n }) : n < 0 ? ' ' + t('home.deleteCardsUnknown') : '';
-    const ok = await dialog.confirm(t('home.deleteTitle'), t('home.deleteBody', { name: v.displayName }) + cardsNote, { ok: t('home.deleteOk'), danger: true });
+    const audio = isAudioRecord(v);
+    const ok = await dialog.confirm(t(v.podcast ? 'home.deleteEpTitle' : audio ? 'home.deleteAudioTitle' : 'home.deleteTitle'), t('home.deleteBody', { name: v.displayName }) + cardsNote, { ok: t('home.deleteOk'), danger: true });
     if (!ok) return;
     // Cards that saved a clip still play without the video: keep them? Dismissed = nothing is deleted.
     const keepCards = clipped > 0 && await dialog.confirm(
@@ -213,7 +219,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
     );
     if (keepCards === null) return;
     const trash = !!v.videoPath && await dialog.confirm(
-      t('home.deleteFileTitle'),
+      t(audio ? 'home.deleteFileAudioTitle' : 'home.deleteFileTitle'),
       t('home.deleteFileBody', { file: fileNameFromPath(v.videoPath) }),
       { ok: t('home.deleteFileOk'), cancel: t('home.deleteFileKeep'), danger: true },
     );
@@ -223,7 +229,9 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
     try {
       await VideoStorage.deleteVideoRecord(v.id);
       // Still generating or waiting its turn: stop it, its events are ignored from here on.
+      // A podcast episode that never finished gives its trial slot back (it was never usable).
       if (v.importJob) cancelImport(v.id).catch(console.error);
+      if (v.importJob && v.podcast) refundListen(v.id);
       setVideos(prev => (prev ? prev.filter(x => x.id !== v.id) : prev));
       forgetCustomPos(v.id);
       forgetWatchPos(v.id);
@@ -267,6 +275,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
 
   const modeName = (m: LearningMode) => (m === LearningMode.BLUR ? t('home.blur') : t('home.dictate'));
   const lastMode = (v: VideoRecord) => v.learningMode ?? LearningMode.DICTATION;
+  // What the card's button starts: on the podcast page the panel opens on 边听边读.
+  const cardMode = (v: VideoRecord) => (podcasts ? t('custom.listen') : modeName(lastMode(v)));
   const otherMode = (v: VideoRecord) => (lastMode(v) === LearningMode.BLUR ? LearningMode.DICTATION : LearningMode.BLUR);
 
   // "Part 2 of 5" and how far into that part, or lines when there is only one part.
@@ -328,7 +338,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   // Shows what was actually saved (re-read after the write), so a failed write snaps back.
   const setVideoLang = async (v: VideoRecord, value: string) => {
     await VideoStorage.patchVideoRecord(v.id, { lang: (value || undefined) as DictLang | undefined });
-    VideoStorage.getAllVideoRecords().then(setVideos).catch(console.error);
+    VideoStorage.getAllVideoRecords().then(all => setVideos(onThisPage(all))).catch(console.error);
   };
   const langRow = (v: VideoRecord) => !v.importJob && (
     <label className="flex items-center gap-2.5 mt-1.5 mx-1 px-1.5 pt-2.5 pb-1 border-t border-line text-sm text-mute">
@@ -389,7 +399,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
           <p className="text-3xl font-semibold text-ink">{t('home.dropRelease')}</p>
         </div>
       )}
-      {adding && <AddVideo initialPath={adding.path} initialSrt={adding.srt ?? null} onClose={closeAdd} onPractice={rec => onResume(rec, LearningMode.DICTATION)} />}
+      {adding && podcasts?.add(closeAdd)}
+      {adding && !podcasts && <AddVideo initialPath={adding.path} initialSrt={adding.srt ?? null} onClose={closeAdd} onPractice={rec => onResume(rec, LearningMode.DICTATION)} />}
 
       {videos === null && loadFailed ? (
         <div className="pt-28 flex flex-col items-center text-center">
@@ -399,7 +410,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
         </div>
       ) : videos === null ? (
         <div className="pt-24 flex justify-center text-mute"><Loader2 className="animate-spin" size={20} /></div>
-      ) : videos.length === 0 ? (
+      ) : videos.length === 0 && podcasts ? podcasts.empty : videos.length === 0 ? (
         <div className="pt-28 flex flex-col items-center text-center">
           <p className="text-[40px] font-semibold tracking-[-0.02em] leading-tight">{t('home.nothingHereYet')}</p>
           <p className="mt-3 text-sm text-mute max-w-sm leading-relaxed">{t('home.nothingHereHint')}</p>
@@ -411,19 +422,20 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
             const w = where(lead);
             return (
               <section className="relative">
-                <button type="button" onClick={() => onResume(lead, lastMode(lead))} className="block w-full" aria-label={t('home.continueMode', { mode: modeName(lastMode(lead)) })}>
-                  <VideoCover path={lead.videoPath} className="h-[min(52vh,440px)] rounded-[20px]" />
+                <button type="button" onClick={() => onResume(lead, lastMode(lead))} className="block w-full" aria-label={t('home.continueMode', { mode: cardMode(lead) })}>
+                  <VideoCover path={lead.videoPath} audio={isAudioRecord(lead)} image={lead.podcast?.image} className="h-[min(52vh,440px)] rounded-[20px]" />
                 </button>
                 <div className="absolute left-6 right-6 bottom-6 flex items-center gap-5 p-4 pl-5 bg-page rounded-2xl shadow-card">
-                  <button type="button" onClick={() => onResume(lead, lastMode(lead))} title={t('home.continueMode', { mode: modeName(lastMode(lead)) })} aria-label={t('home.continueMode', { mode: modeName(lastMode(lead)) })}
+                  <button type="button" onClick={() => onResume(lead, lastMode(lead))} title={t('home.continueMode', { mode: cardMode(lead) })} aria-label={t('home.continueMode', { mode: cardMode(lead) })}
                     className="press shrink-0 w-[52px] h-[52px] rounded-full bg-accent text-white flex items-center justify-center">
                     <Play size={20} fill="currentColor" className="ml-1" />
                   </button>
                   <div className="min-w-0 flex-1">
+                    {lead.podcast && <p className="mb-0.5 text-xs text-mute truncate">{lead.podcast.show}</p>}
                     <p className="text-xl font-semibold leading-snug truncate" title={lead.displayName}>{lead.displayName}</p>
                     <div className="mt-2 flex items-center gap-3 text-[13px] text-mute min-w-0">
                       {ticks(lead)}
-                      <span className="truncate">{w.text} · {w.pct >= 100 && (shelfPosition.get(lead.id)?.customSec || (shelfPosition.get(lead.id)?.part ?? 0) + 1 >= (shelfPosition.get(lead.id)?.parts ?? 1)) ? t('home.finished') : t('home.continueMode', { mode: modeName(lastMode(lead)) })}{prepLine(lead)}</span>
+                      <span className="truncate">{w.text} · {w.pct >= 100 && (shelfPosition.get(lead.id)?.customSec || (shelfPosition.get(lead.id)?.part ?? 0) + 1 >= (shelfPosition.get(lead.id)?.parts ?? 1)) ? t('home.finished') : t('home.continueMode', { mode: cardMode(lead) })}{prepLine(lead)}</span>
                     </div>
                   </div>
                   {more(lead, 'lg')}
@@ -433,11 +445,11 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
           })()}
 
           <div className="mt-7 mb-3.5 flex items-baseline justify-between gap-4 text-[13px] text-mute">
-            <span className="font-medium text-ink">{lead ? t('home.others') : t('nav.videos')}</span>
+            <span className="font-medium text-ink">{t(podcasts ? (lead ? 'home.otherPodcasts' : 'nav.podcasts') : lead ? 'home.others' : 'nav.videos')}</span>
             {stats && <span title={t('home.rememberedTitle')}>{stats}</span>}
           </div>
           {rest.length === 0 ? (
-            <p className="py-2 text-sm text-mute">{t('home.onlyOne')}</p>
+            <p className="py-2 text-sm text-mute">{t(podcasts ? 'home.onlyOnePodcast' : 'home.onlyOne')}</p>
           ) : (
             <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-7">
               {rest.map(v => {
@@ -445,7 +457,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
                 return (
                   <li key={v.id} className="group relative min-w-0 focus-within:z-10 hover:z-10">
                     <button type="button" disabled={!!v.importJob} onClick={() => onResume(v, lastMode(v))} className="block w-full text-left disabled:cursor-default">
-                      <VideoCover path={v.videoPath}>
+                      <VideoCover path={v.videoPath} audio={isAudioRecord(v)} image={v.podcast?.image}>
                         {v.importJob && !v.importJob.error && (
                           <span className="absolute inset-x-0 bottom-0 px-3 py-2 text-xs text-white bg-black/60">{jobLabel(v.importJob)}</span>
                         )}
@@ -455,12 +467,13 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
                           </span>
                         )}
                       </VideoCover>
+                      {v.podcast && <p className="mt-2.5 -mb-2 text-xs text-mute truncate">{v.podcast.show}</p>}
                       <p className={`mt-2.5 text-[13px] font-medium leading-snug truncate ${v.importJob ? 'text-mute' : ''}`} title={v.displayName}>{v.displayName}</p>
                     </button>
                     {v.importJob ? (
                       jobStatus(v) ?? <Line pct={v.importJob.percent ?? 0} className="mt-2" />
                     ) : (
-                      <p className="mt-0.5 text-xs text-mute truncate">{w!.text} · {modeName(lastMode(v))}{prepLine(v)}</p>
+                      <p className="mt-0.5 text-xs text-mute truncate">{w!.text} · {cardMode(v)}{prepLine(v)}</p>
                     )}
                     <div className="absolute top-2 right-2 rounded-lg bg-page opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                       {more(v)}

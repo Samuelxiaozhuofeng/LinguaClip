@@ -131,7 +131,7 @@ pub async fn install_convert_tool(app: AppHandle) -> Result<(), String> {
 // What the player opens as is. Anything else is converted.
 pub(crate) fn plays_natively(path: &Path) -> bool {
   let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-  matches!(ext.as_str(), "mp4" | "mov" | "m4v")
+  matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "mp3" | "m4a")
 }
 
 #[derive(serde::Serialize, Debug, PartialEq)]

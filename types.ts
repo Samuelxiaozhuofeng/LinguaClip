@@ -13,6 +13,8 @@ export enum AppState {
   SETTINGS = 'SETTINGS',
   WATCH = 'WATCH',       // watch mode: the whole window is the video (components/WatchPage.tsx)
   READ = 'READ',         // reading the subtitles before practice (pro/ReaderPage.tsx)
+  PODCASTS = 'PODCASTS', // the podcast tab: Home with only podcast episodes (Pro)
+  LISTEN = 'LISTEN',     // listening to a record with no picture (pro/ListenPage.tsx)
 }
 
 export enum PracticeMode {
@@ -145,6 +147,9 @@ export interface VideoRecord {
   learningMode?: LearningMode;          // Last-used practice mode
   blurPlaybackMode?: BlurPlaybackMode;  // Last-used blur playback variant
   lang?: import('./utils/dictionary').DictLang; // set by hand in the video's menu; unset = guessed from the subtitles (utils/deckLang.ts)
+  // An episode imported from a podcast feed (docs/private/podcast.md): listed on the podcast
+  // page, not with the videos. `name` = the downloaded file's name stem, sent again on a retry.
+  podcast?: { show: string; feed: string; guid: string; image?: string; name: string };
 
   // Present while a YouTube/local import is generating subtitles (or failed).
   // Cleared once videoPath / subtitleText / totalSubtitles are filled in.

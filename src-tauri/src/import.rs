@@ -795,7 +795,7 @@ fn done(app: &AppHandle, id: &str, video: &Path, subtitle_text: Option<String>, 
   );
 }
 
-fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32, engine: &Engine, convert: bool, subs: Option<Subs>) -> Result<(), String> {
+fn run_import(app: &AppHandle, id: &str, source: &str, name: Option<&str>, lang: &str, quality: u32, engine: &Engine, convert: bool, subs: Option<Subs>) -> Result<(), String> {
   let dir = movies_dir()?;
   std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
@@ -813,13 +813,18 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
   };
   crate::import_queue::check()?;
 
-  let video = if is_url(source) {
-    if !is_youtube_url(source) {
-      return Err("download:not a YouTube URL".into());
-    }
+  let podcast = is_url(source) && !is_youtube_url(source);
+  let video = if is_url(source) && is_youtube_url(source) {
     let yt = find_bin("yt-dlp")?;
     emit(app, ImportProgress::stage(id, "download", Some(0)));
     download_video(app, id, source, &yt, &dir, quality)?
+  } else if is_url(source) {
+    // Any other link is a podcast episode, which comes with the file name to save it as.
+    let stem = name.and_then(crate::podcast::safe_stem).ok_or_else(|| "download:not a YouTube URL".to_string())?;
+    emit(app, ImportProgress::stage(id, "download", Some(0)));
+    crate::podcast::download(source.trim(), &dir, &stem, crate::import_queue::check, |pct| {
+      emit(app, ImportProgress::stage(id, "download", Some(pct)));
+    })?
   } else {
     let p = PathBuf::from(source.trim());
     if !p.is_file() {
@@ -877,6 +882,12 @@ fn run_import(app: &AppHandle, id: &str, source: &str, lang: &str, quality: u32,
   extract_wav(&video, &wav, |pct| {
     let stage = if pct < 100 { ImportProgress::stage(id, "convertSetup", Some(pct)) } else { ImportProgress::stage(id, "extract", Some(0)) };
     emit(app, stage);
+  })
+  .inspect_err(|_| {
+    // An episode whose sound cannot be read came down broken: the retry fetches it again.
+    if podcast {
+      let _ = std::fs::remove_file(&video);
+    }
   })?;
 
   let result = crate::import_queue::check().and_then(|()| match (&parts, engine) {
@@ -961,6 +972,7 @@ pub fn start_import(
   api_key: Option<String>,
   convert: Option<bool>,
   subs: Option<String>,
+  name: Option<String>,
 ) -> Result<(), String> {
   if id.trim().is_empty() || source.trim().is_empty() {
     return Err("missing id or source".into());
@@ -970,7 +982,7 @@ pub fn start_import(
     return Err("bad id".into());
   }
   let lang = lang.trim().to_string();
-  if !matches!(lang.as_str(), "en" | "es" | "ja" | "zh" | "auto") {
+  if !matches!(lang.as_str(), "en" | "es" | "ja" | "zh" | "fr" | "de" | "ko" | "auto") {
     return Err("bad-lang".into());
   }
   if !matches!(quality, 1080 | 720 | 480) {
@@ -1001,7 +1013,7 @@ pub fn start_import(
   // Their own .srt and a video the player opens: nothing heavy to do, no waiting.
   let light = subs.is_some() && !convert && !is_url(&source) && crate::convert::plays_natively(Path::new(source.trim()));
   thread::spawn(move || {
-    let run = || run_import(&app, &id, &source, &lang, quality, &engine, convert, subs);
+    let run = || run_import(&app, &id, &source, name.as_deref(), &lang, quality, &engine, convert, subs);
     let result = if light {
       run()
     } else {

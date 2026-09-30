@@ -134,16 +134,21 @@ export const forgetWatchPos = (videoId: string) => writeWatchPos(all => { delete
 // is never kept as `chosen`.
 export type WatchSubs = 'show' | 'blur' | 'hide';
 export type ReadBy = 'all' | 'section';
-export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean; pin: boolean; list: boolean; listPct: number; readBy: ReadBy; kana: boolean; autoClip: boolean };
+// listenSubs / podLang / listenThrough: the podcast page's (docs/private/podcast.md) — how much text shows, which
+// language's shows are listed, whether a section's end plays on.
+export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean; pin: boolean; list: boolean; listPct: number; readBy: ReadBy; kana: boolean; autoClip: boolean; listenSubs: WatchSubs; podLang: string; listenThrough: boolean };
 export const LIST_PCT = { min: 20, max: 50, def: 30 };
 
 export const getWatchPrefs = (): WatchPrefs => {
   try {
     const v = JSON.parse(localStorage.getItem(STORAGE_KEY_WATCH_PREFS) || '{}') ?? {};
     const pct = typeof v.listPct === 'number' && Number.isFinite(v.listPct) ? Math.min(LIST_PCT.max, Math.max(LIST_PCT.min, v.listPct)) : LIST_PCT.def;
-    return { subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen === true, pin: v.pin === true, list: v.list === true, listPct: pct, readBy: v.readBy === 'section' ? 'section' : 'all', kana: v.kana !== false, autoClip: v.autoClip === true };
+    return {
+      subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen === true, pin: v.pin === true, list: v.list === true, listPct: pct, readBy: v.readBy === 'section' ? 'section' : 'all', kana: v.kana !== false, autoClip: v.autoClip === true,
+      listenSubs: v.listenSubs === 'blur' || v.listenSubs === 'show' ? v.listenSubs : 'hide', podLang: typeof v.podLang === 'string' ? v.podLang : '', listenThrough: v.listenThrough === true,
+    };
   } catch {
-    return { subs: 'show', autoPause: false, chosen: false, pin: false, list: false, listPct: LIST_PCT.def, readBy: 'all', kana: true, autoClip: false };
+    return { subs: 'show', autoPause: false, chosen: false, pin: false, list: false, listPct: LIST_PCT.def, readBy: 'all', kana: true, autoClip: false, listenSubs: 'hide', podLang: '', listenThrough: false };
   }
 };
 

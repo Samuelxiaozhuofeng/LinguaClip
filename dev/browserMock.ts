@@ -275,5 +275,6 @@ export const fetch: typeof window.fetch = (input, init) => {
   if (!/^https?:\/\//.test(url) || url.startsWith(location.origin)) return window.fetch(input, init);
   const headers = new Headers(init?.headers);
   headers.set('x-proxy-url', url);
-  return window.fetch('/__proxy', { ...init, headers });
+  // One address for every target: the browser's cache would hand one feed back for all.
+  return window.fetch('/__proxy', { ...init, headers, cache: 'no-store' });
 };

@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { VideoRecord } from '../types';
 import { dialog } from '../components/Dialog';
-import { fileNameFromPath, needsConvert, pathExists, trashFile } from './desktop';
+import { fileNameFromPath, isAudioPath, needsConvert, pathExists, trashFile } from './desktop';
 import { getLang, t } from './i18n';
 import { getAIConfig } from './aiConfig';
 import { canCloze } from './aiDrills';
@@ -81,6 +81,7 @@ export function formatImportError(raw: string): string {
   if (raw.startsWith('setup:')) {
     return t('import.failedSetup', { detail: raw.slice('setup:'.length) });
   }
+  if (raw === 'podcast:format') return t('import.podcastFormat');
   if (raw.startsWith('download:')) {
     return t('import.failedDownload', { detail: raw.slice('download:'.length) });
   }
@@ -112,6 +113,9 @@ export type LocalImportOptions = {
   trashOriginal?: boolean;
 };
 
+// A podcast episode: its record id is picked first (the trial counts it before the import starts).
+export type PodcastImport = { id: string; title: string; audio: string; lang: string; podcast: NonNullable<VideoRecord['podcast']> };
+
 function pendingRecord(
   id: string,
   source: string,
@@ -119,9 +123,10 @@ function pendingRecord(
   lang: string,
   quality: ImportQuality,
   opts: LocalImportOptions = {},
+  episode?: PodcastImport,
 ): VideoRecord {
   const now = Date.now();
-  const label = fromUrl ? source : fileNameFromPath(source);
+  const label = episode?.title ?? (fromUrl ? source : fileNameFromPath(source));
   const own = typeof opts.subs === 'object' ? opts.subs : null;
   return {
     id,
@@ -136,6 +141,7 @@ function pendingRecord(
     dateAdded: now,
     lastPracticed: now,
     totalPracticeTime: 0,
+    ...(episode && { podcast: episode.podcast }),
     importJob: {
       stage: fromUrl ? 'download' : 'extract',
       percent: 0,
@@ -160,13 +166,14 @@ async function startImport(
   fromUrl: boolean,
   quality: ImportQuality,
   opts: LocalImportOptions = {},
+  episode?: PodcastImport,
 ): Promise<void> {
-  const id = crypto.randomUUID();
-  const record = pendingRecord(id, source, fromUrl, lang, quality, opts);
+  const id = episode?.id ?? crypto.randomUUID();
+  const record = pendingRecord(id, source, fromUrl, lang, quality, opts, episode);
   await VideoStorage.updateVideoRecord(record);
   notify();
   try {
-    await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...jobArgs(record.importJob!) });
+    await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...jobArgs(record.importJob!), name: episode?.podcast.name ?? null });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     await VideoStorage.updateVideoWith(id, rec => rec.importJob
@@ -190,11 +197,16 @@ export function startLocalImport(path: string, lang: string, opts: LocalImportOp
   return startImport(path, lang, false, 1080, opts);
 }
 
+// Resolves once the card is saved (the import itself goes on in the background).
+export function startPodcastImport(episode: PodcastImport): Promise<void> {
+  return startImport(episode.audio, episode.lang, true, 1080, {}, episode);
+}
+
 // A local video whose sound could not be read: converting it to a plain mp4
 // usually fixes that. Not offered when it was converted already.
 export function canConvertRetry(job: NonNullable<VideoRecord['importJob']>): boolean {
   return !!job.error?.startsWith('extract:') && job.error !== 'extract:video not found'
-    && !job.convert && !isYouTubeUrl(job.source) && !needsConvert(job.source);
+    && !job.convert && !/^https?:\/\//i.test(job.source) && !needsConvert(job.source) && !isAudioPath(job.source);
 }
 
 // Retry a failed import on the same record: no second card in the history, and the
@@ -212,7 +224,7 @@ export async function retryImport(id: string, convert = false): Promise<void> {
   retrying.add(id);
   const lang = job.lang ?? 'en';
   const quality = (job.quality ?? 1080) as ImportQuality;
-  const stage = isYouTubeUrl(job.source) ? 'download' as const : 'extract' as const;
+  const stage = isYouTubeUrl(job.source) || rec.podcast ? 'download' as const : 'extract' as const;
   // Everything the user chose at the start (own subtitles, conversion, trashing
   // the original) carries over; only the progress starts again.
   const next = { ...job, stage, percent: 0, error: undefined, lang, quality, ...(convert && { convert: true }) };
@@ -234,7 +246,7 @@ export async function retryImport(id: string, convert = false): Promise<void> {
   try {
     // Uses the engine picked in Settings now, not the one this card started
     // with: switching to the cloud after a failed download is a way out.
-    await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...args });
+    await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...args, name: rec.podcast?.name ?? null });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     await VideoStorage.updateVideoWith(id, r => r.importJob ? { ...r, importJob: { ...r.importJob, error: detail } } : null);
@@ -291,7 +303,7 @@ async function applyProgress(payload: ImportProgressPayload): Promise<void> {
       delete rest.importJob;
       return {
         ...rest,
-        displayName: name,
+        displayName: r.podcast ? r.displayName : name, // an episode keeps its title
         videoFileName: name,
         videoPath,
         subtitleText,

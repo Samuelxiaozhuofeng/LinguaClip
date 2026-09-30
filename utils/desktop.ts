@@ -16,11 +16,17 @@ import { IS_WINDOWS } from './platform';
 
 // What the player opens as is; the rest of VIDEO_EXTS gets converted to mp4 on
 // import (src-tauri/src/convert.rs `plays_natively` must agree on the first list).
-const PLAYABLE = ['mp4', 'mov', 'm4v'];
+// Sound-only files play too: a podcast episode, or an mp3 of one.
+const AUDIO = ['mp3', 'm4a'];
+const PLAYABLE = ['mp4', 'mov', 'm4v', ...AUDIO];
 export const VIDEO_EXTS = [...PLAYABLE, 'mkv', 'avi', 'webm', 'wmv', 'flv', 'rmvb', 'rm', 'ts', 'mts', 'm2ts', 'mpg', 'mpeg', 'vob', '3gp', 'ogv'];
 const extOf = (path: string) => (/\.([^./\\]+)$/.exec(path)?.[1] ?? '').toLowerCase();
 export const isVideoFile = (path: string) => VIDEO_EXTS.includes(extOf(path));
 export const needsConvert = (path: string) => isVideoFile(path) && !PLAYABLE.includes(extOf(path));
+export const isAudioPath = (path: string) => AUDIO.includes(extOf(path));
+// No picture to show: a podcast episode or a sound file. The one place that decides.
+export const isAudioRecord = (r: { podcast?: unknown; videoPath?: string; videoFileName: string }) =>
+  !!r.podcast || isAudioPath(r.videoPath || r.videoFileName);
 const SUBTITLE_FILTER = { name: 'Subtitles', extensions: ['srt'] }; // parseSRT reads nothing else
 
 export function fileNameFromPath(path: string): string {

@@ -191,8 +191,8 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
       const needsScreenshot = mappingValues.includes('screenshot');
       const needsAudio = mappingValues.includes('audio');
 
-      // 1. Capture Screenshot
-      if (videoRef.current && needsScreenshot) {
+      // 1. Capture Screenshot (a sound-only file has no picture: no image rather than a blank one)
+      if (videoRef.current?.videoWidth && needsScreenshot) {
           try {
               const canvas = document.createElement('canvas');
               canvas.width = videoRef.current.videoWidth;

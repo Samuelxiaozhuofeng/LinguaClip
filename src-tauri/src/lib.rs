@@ -15,6 +15,7 @@ mod import;
 mod import_queue;
 mod ja_dict;
 mod paths;
+mod podcast;
 mod tts;
 mod whisper_setup;
 
