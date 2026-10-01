@@ -10,6 +10,8 @@ A desktop app for Mac and Windows. Drop in any video, get subtitles made on your
 
 If LinguaClip helps your listening, a ⭐ on GitHub helps other learners find it.
 
+Free, no account, no limits. This repo is the open-source core ([AGPL-3.0](LICENSE)); the official download adds Read first and Podcasts, also free.
+
 ![Dictation: type what you hear, only the words you missed are marked](assets/readme/feedback.jpg)
 
 </div>
@@ -160,6 +162,8 @@ Package with `npx tauri build`.
 ## 中文说明
 
 觉得有用的话，给个 ⭐ 吧，能让更多学语言的人看到它。
+
+完全免费，不用注册，不限次数。本仓库是开源部分（AGPL-3.0）；官方安装包另带「先读字幕」和「播客」，同样免费。
 
 **用你爱看的视频，练出真听力。** 一个 Mac / Windows 桌面听写 App：拖进任意视频，自动出字幕，一句一句听、一句一句打。
 
