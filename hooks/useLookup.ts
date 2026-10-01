@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as AI from '../utils/ai';
 import { DefinitionState, emptyDefinition } from '../components/DefinitionPanel';
 import { useT } from '../utils/i18n';
-import { DictLang, dictsOff, lookupWord, senseList, DictEntry } from '../utils/dictionary';
+import { DictLang, dictsOff, getDictSources, lookupWord, senseList, DictEntry } from '../utils/dictionary';
 import { lookupJa } from '../utils/jaLookup';
 
 // Word lookup behind the definition popup, shared by the practice page and review.
@@ -41,7 +41,11 @@ export const useLookup = (dictLang: DictLang | null, currentContext: string) => 
       try { dict = dictLang === 'ja' ? await lookupJa(word) : await lookupWord(word, dictLang); } catch (e) { offline = true; console.error('Dictionary lookup failed:', e); }
     }
     if (!mine()) return;
-    if (dict) return setDef({ ...emptyDefinition, word, anchor, dict, context });
+    if (dict) {
+      setDef({ ...emptyDefinition, word, anchor, dict, context });
+      if (ai && getDictSources().autoPick && senseList(dict).length > 3) runPick(seq, word, context, dict);
+      return;
+    }
     if (!ai) {
       const error = t(offline ? 'definition.dictOffline' : off === 'all' ? 'definition.dictsOff' : off === 'noLocal' ? 'definition.noLocalDict' : dictLang ? 'definition.notFound' : 'definition.noDictLang');
       return setDef({ ...emptyDefinition, word, anchor, failed: true, error });
@@ -55,10 +59,7 @@ export const useLookup = (dictLang: DictLang | null, currentContext: string) => 
   };
 
   // AI points at the dictionary meaning this sentence uses.
-  const explain = async () => {
-    const seq = seqRef.current;
-    const { word, context: ctx, dict } = def;
-    if (!word || !dict) return;
+  const runPick = async (seq: number, word: string, ctx: string | undefined, dict: DictEntry[]) => {
     setDef(d => ({ ...d, aiLoading: true, aiError: undefined }));
     try {
       const pick = await AI.pickSense(word, ctx ?? '', senseList(dict).map(s => s.line));
@@ -67,6 +68,7 @@ export const useLookup = (dictLang: DictLang | null, currentContext: string) => 
       if (seq === seqRef.current) setDef(d => ({ ...d, aiLoading: false, aiError: (e as Error).message }));
     }
   };
+  const explain = () => { if (def.word && def.dict) runPick(seqRef.current, def.word, def.context, def.dict); };
 
   const closeDef = () => { seqRef.current++; setDef(emptyDefinition); };
 

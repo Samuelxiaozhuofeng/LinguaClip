@@ -338,6 +338,7 @@ export const en = {
   'lookup.aiSub': 'Asked when no dictionary has the word',
   'lookup.offNote': 'Off, not used for look-ups',
   'lookup.use': 'Use',
+  'lookup.autoPick': 'When there are more than 3 meanings, let AI pick the one this sentence uses automatically',
   'lookup.localFirst': 'Local first',
   'lookup.localFirstHint': 'On: local dictionaries first, online if they lack the word. Off: online first, local if it lacks the word or is offline.',
   'lookup.allOff': 'Online and local dictionaries are both off, so words go straight to AI.',

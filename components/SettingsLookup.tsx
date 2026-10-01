@@ -85,7 +85,13 @@ const SettingsLookup: React.FC<{ onSaved: () => void; aiReady: boolean; goAI: ()
         </p>
       )}
       {dicts.map(d => <Step key={d.key} n={steps.indexOf(d.key)} title={d.title} sub={d.sub} on={d.on} setOn={d.setOn}>{d.body}</Step>)}
-      <Step n={steps.length - 1} title="AI" sub={t('lookup.aiSub')}>{children}</Step>
+      <Step n={steps.length - 1} title="AI" sub={t('lookup.aiSub')}>
+        <label className={`flex items-center gap-2 text-sm ${aiReady ? 'cursor-pointer' : 'text-mute'}`}>
+          <input type="checkbox" checked={src.autoPick} disabled={!aiReady} onChange={e => set({ autoPick: e.target.checked })} />
+          {t('lookup.autoPick')}
+        </label>
+        {children}
+      </Step>
     </div>
   );
 };

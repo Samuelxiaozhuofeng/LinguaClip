@@ -52,7 +52,8 @@ export const dictOptions = (ui: Lang = getLang()): Record<DictLang, DictSource[]
 // Online / local on or off and which goes first (docs/dictionary.md「查词顺序与开关」):
 // one copy for both interface languages. Unset or unreadable = on, on, local
 // first only in an English interface — the behaviour before these switches.
-export interface DictSources { online: boolean; local: boolean; localFirst: boolean }
+// autoPick: more than 3 meanings → the AI picks one without the button; off unless set.
+export interface DictSources { online: boolean; local: boolean; localFirst: boolean; autoPick: boolean }
 const SOURCES_KEY = 'linguaclip_dict_sources';
 const readObj = (key: string): Record<string, unknown> => {
   try {
@@ -65,7 +66,7 @@ const readObj = (key: string): Record<string, unknown> => {
 const storedSources = () => readObj(SOURCES_KEY) as Partial<DictSources>;
 export const getDictSources = (ui: Lang = getLang()): DictSources => {
   const v = storedSources();
-  return { online: v.online !== false, local: v.local !== false, localFirst: typeof v.localFirst === 'boolean' ? v.localFirst : ui === 'en' };
+  return { online: v.online !== false, local: v.local !== false, localFirst: typeof v.localFirst === 'boolean' ? v.localFirst : ui === 'en', autoPick: v.autoPick === true };
 };
 export const saveDictSources = (patch: Partial<DictSources>) => {
   try { localStorage.setItem(SOURCES_KEY, JSON.stringify({ ...storedSources(), ...patch })); } catch { /* private mode: stays default */ }

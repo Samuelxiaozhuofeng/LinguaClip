@@ -96,13 +96,15 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
 
   // Closing it plays — unless a step's card or the summary is still waiting under it.
   const closeIntro = () => { setIntro(false); saveWatchPrefs({ listenIntro: true }); if (passCard === null && !summaryRef.current) audio.current?.play().catch(() => {}); };
-  const help = () => { audio.current?.pause(); window.clearTimeout(gap.current); setIntro(true); }; // a looped line's next play waits too
+  const help = () => { audio.current?.pause(); stopGap(); setIntro(true); }; // a looped line's next play waits too
 
   const at = lineAt(lines, time);
   const cur = at >= 0 ? lines[at] : null;
   const sec = cur ? sectionOf.get(cur.id) ?? 0 : 0;
   const section = sections[sec];
-  const sectionEnd = (i: number) => sections[i]?.subtitles.at(-1)?.endTime ?? 0;
+  // A section ends with its last line, or where the next section's first line starts if they
+  // overlap: past that, playback is already in the next section and the stop would be missed.
+  const sectionEnd = (i: number) => Math.min(sections[i]?.subtitles.at(-1)?.endTime ?? 0, sections[i + 1]?.subtitles[0]?.startTime ?? Infinity);
 
   // --- Playback: one loop follows the clock. When playback itself runs past a line's end
   // (not a seek landing past it): the line loop plays it again after a pause; else the end
@@ -110,14 +112,15 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const prevT = useRef(0);
   const heldAt = useRef(-1);
   const plays = useRef({ at: -1, n: 1 });
-  const gap = useRef(0);
+  const gap = useRef(0); // a looped line's next play, waiting out the gap (0: none)
+  const stopGap = () => { window.clearTimeout(gap.current); gap.current = 0; };
   const resumeAfter = useRef(false); // a lookup paused playback: closing it plays again
   const opts = useRef({ autoPause, through, passes, pass, sec });
   opts.current = { autoPause, through, passes, pass, sec };
   const seek = useCallback((to: number, play = false) => {
     const a = audio.current;
     if (!a) return;
-    window.clearTimeout(gap.current);
+    stopGap();
     heldAt.current = -1;
     armed.current = null; // moved: play is play again, not "the next pass"
     resumeAfter.current = false; // moved by hand while a lookup is open: closing it leaves that be
@@ -127,49 +130,57 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     setTime(s);
     if (play) a.play().catch(() => {});
   }, []);
+  // Run by every frame and by the audio's own timeupdate: with the window hidden or covered the
+  // frames stop but the audio plays on, and a section end crossed then must still stop it.
+  // Any forward move not made by seek() is playback (seek moves prevT along), however long.
+  const check = useRef(() => {});
+  useEffect(() => {
+    check.current = () => {
+      const a = audio.current;
+      if (!a) return;
+      const now = a.currentTime, before = prevT.current;
+      setTime(x => (Math.abs(x - now) > 0.04 ? now : x));
+      const was = lineAt(lines, before);
+      if (a.paused || was < 0 || now <= before) { prevT.current = now; return; }
+      const line = lines[was];
+      const crossed = before < line.endTime && now >= line.endTime;
+      const s = sectionOf.get(line.id) ?? 0, end = sectionEnd(s);
+      const last = sections[s]?.subtitles.at(-1);
+      const lastAt = last ? indexOf.get(last.id) ?? -1 : -1;
+      const pause = (i: number) => { // back to that line's end (never past its section's); the page's time too, not
+        const back = Math.max(lines[i].startTime, Math.min(lines[i].endTime, sectionEnd(sectionOf.get(lines[i].id) ?? 0)) - 0.02);
+        a.pause(); a.currentTime = back; setTime(back); // `now`, already in the next section: that would reset the passes
+      };
+      if (crossed && now - before < 0.5 && loopMore(plays.current.at === was ? plays.current.n : 1)) {
+        if (plays.current.at !== was) plays.current = { at: was, n: 1 };
+        plays.current.n++;
+        pause(was); // the gap is still this line (and this section)
+        gap.current = window.setTimeout(() => { gap.current = 0; seek(line.startTime, true); }, LOOP_GAP_MS);
+      } else if (!opts.current.through && lastAt >= 0 && before < end && now >= end && heldAt.current !== lastAt) {
+        // Once: closing the summary and pressing play goes on past the section end.
+        heldAt.current = lastAt;
+        pause(lastAt);
+        if (opts.current.passes && opts.current.pass < 3) openPass(); else openSummary(false);
+      } else if (crossed && now - before < 0.5 && opts.current.autoPause && heldAt.current !== was) {
+        heldAt.current = was;
+        pause(was); // (and a line peeked at stays up while held)
+      }
+      if (crossed && plays.current.at !== was) plays.current = { at: was, n: 1 };
+      prevT.current = a.currentTime;
+    };
+  });
   useEffect(() => {
     let raf = 0;
-    const tick = () => {
-      const a = audio.current;
-      if (a) {
-        const now = a.currentTime, before = prevT.current;
-        setTime(x => (Math.abs(x - now) > 0.04 ? now : x));
-        const was = lineAt(lines, before);
-        if (!a.paused && was >= 0 && now > before && now - before < 0.5 && before < lines[was].endTime && now >= lines[was].endTime) {
-          const line = lines[was];
-          if (plays.current.at !== was) plays.current = { at: was, n: 1 };
-          const back = Math.max(line.startTime, line.endTime - 0.02);
-          if (loopMore(plays.current.n)) {
-            plays.current.n++;
-            a.pause(); a.currentTime = back; setTime(back); // the gap is still this line (and this section)
-            gap.current = window.setTimeout(() => seek(line.startTime, true), LOOP_GAP_MS);
-          } else if (!opts.current.through && sectionEnd(sectionOf.get(line.id) ?? 0) === line.endTime && heldAt.current !== was) {
-            // Once: closing the summary and pressing play goes on past the section end.
-            a.pause();
-            heldAt.current = was;
-            a.currentTime = back;
-            setTime(back); // not the frame's `now`, already in the next section: that would reset the passes
-            if (opts.current.passes && opts.current.pass < 3) openPass(); else openSummary(false);
-          } else if (opts.current.autoPause && heldAt.current !== was) {
-            a.pause();
-            heldAt.current = was;
-            a.currentTime = back;
-            setTime(back); // (and a line peeked at stays up while held)
-          }
-          prevT.current = a.currentTime;
-        } else prevT.current = now;
-      }
-      raf = requestAnimationFrame(tick);
-    };
+    const tick = () => { check.current(); raf = requestAnimationFrame(tick); };
     raf = requestAnimationFrame(tick);
-    return () => { cancelAnimationFrame(raf); window.clearTimeout(gap.current); };
-  }, [lines, sections]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { cancelAnimationFrame(raf); stopGap(); };
+  }, []);
 
   const togglePlay = () => {
     const a = audio.current;
     if (!a) return;
     resumeAfter.current = false; // played / paused by hand: closing the definition leaves it be
-    window.clearTimeout(gap.current);
+    stopGap();
     if (a.paused && armed.current) startPass(armed.current);
     else if (a.paused) a.play().catch(() => {}); else a.pause();
   };
@@ -189,6 +200,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   };
   const lastSaved = useRef(0);
   const onTime = () => {
+    check.current();
     const a = audio.current;
     if (a && Math.abs(a.currentTime - lastSaved.current) > 5) { lastSaved.current = a.currentTime; setWatchPos(record.id, a.currentTime); }
   };
@@ -231,13 +243,14 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const keyOf = (word: string) => lookedKey(word, ja) ?? word.toLowerCase();
   const onWord = useCallback((word: string, line: Subtitle) => {
     const a = audio.current;
-    window.clearTimeout(gap.current); // between two plays of a looped line: the next one waits for the card
-    if (a && !a.paused) {
+    // Playing, or between two plays of a looped line: the next play waits for the card, then goes on.
+    if (a && (!a.paused || gap.current)) {
       const i = lineAt(lines, a.currentTime);
       resumeFrom.current = i >= 0 ? lines[i].startTime : a.currentTime;
       resumeAfter.current = true;
       a.pause();
     }
+    stopGap();
     addLooked(record.id, word, ja);
     const key = keyOf(word);
     setWords(ws => (ws.some(w => w.key === key) ? ws : [...ws, { word, line, key }]));
@@ -289,7 +302,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     setPassCard(null);
     armed.current = null;
     audio.current?.pause();
-    window.clearTimeout(gap.current);
+    stopGap();
     setDrillMissing(false);
     setSummary({ ended });
   }
@@ -317,7 +330,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     setPass(1); setPassMode(null); setPassCard(null); armed.current = null; summed.current = -1;
   }, [sec]);
   function openPass() {
-    audio.current?.pause(); window.clearTimeout(gap.current);
+    audio.current?.pause(); stopGap();
     armed.current = opts.current.pass + 1; setPassCard(opts.current.pass);
   }
   function startPass(n: number) { // back to this section's start: the count stays

@@ -339,6 +339,7 @@ export const zh: Record<keyof typeof en, string> = {
   'lookup.aiSub': '词典都查不到时问 AI',
   'lookup.offNote': '已关闭，查词不用它',
   'lookup.use': '使用',
+  'lookup.autoPick': '释义超过 3 条时，自动让 AI 指出这句里是哪一条',
   'lookup.localFirst': '先查本地',
   'lookup.localFirstHint': '勾上：先查本地词典，查不到再查在线。不勾：先查在线，查不到或没网再查本地。',
   'lookup.allOff': '在线和本地词典都关着，点词会直接问 AI。',
