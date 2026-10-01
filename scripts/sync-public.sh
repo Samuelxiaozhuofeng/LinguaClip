@@ -1,6 +1,6 @@
 #!/bin/bash
 # Syncs the open-source repo from this one (the private repo, linguaclip-pro):
-# the committed tree of HEAD, minus pro/ and docs/, lands as one commit on the
+# the committed tree of HEAD, minus docs/, lands as one commit on the
 # public repo's main. Uncommitted changes here are never exported.
 #
 #   scripts/sync-public.sh "说明"   prepare + check that the free build compiles, then commit (no push)
@@ -10,7 +10,7 @@ set -euo pipefail
 PUBLIC=https://github.com/Samuelxiaozhuofeng/LinguaClip.git
 ROOT=$(git rev-parse --show-toplevel)
 WORK="$HOME/.cache/linguaclip-public"
-EXCLUDE=(pro docs)
+EXCLUDE=(docs)
 
 if [ "${1:-}" = "--push" ]; then
   [ "$(git -C "$WORK" remote get-url origin)" = "$PUBLIC" ] || { echo "工作副本不是公开仓库：$WORK"; exit 1; }
@@ -33,12 +33,7 @@ find "$WORK" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
 git -C "$ROOT" archive HEAD | tar -x -C "$WORK"
 for x in "${EXCLUDE[@]}"; do rm -rf "${WORK:?}/$x"; done
 
-# Nothing may reach into pro/ except through the @pro alias.
-if grep -rnE "(from |import\()['\"]((\.\.?/)+|@/)pro/" "$WORK" --include='*.ts' --include='*.tsx' --include='*.mjs'; then
-  echo "上面这些文件直接引用了 pro/，开源版会编译不过"; exit 1
-fi
-
-# The free build must compile on its own.
+# The public tree must compile on its own.
 ln -s "$ROOT/node_modules" "$WORK/node_modules"
 trap 'rm -f "$WORK/node_modules"' EXIT
 (cd "$WORK" && npx tsc --noEmit && npx vite build --logLevel error --outDir "$(mktemp -d)")

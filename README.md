@@ -10,7 +10,7 @@ A desktop app for Mac and Windows. Drop in any video, get subtitles made on your
 
 If LinguaClip helps your listening, a ⭐ on GitHub helps other learners find it.
 
-Free, no account, no limits. This repo is the open-source core ([AGPL-3.0](LICENSE)); the official download adds Read first and Podcasts, also free.
+Free, no account, no limits. Fully open source ([AGPL-3.0](LICENSE)).
 
 ![Dictation: type what you hear, only the words you missed are marked](assets/readme/feedback.jpg)
 
@@ -146,7 +146,9 @@ Not yet.
 
 ## Open source
 
-This repository is the open-source core of LinguaClip, under [AGPL-3.0](LICENSE). The official download also includes Read first and Podcasts, which aren't open source. Everything in the official app is free to use.
+LinguaClip is fully open source under [AGPL-3.0](LICENSE), and everything in the official app is free to use.
+
+This project participates in and endorses the [LINUX DO](https://linux.do) community.
 
 Build it yourself (needs Node.js and [Rust](https://www.rust-lang.org/tools/install)):
 
@@ -223,6 +225,8 @@ Package with `npx tauri build`.
 
 ### 开源
 
-本仓库是 LinguaClip 的开源部分，协议 [AGPL-3.0](LICENSE)：可以自由使用、修改、分发；改过的版本（包括做成网络服务）也要以同样协议开源。官方安装包里另有「先读字幕」和「播客」，这两部分不开源；官方 App 里的功能全部免费。
+LinguaClip 完全开源，协议 [AGPL-3.0](LICENSE)：可以自由使用、修改、分发；改过的版本（包括做成网络服务）也要以同样协议开源。官方 App 里的功能全部免费。
+
+本项目积极参与并认可 [LINUX DO 社区](https://linux.do)。
 
 从源码运行需要 Node.js 和 [Rust](https://www.rust-lang.org/tools/install)：`npm install` 后 `npx tauri dev`，打包用 `npx tauri build`。
