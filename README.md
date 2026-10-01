@@ -80,11 +80,11 @@ Videos never leave your computer. No account and no upload. Practice progress is
 
 ## Install
 
-Requires macOS on Apple silicon (M1 or later) or Windows 10/11 (64-bit).
+Requires macOS (Apple silicon or Intel) or Windows 10/11 (64-bit).
 
 **Mac**
 
-1. Download `LinguaClip.zip` from [Releases](https://github.com/Samuelxiaozhuofeng/LinguaClip/releases), unzip it and drag it into Applications.
+1. Download `LinguaClip-mac-apple-silicon.zip` (M1 or later) or `LinguaClip-mac-intel.zip` (Intel Mac) from [Releases](https://github.com/Samuelxiaozhuofeng/LinguaClip/releases), unzip it and drag it into Applications.
 2. The app isn't notarized by Apple, so macOS blocks it the first time. Click Done, open **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.
    If it says the app is "damaged", run this in Terminal and open it again:
 
@@ -94,7 +94,7 @@ Requires macOS on Apple silicon (M1 or later) or Windows 10/11 (64-bit).
 
 **Windows**
 
-1. Download `LinguaClip_x.x.x_x64-setup.exe` from [Releases](https://github.com/Samuelxiaozhuofeng/LinguaClip/releases) and run it.
+1. Download `LinguaClip-windows-setup.exe` from [Releases](https://github.com/Samuelxiaozhuofeng/LinguaClip/releases) and run it.
 2. At "Windows protected your PC", click **More info → Run anyway**.
 3. Pasting YouTube links isn't supported on Windows, and transcription runs on the CPU, so it's slower than on a Mac.
 
@@ -146,11 +146,11 @@ Package with `npx tauri build`.
 
 ### 安装
 
-需要：macOS（Apple 芯片，M1 及以后）或 Windows 10 / 11（64 位）。
+需要：macOS（Apple 芯片或 Intel 芯片）或 Windows 10 / 11（64 位）。
 
 **Mac**
 
-1. 到 [Releases](https://github.com/Samuelxiaozhuofeng/LinguaClip/releases) 下载 `LinguaClip.zip`，解压后拖进「应用程序」。国内下载慢可以去 [官网](https://linguaclipapp.com) 下载。
+1. 到 [Releases](https://github.com/Samuelxiaozhuofeng/LinguaClip/releases) 下载 `LinguaClip-mac-apple-silicon.zip`（M1 及以后）或 `LinguaClip-mac-intel.zip`（Intel 芯片的 Mac），解压后拖进「应用程序」。国内下载慢可以去 [官网](https://linguaclipapp.com) 下载。
 2. App 没有经过苹果付费签名，第一次打开会被拦下。点「完成」，打开「系统设置 → 隐私与安全性」，拉到底点「仍要打开」。
    如果提示「已损坏，无法打开」，打开「终端」运行下面这行再双击：
 
@@ -160,7 +160,7 @@ Package with `npx tauri build`.
 
 **Windows**
 
-1. 到 [Releases](https://github.com/Samuelxiaozhuofeng/LinguaClip/releases) 下载 `LinguaClip_x.x.x_x64-setup.exe`，双击安装。
+1. 到 [Releases](https://github.com/Samuelxiaozhuofeng/LinguaClip/releases) 下载 `LinguaClip-windows-setup.exe`，双击安装。
 2. 安装包没有付费签名，会弹出「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」。
 3. Windows 版不支持粘贴 YouTube 链接；字幕识别用 CPU，比 Mac 慢一些。
 
