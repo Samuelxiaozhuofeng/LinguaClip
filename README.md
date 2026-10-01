@@ -111,6 +111,35 @@ The app updates itself: when a new version is out, it offers a one-click update.
 
 - **Anki:** install [Anki](https://apps.ankiweb.net) and the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on, and keep Anki open while you practise.
 
+## FAQ
+
+**Is it free? Do I need an account?**
+Yes, everything in the app is free. No account, no sign-up.
+
+**Does my video get uploaded anywhere?**
+No. Videos stay on your computer, and subtitles are transcribed locally by default. Only if you turn on cloud transcription or AI features is text or audio sent to the service you set up.
+
+**Why does it download about 580 MB the first time?**
+That's the speech-to-text model, downloaded once when you first transcribe a video without subtitles. After that it works offline. Short on space? Pick the lighter model (about 190 MB) in **Settings → Import & transcribe**, or skip the download by adding your own `.srt`. You can also use cloud transcription (Groq or Alibaba Bailian) with your own key.
+
+**Do I need an AI key?**
+No. Full dictation, Blur mode and dictionary lookup work without one. A key unlocks Easy / Medium blanks, Break it down, AI lookup and translations.
+
+**macOS says it can't be opened, or that it's damaged.**
+The app isn't notarized by Apple yet. See step 2 under [Install](#install).
+
+**Can I paste a YouTube link?**
+On Mac, yes, after installing `yt-dlp`, `ffmpeg` and `node` (see [Optional extras](#optional-extras)). On Windows, not yet: download the video first and add the file.
+
+**Transcription is slow on Windows.**
+It runs on the CPU by default. There's an experimental GPU option in **Settings → Import & transcribe**, or use cloud transcription.
+
+**Which languages work?**
+Any language whisper can transcribe. Dictionary lookup and the extra polish are best for Spanish, English, Japanese, French and German.
+
+**Linux?**
+Not yet.
+
 ## Open source
 
 This repository is the open-source core of LinguaClip, under [AGPL-3.0](LICENSE). The official download also includes Read first and Podcasts, which aren't open source. Everything in the official app is free to use.
@@ -171,6 +200,18 @@ Package with `npx tauri build`.
 - **AI 功能**：「设置 → AI」里填任意 OpenAI 兼容接口的地址和 key。不填也能用全写听写、模糊模式和词典查词；挖空的轻松 / 适中档、拆开教我、AI 查词和译文需要 AI。
 - **YouTube 链接（只限 Mac）**：用 [Homebrew](https://brew.sh) 装好 `brew install yt-dlp ffmpeg node`，添加视频的弹窗里就会出现网址框。第一次下载会让你在 App 里登录 YouTube。请只下载你有权使用的视频。
 - **Anki**：装好 [Anki](https://apps.ankiweb.net) 和 [AnkiConnect](https://ankiweb.net/shared/info/2055492159) 插件，练习时开着 Anki 就能一键加卡。
+
+### 常见问题
+
+- **要钱吗？要注册吗？** 官方 App 里的功能全部免费，不用注册账号。
+- **视频会上传吗？** 不会。视频只在你电脑上，字幕默认在本机识别。只有你自己开了云端转录或 AI 功能，才会把文字或声音发给你填的那家服务。
+- **为什么第一次要下载约 580MB？** 那是语音识别模型，只在第一次给没字幕的视频生成字幕时下载一次，之后断网也能用。空间紧可以在「设置 → 导入与转录」换轻量模型（约 190MB），或直接添加自带的 `.srt` 不下载；也可以用云端转录（Groq / 阿里云百炼，自填密钥）。
+- **必须填 AI key 吗？** 不用。全写听写、模糊模式、词典查词都不需要；挖空的轻松 / 适中档、拆开教我、AI 查词和译文才需要。
+- **Mac 提示无法打开 / 已损坏？** App 还没经过苹果公证，按上面「安装」第 2 步操作。
+- **能粘贴 YouTube 链接吗？** Mac 可以，先装好 `yt-dlp`、`ffmpeg`、`node`（见「可选」）；Windows 暂不支持，先把视频下载下来再添加。
+- **Windows 上识别字幕很慢？** 默认用 CPU。「设置 → 导入与转录」里有实验性的显卡加速，或改用云端转录。
+- **支持哪些语言？** whisper 能识别的语言都能练；查词和细节打磨最好的是西、英、日、法、德。
+- **有 Linux 版吗？** 暂时没有。
 
 ### 开源
 
