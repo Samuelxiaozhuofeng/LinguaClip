@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "check": "tsc --noEmit && for f in test-*.mjs pro/test-*.mjs; do node $f > /dev/null || { echo \"没过：node $f\"; exit 1; }; done && echo 类型检查和全部自检都过了",
     "release": "tauri build --bundles app",
     "postrelease": "bash scripts/install-macos.sh",
     "release:public": "bash scripts/release-mac.sh"

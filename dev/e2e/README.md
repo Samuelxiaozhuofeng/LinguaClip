@@ -43,6 +43,19 @@ try {
 - 读库：`page.evaluate(async () => (await import('/utils/review.ts')).getAllCards())`（vite 直接给源文件，任何 `utils/*.ts` 的导出都能这样调）。
 - 同一类检查做第二次，就把它写成一个流程加进下面的回归。
 
+## 浏览器模式备忘
+
+`dev/browserMock.ts` 冒充 Tauri 外壳（只在浏览器 dev 下加载）。`window.__MOCK__` 的全部开关写在它的文件头注释里，用之前先读那一段。常用的：
+
+- 本地文件经 vite `/@fs` 读真文件（允许 `~/Movies`、`~/Downloads`、项目目录）。文件对话框默认返回 `SAMPLE` 样片（视频或 .srt 看过滤器）；`__MOCK__.pick = '绝对路径'` 指定下一次返回值。
+- Rust 命令不执行，只记到 `__MOCK__.calls`；`write_cache` 存内存，刷新即清。导入进度手动发：`__MOCK__.emit('import-progress', { id, stage: 'done', videoPath, subtitleText })`，`id` 从 `calls` 里的 `start_import` 取。
+- 日语词典默认「没下载」；`__MOCK__.jaDict = true` 当已下载（刷新即忘）。
+- AI / Anki 请求经 vite `/__proxy` 转发，能打到真实端点。React StrictMode 下 dev 的副作用跑两遍（AI 请求发两次），正式包只发一次，别误判成 bug。
+- 浏览器里的 IndexedDB 和桌面 App 是两份，测试数据不会污染真实记录。
+- 进听写：添加视频 → 开始练习 → 等输入格出现（先放完一遍听、再切到输入，写法见 `practice.mjs` 的 `dictate`）；交卷后答案行 `section p button` 可点查词，释义弹窗是 `[role=dialog]`。
+- 同时起两个 vite（如这份 + 开源副本）会共用 `node_modules/.vite` 缓存互相覆盖，页面报 Invalid hook call：一次只起一个，换目录时加 `--force`。
+- 用内置浏览器（不是 Playwright）时：pane 隐藏时截图可能是旧帧，读状态用取页面文字 / 执行脚本；按空格 / 回车要往 `document.activeElement` 派发 `KeyboardEvent`；输入框改值用原生 value setter + `input` 事件。
+
 ## 回归覆盖（按顺序，后一步接着前一步的状态）
 
 | 文件 | 流程 |
