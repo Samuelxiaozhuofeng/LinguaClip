@@ -375,11 +375,18 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   };
 
   // --- Hard lines: S (or the blind screen's button) marks / unmarks the line being said; seeing one with V marks it ---
-  const toggleMark = () => {
-    if (!cur) return;
-    const id = cur.id, on = marks.has(id);
-    toast.say(t(on ? 'listen.unmarked' : 'listen.marked'));
+  const flipMark = (id: number, onMsg: 'listen.marked' | 'listen.markedPrev') => {
+    const on = marks.has(id);
+    toast.say(t(on ? 'listen.unmarked' : onMsg));
     setMarks(m => { const n = new Map(m); if (on) n.delete(id); else n.set(id, 'open'); return n; });
+  };
+  const toggleMark = () => { if (cur) flipMark(cur.id, 'listen.marked'); };
+  // A: the line just heard — in the gap after a line (or stopped at its end: pause() parks 0.02s before it) that's still it,
+  // once the next has begun it's the one before. Not across sections.
+  const markPrev = () => {
+    const i = at >= 0 && time > lines[at].endTime - 0.05 ? at : at - 1;
+    if (i < 0 || (sectionOf.get(lines[i].id) ?? 0) !== sec) { toast.say(t('listen.noPrev')); return; }
+    flipMark(lines[i].id, 'listen.markedPrev');
   };
   useEffect(() => { if (peek !== null) setMarks(m => (m.has(peek) ? m : new Map(m).set(peek, 'open'))); }, [peek]);
   const markedIds = useMemo(() => new Set(marks.keys()), [marks]);
@@ -432,6 +439,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     else if (((plain || mod) && e.code === 'ArrowLeft') || matches(e, 'prev')) act = prev;
     else if (((plain || mod) && e.code === 'ArrowRight') || matches(e, 'next')) act = next;
     else if (plain && e.code === 'KeyS') act = toggleMark;
+    else if (plain && e.code === 'KeyA') act = markPrev;
     else if (plain && e.code === 'KeyP') act = () => { setAutoPause(!autoPause); saveWatchPrefs({ autoPause: !autoPause }); };
     else if (plain && e.code === 'KeyC') act = () => changeMode(MODES[(MODES.indexOf(effMode) + 1) % MODES.length]);
     else if (plain && e.code === 'KeyV') act = togglePeek;
