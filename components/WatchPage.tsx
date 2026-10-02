@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bookmark, Loader2, Maximize2, Minimize2, MoreHorizontal, Pause, Play, PlusCircle, RotateCcw, SkipBack, SkipForward, Check, X, Mic, Pin, PanelRight } from 'lucide-react';
+import { ArrowLeft, Bookmark, Maximize2, Minimize2, MoreHorizontal, Pause, Play, RotateCcw, Check } from 'lucide-react';
 import { Subtitle, VideoRecord } from '../types';
 import { Btn, Menu, Seg, Stamp, useToast } from './ui';
 import WatchLine from './WatchLine';
@@ -21,8 +21,8 @@ import { IS_WINDOWS } from '../utils/platform';
 import { DictKey, useT } from '../utils/i18n';
 
 // Watch mode: the whole window is the video, the subtitle sits on the picture.
-// Look words up, save lines (S), send them to Anki, and at the end (or on the
-// way out) pick a few saved lines to dictate. Its own page: the practice
+// Look words up, save lines (S), send them to Anki, and at the end dictate a few
+// of the lines saved this time; leaving midway just leaves. Its own page: the practice
 // session, its sections and its progress are never touched.
 
 const SPEEDS = [0.75, 0.9, 1, 1.25];
@@ -45,16 +45,14 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   // The line on screen: `at` = last line started, `on` = still inside it (not in the gap after).
   const [cur, setCur] = useState({ at: -1, on: false });
   const [revealed, setRevealed] = useState<number | null>(null);
-  const [summary, setSummary] = useState<{ ended: boolean } | null>(null);
+  const [summary, setSummary] = useState(false);
   const [drill, setDrill] = useState<ReviewCard[] | null>(null);
   const [looked, setLooked] = useState<Looked[]>([]);
   const [awake, setAwake] = useState(true);
   const [intro, setIntro] = useState(true);
   const [near, setNear] = useState({ top: false, bottom: false });
   const [full, setFull] = useState(false);
-  // Saves / lookups since the summary last showed: leaving with none skips it.
-  const activity = useRef(0);
-  const shownAt = useRef(0);
+  const [mine, setMine] = useState<number[]>([]); // lines saved this time: the summary's
 
   const shown = cur.on ? lines[cur.at] : null;
   const target = cur.at >= 0 ? lines[cur.at] : null; // what S / Anki / replay act on
@@ -168,7 +166,6 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     if (v && !v.paused && !busy()) { resumeAfter.current = true; v.pause(); }
     lookLine.current = line;
     if (!fromList) {
-      activity.current++;
       setLooked(l => (l.some(x => x.word.toLowerCase() === word.toLowerCase()) ? l : [...l, { word, line }]));
     }
     lookup(word, line.text);
@@ -192,11 +189,16 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   const save = () => {
     if (!target) return;
     say(savedIds.has(target.id) ? 'watch.unsaved' : 'watch.saved');
-    if (!savedIds.has(target.id)) activity.current++;
+    const id = target.id;
+    setMine(m => (savedIds.has(id) ? m.filter(x => x !== id) : [...m, id]));
     toggleSave(target);
   };
   const toAnki = () => { if (target && !busy()) handleAddToAnki(target); };
   const ankiReady = !!ankiConfig?.card;
+  // The Anki button lives in "…": how it went shows as a note.
+  useEffect(() => {
+    if (ankiStatus === 'success' || ankiStatus === 'error') toast.say(`Anki · ${t(ankiStatus === 'success' ? 'common.added' : 'common.failed')}`);
+  }, [ankiStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cycleSubs = () => {
     const subs = SUBS[(SUBS.indexOf(prefs.subs) + 1) % SUBS.length];
@@ -208,21 +210,12 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     say(prefs.autoPause ? 'watch.autoPauseOff' : 'watch.autoPauseOn');
   };
 
-  // --- Summary: at the end, or on the way out when something was saved or looked up ---
-  const openSummary = (ended: boolean) => {
-    videoRef.current?.pause();
-    shownAt.current = activity.current;
-    setSummary({ ended });
-  };
-  const leave = () => {
-    if (busy()) return;
-    if (activity.current > shownAt.current) openSummary(false);
-    else onExit();
-  };
+  // --- Summary: only at the end; leaving midway never asks (the saved lines are review cards already) ---
+  const leave = () => { if (!busy()) onExit(); };
   const onEnded = () => {
     if (busy()) return; // an Anki clip ran to the very end: not a finished watch
     setWatchPos(record.id, 0);
-    openSummary(true);
+    setSummary(true);
   };
   const startDrill = async (picked: Subtitle[]) => {
     const cards = await lineCardsFor(record.id, picked).catch(() => [] as ReviewCard[]);
@@ -236,7 +229,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     if (e.key === 'Escape') {
       if (def.word !== null) closeLookup();
-      else if (summary) setSummary(null);
+      else if (summary) setSummary(false);
       else if (full) toggleFull();
       return;
     }
@@ -293,15 +286,10 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   const hideCursor = !awake && playing && !near.top && !near.bottom;
 
   // Fullscreen is the window's; the green button can change it too, so read it back on every resize.
-  const [winW, setWinW] = useState(window.innerWidth);
-  // The controls fit the picture's width, not the window's: with the list open, the less-used
-  // ones fold into "…" first (sentence pause, then the subtitle switch) so none overlap.
-  const stageW = prefs.list ? winW * (1 - listPct / 100) : winW;
-  const fold = { pause: stageW < 900, subs: stageW < 720 };
   const fullRef = useRef(false);
   fullRef.current = full;
   useEffect(() => {
-    const sync = () => { setWinW(window.innerWidth); isFullscreen().then(setFull).catch(() => {}); };
+    const sync = () => { isFullscreen().then(setFull).catch(() => {}); };
     sync();
     window.addEventListener('resize', sync);
     return () => {
@@ -326,23 +314,15 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     if (duration) seek(((e.clientX - r.left) / r.width) * duration);
   };
 
-  const af = (() => {
-    switch (ankiStatus) {
-      case 'recording': return { icon: <Mic size={15} />, label: t('transport.rec') };
-      case 'adding': return { icon: <Loader2 size={15} className="animate-spin" />, label: t('transport.adding') };
-      case 'success': return { icon: <Check size={15} />, label: t('common.added') };
-      case 'error': return { icon: <X size={15} />, label: t('common.failed') };
-      default: return { icon: <PlusCircle size={15} />, label: 'Anki' };
-    }
-  })();
   const isSaved = !!target && savedIds.has(target.id);
+  const mySaved = savedItems.filter(l => mine.includes(l.id));
   const withKey = (label: string, key: string) => `${label} (${key})`;
+  const onOff = (label: string, on: boolean) => <><span className="flex-1">{label}</span>{on && <Check size={15} className="text-accent" />}</>;
   const legend: [string, string][] = [
     [formatCombo(combos.play), t('keys.play')],
-    [`${IS_WINDOWS ? 'Ctrl+' : '⌘'}← / ${formatCombo(combos.prev)}`, t('keys.prev')],
-    [`${IS_WINDOWS ? 'Ctrl+' : '⌘'}→ / ${formatCombo(combos.next)}`, t('keys.next')],
+    [`← / ${formatCombo(combos.prev)}`, t('keys.prev')],
+    [`→ / ${formatCombo(combos.next)}`, t('keys.next')],
     [formatCombo(combos.replay), t('keys.replay')],
-    ['← / →', t('watch.keySeek')],
     ['S', t('watch.keySave')],
     ['P', t('watch.autoPause')],
     ['C', t('watch.keySubs')],
@@ -403,55 +383,40 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
             <Btn square size="sm" flat onClick={save} disabled={recording || !target} title={withKey(isSaved ? t('transport.unsaveLine') : t('transport.saveLine'), 'S')} className={isSaved ? '!text-accent' : ''}>
               <Bookmark size={17} fill={isSaved ? 'currentColor' : 'none'} />
             </Btn>
-            {ankiReady && (
-              <Btn size="sm" flat disabled={ankiStatus !== 'idle' || !target} onClick={toAnki} title={withKey(t('transport.sendToAnki'), formatCombo(combos.anki))} className={ankiStatus === 'idle' ? '' : '!opacity-100 !text-ink'}>
-                {af.icon} {!fold.subs && <span>{af.label}</span>}
-              </Btn>
-            )}
           </div>
           <div className="flex items-center gap-1.5 shrink-0 text-ink">
-            <Btn square flat onClick={prev} disabled={recording} title={withKey(t('transport.previousLine'), `${IS_WINDOWS ? 'Ctrl+' : '⌘'}←`)} className="!text-ink"><SkipBack size={18} /></Btn>
             <Btn square flat onClick={replay} disabled={recording || !target} title={withKey(t('transport.replayLine'), formatCombo(combos.replay))} className="!text-ink"><RotateCcw size={18} /></Btn>
             <button type="button" onClick={e => { e.currentTarget.blur(); togglePlay(); }} disabled={recording} aria-label={playing ? t('transport.pauseSpace') : t('transport.playSpace')}
               className="press w-11 h-11 rounded-full bg-accent text-white flex items-center justify-center">
               {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
             </button>
-            <Btn square flat onClick={next} disabled={recording} title={withKey(t('transport.nextLine'), `${IS_WINDOWS ? 'Ctrl+' : '⌘'}→`)} className="!text-ink"><SkipForward size={18} /></Btn>
+            <span className="w-10" />{/* keeps play in the middle now that replay sits alone beside it */}
           </div>
           <div className="flex-1 min-w-0 flex items-center justify-end gap-2">
-            {!fold.subs && <Seg size="sm" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey), title: withKey(t('watch.keySubs'), 'C') }))} />}
-            {!fold.pause && <Btn size="sm" tone={prefs.autoPause ? 'accent-soft' : 'white'} onClick={toggleAutoPause} title={withKey(t('watch.autoPauseTitle'), 'P')} aria-pressed={prefs.autoPause}>
-              {t('watch.autoPause')}
-            </Btn>}
-            <Btn square size="sm" flat onClick={() => setPrefs({ list: !prefs.list })} title={t('watch.list')} aria-label={t('watch.list')} aria-pressed={prefs.list} className={prefs.list ? '!text-accent' : ''}>
-              <PanelRight size={17} />
-            </Btn>
-            <Btn square size="sm" flat onClick={() => setPrefs({ pin: !prefs.pin })} title={prefs.pin ? t('watch.unpin') : t('watch.pin')} aria-label={prefs.pin ? t('watch.unpin') : t('watch.pin')} aria-pressed={prefs.pin} className={prefs.pin ? '!text-accent' : ''}>
-              <Pin size={17} fill={prefs.pin ? 'currentColor' : 'none'} />
-            </Btn>
             <Btn square size="sm" flat onClick={toggleFull} title={withKey(full ? t('watch.exitFullscreen') : t('watch.fullscreen'), 'F')} aria-label={full ? t('watch.exitFullscreen') : t('watch.fullscreen')}>
               {full ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
             </Btn>
-            <Menu up items={[]} className="w-[280px]" trigger={(open, toggle) => (
+            {/* Everything used less than once a line: how subtitles show, the pause at each line's end, the list, pinning, Anki */}
+            <Menu up className="w-[280px]" items={[
+              { label: onOff(t('watch.autoPause'), prefs.autoPause), title: withKey(t('watch.autoPauseTitle'), 'P'), onClick: toggleAutoPause },
+              { label: onOff(t('watch.list'), prefs.list), onClick: () => setPrefs({ list: !prefs.list }) },
+              { label: onOff(t('watch.pin'), prefs.pin), onClick: () => setPrefs({ pin: !prefs.pin }) },
+              ...(ankiReady ? [{ label: t('transport.sendToAnki'), title: formatCombo(combos.anki), disabled: ankiStatus !== 'idle' || !target, onClick: toAnki }] : []),
+              'divider',
+            ]} trigger={(open, toggle) => (
               <Btn square size="sm" flat onClick={toggle} title={t('home.more')} aria-label={t('home.more')} className={open ? '!bg-shade !text-ink' : ''}><MoreHorizontal size={18} /></Btn>
-            )}>
-              <div className="px-2.5 py-2 flex flex-col gap-2">
-                <span className="text-xs text-mute">{t('transport.speed')}</span>
-                <Seg<number> size="sm" className="w-full [&>button]:flex-1" value={speed} onChange={setSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
-              </div>
-              {fold.subs && (
-                <div className="px-2.5 py-2">
-                  <Seg size="sm" className="w-full [&>button]:flex-1" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey) }))} />
-                </div>
-              )}
-              {fold.pause && <div className="px-2.5 py-2">
-                <Btn size="sm" tone={prefs.autoPause ? 'accent-soft' : 'white'} onClick={toggleAutoPause} className="w-full">{t('watch.autoPause')}</Btn>
-              </div>}
-              <div className="mx-1 my-1 border-t border-line" />
+            )} footer={
               <div className="px-2.5 py-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
                 {legend.map(([k, label]) => (
                   <React.Fragment key={label}><span className="text-ink/80 whitespace-nowrap">{k}</span><span className="text-mute">{label}</span></React.Fragment>
                 ))}
+              </div>
+            }>
+              <div className="px-2.5 py-2 flex flex-col gap-2">
+                <span className="text-xs text-mute">{t('transport.speed')}</span>
+                <Seg<number> size="sm" className="w-full [&>button]:flex-1" value={speed} onChange={setSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
+                <span className="text-xs text-mute">{withKey(t('watch.keySubs'), 'C')}</span>
+                <Seg size="sm" className="w-full [&>button]:flex-1" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey) }))} />
               </div>
             </Menu>
           </div>
@@ -465,16 +430,13 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
       )}
 
       {summary && (
-        <WatchSummary title={t(summary.ended ? 'watch.summaryEnded' : 'watch.summaryTitle')} savedEmpty={t('watch.savedEmpty')}
-          saved={savedItems} looked={looked}
+        <WatchSummary title={t('watch.summaryEnded')} savedEmpty={t('watch.savedEmpty')} savedHead={t('watch.savedNow', { n: mySaved.length })} tick={5} saved={mySaved} looked={looked}
           actions={<>
             <Btn onClick={onExit}><ArrowLeft size={16} /> {t('studio.backToVideosBtn')}</Btn>
-            {summary.ended
-              ? <Btn onClick={() => { setSummary(null); seek(0, true); }}><RotateCcw size={16} /> {t('watch.restart')}</Btn>
-              : <Btn onClick={() => { setSummary(null); videoRef.current?.play().catch(() => {}); }}><Play size={16} /> {t('watch.keepWatching')}</Btn>}
+            <Btn onClick={() => { setSummary(false); seek(0, true); }}><RotateCcw size={16} /> {t('watch.restart')}</Btn>
           </>}
-          onClose={() => setSummary(null)}
-          onJump={line => { setSummary(null); seek(line.startTime, true); }}
+          onClose={() => setSummary(false)}
+          onJump={line => { setSummary(false); seek(line.startTime, true); }}
           onWord={w => onWord(w.word, w.line, true)}
           onDrill={lines => { startDrill(lines).catch(console.error); }} />
       )}

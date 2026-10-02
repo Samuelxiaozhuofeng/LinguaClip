@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, MoreHorizontal, Loader2, Play } from 'lucide-react';
 import { LearningMode, VideoRecord } from '../types';
 import * as VideoStorage from '../utils/videoStorage';
-import { forgetCustomPos, forgetWatchPos, formatTimeCode, getCustomConfig, getCustomPos, getPracticeConfig, getWatchPos } from '../utils/storage';
+import { forgetCustomPos, forgetWatchPos, formatTimeCode, getCustomPos, getLastWay, getPracticeConfig, getWatchPos, setLastWay } from '../utils/storage';
 import { parseSRT } from '../utils/srtParser';
 import { buildSections, sectionAt } from '../utils/sections';
 import { fileNameFromPath, isAudioRecord, isVideoFile, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
@@ -31,13 +31,14 @@ import { getToday } from '../utils/today';
 // waits behind hover or the "…" menu.
 
 interface HomeProps {
-  onResume: (record: VideoRecord, mode: LearningMode) => void | Promise<void>;
+  onResume: (record: VideoRecord, mode: LearningMode, practiceOnly?: boolean) => void | Promise<void>;
+  onOtherWay: (record: VideoRecord) => void; // "…" → another way: the start panel
   onEmptyChange?: (empty: boolean) => void;
   addAsked?: boolean; // the top bar's "+" was pressed
   onAddHandled?: () => void;
   // The podcast page (a Pro tab): the same shelf with only podcast episodes, its own
   // add dialog and empty state, no drops. Without it, the videos (and sound files).
-  podcasts?: { empty: React.ReactNode; add: (close: () => void) => React.ReactNode; rate?: (v: VideoRecord) => string | null; otherWay?: (v: VideoRecord) => void };
+  podcasts?: { empty: React.ReactNode; add: (close: () => void) => React.ReactNode; rate?: (v: VideoRecord) => string | null };
 }
 
 type PrepInfo = { eligible: number; missing: number };
@@ -49,7 +50,7 @@ const Line: React.FC<{ pct: number; className?: string }> = ({ pct, className = 
   </div>
 );
 
-const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHandled, podcasts }) => {
+const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsked, onAddHandled, podcasts }) => {
   const t = useT();
   const lang = useLang();
   const [videos, setVideos] = useState<VideoRecord[] | null>(null);
@@ -78,15 +79,15 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   // Computed the same way the practice page cuts the video, so the two agree.
   const sectionLength = getPracticeConfig().sectionLength;
   const shelfPosition = useMemo(() => {
-    const byId = new Map<string, { part: number; parts: number; line: number; lines: number; customSec?: number; customPct?: number; listen?: boolean }>();
-    // The start panel opens on custom when that was the last choice; the card then
-    // shows where the custom sets reached, since that is where "start" goes on.
-    const customOn = getCustomConfig().on;
+    const byId = new Map<string, { part: number; parts: number; line: number; lines: number; customSec?: number; customPct?: number; listen?: boolean; watch?: boolean }>();
+    // The card shows where a click goes on (docs/watch.md): the way this video was last
+    // started — where the custom sets reached, where watching stopped, else the section.
     for (const v of videos ?? []) {
       if (v.importJob || !v.subtitleText) continue;
       try {
         const subs = parseSRT(v.subtitleText);
-        const customSec = customOn ? getCustomPos(v.id) : 0;
+        const way = getLastWay(v.id);
+        const customSec = way === 'custom' ? getCustomPos(v.id) : way === 'watch' ? getWatchPos(v.id) : 0;
         const end = subs[subs.length - 1]?.endTime ?? 0;
         const sections = buildSections(subs, sectionLength);
         if (sections.length === 0) continue;
@@ -101,7 +102,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
           parts: sections.length,
           line: Math.min(Math.max(v.currentSubtitleIndex, 0), lines),
           lines,
-          ...(customSec > 0 ? { customSec, customPct: end ? Math.min(100, customSec / end * 100) : 0 } : {}),
+          ...(way === 'custom' || way === 'watch' ? { customSec, customPct: end ? Math.min(100, customSec / end * 100) : 0, watch: way === 'watch' } : {}),
         });
       } catch { /* a record we cannot parse just falls back to percent */ }
     }
@@ -237,6 +238,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
       setVideos(prev => (prev ? prev.filter(x => x.id !== v.id) : prev));
       forgetCustomPos(v.id);
       forgetWatchPos(v.id);
+      setLastWay(v.id, null);
       forgetLooked(v.id);
     } catch {
       dialog.alert(t('home.deleteFailTitle'), t('home.deleteFailBody'));
@@ -278,7 +280,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   const modeName = (m: LearningMode) => (m === LearningMode.BLUR ? t('home.blur') : t('home.dictate'));
   const lastMode = (v: VideoRecord) => v.learningMode ?? LearningMode.DICTATION;
   // What the card's button starts: on the podcast page, intensive listening.
-  const cardMode = (v: VideoRecord) => (podcasts ? t('custom.listen') : modeName(lastMode(v)));
+  const cardMode = (v: VideoRecord) => (podcasts ? t('custom.listen') : getLastWay(v.id) === 'watch' ? t(isAudioRecord(v) ? 'custom.listen' : 'custom.watch') : modeName(lastMode(v)));
   const otherMode = (v: VideoRecord) => (lastMode(v) === LearningMode.BLUR ? LearningMode.DICTATION : LearningMode.BLUR);
 
   // "Part 2 of 5" and how far into that part, or lines when there is only one part.
@@ -286,7 +288,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
     const pos = shelfPosition.get(v.id);
     if (!pos) return { text: `${v.completionRate}%`, pct: v.completionRate };
     if (pos.listen) return { text: t('home.listenAt', { current: pos.part + 1, total: pos.parts }), pct: (pos.part / pos.parts) * 100 };
-    if (pos.customSec) return { text: t('home.customAt', { time: formatTimeCode(pos.customSec) }), pct: pos.customPct ?? 0 };
+    if (pos.customSec !== undefined) return { text: t(pos.watch ? 'home.watchAt' : 'home.customAt', { time: formatTimeCode(pos.customSec ?? 0) }), pct: pos.customPct ?? 0 };
     const pct = pos.lines ? (pos.line / pos.lines) * 100 : 0;
     if (pos.parts > 1) return { text: t('home.partOf', { current: pos.part + 1, total: pos.parts }), pct };
     return { text: t('home.linesCount', { current: pos.line, total: pos.lines }), pct };
@@ -324,8 +326,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   const menuFor = (v: VideoRecord): MenuItem[] => {
     const items: MenuItem[] = [];
     if (!v.importJob) {
-      if (podcasts?.otherWay) items.push({ label: t('home.otherWay'), onClick: () => podcasts.otherWay?.(v) });
-      else items.push({ label: t('home.practiceAs', { mode: modeName(otherMode(v)) }), onClick: () => onResume(v, otherMode(v)) });
+      items.push({ label: t('home.otherWay'), onClick: () => onOtherWay(v) });
+      if (!podcasts) items.push({ label: t('home.practiceAs', { mode: modeName(otherMode(v)) }), onClick: () => onResume(v, otherMode(v), true) });
       if (hasAi) {
         const b = prepItem(getPrepJob(v.id), prep.get(v.id), 'Breakdown', () => prepareBreakdowns(v.id, v.subtitleText, lang));
         const c = prepItem(getClozeJob(v.id), cloze.get(v.id), 'Cloze', () => prepareCloze(v.id, linesOf(v.subtitleText)));
@@ -386,7 +388,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onEmptyChange, addAsked, onAddHan
   // Where you are in this part: one tick per line when they fit, else a bar.
   const ticks = (v: VideoRecord) => {
     const pos = shelfPosition.get(v.id);
-    if (!pos || pos.customSec || pos.listen || pos.lines > 32) return <Line pct={where(v).pct} className="w-[160px]" />;
+    if (!pos || pos.customSec !== undefined || pos.listen || pos.lines > 32) return <Line pct={where(v).pct} className="w-[160px]" />;
     return (
       <span className="flex gap-[3px]">
         {Array.from({ length: pos.lines }, (_, i) => (

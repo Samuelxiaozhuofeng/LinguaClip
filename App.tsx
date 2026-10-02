@@ -6,7 +6,7 @@ import Home from './components/Home';
 import Shell from './components/Shell';
 import Studio from './components/Studio';
 import WatchPage from './components/WatchPage';
-import CustomPanel, { PanelChoice, nextPick, paceOf } from './components/CustomPanel';
+import CustomPanel, { PanelChoice, nextPick, paceOf, resumeChoice } from './components/CustomPanel';
 import { Listen, PodcastPicker, ProHost, Reader, podcastRate } from '@pro';
 import type { ReadBy } from './utils/storage';
 import { DialogHost, dialog } from './components/Dialog';
@@ -31,7 +31,7 @@ import { countLine } from './utils/today';
 import { deleteCards, keepOrphans, orphanCards } from './utils/review';
 import { startClips } from './utils/clips';
 import { CustomConfig, CustomPick } from './utils/customPick';
-import { setCustomPos } from './utils/storage';
+import { setCustomPos, setLastWay } from './utils/storage';
 
 let orphansAsked = false; // StrictMode runs effects twice in dev
 async function askAboutOrphans() {
@@ -228,17 +228,21 @@ export default function App() {
     setAppState(AppState.PRACTICE);
   };
 
-  // Every way into practice lands here: ask how to practise first — except a podcast
-  // episode, which goes straight to intensive listening ("…" → another way opens the panel).
-  const handleResume = (record: VideoRecord, lm: LearningMode) => {
-    if (record.importJob) return;
-    if (record.podcast && Listen) openPractice(record, lm, { kind: 'listen' }).catch(console.error);
-    else setPanel({ record, lm });
-  };
-
   // Only the latest start wins: two starts in quick succession must not mix one
   // video's lines with the other's custom session.
   const launchRef = useRef(0);
+  // Every way into practice lands here. A podcast episode goes straight to intensive listening, a video
+  // started before starts the same way again (docs/watch.md); else the panel asks ("…" → another way opens it).
+  const handleResume = (record: VideoRecord, lm: LearningMode, practiceOnly = false) => {
+    if (record.importJob) return;
+    if (record.podcast && Listen) return void openPractice(record, lm, { kind: 'listen' }).catch(console.error);
+    const launch = ++launchRef.current;
+    resumeChoice(record, lm, practiceOnly).catch(() => null).then(choice => {
+      if (launchRef.current !== launch) return;
+      if (choice) openPractice(record, lm, choice); else setPanel({ record, lm });
+    });
+  };
+  const otherWay = (r: VideoRecord) => setPanel({ record: r, lm: r.learningMode ?? LearningMode.DICTATION });
   const openPractice = async (record: VideoRecord, lm: LearningMode, choice: PanelChoice) => {
     const launch = ++launchRef.current;
     const stale = () => launchRef.current !== launch;
@@ -267,6 +271,7 @@ export default function App() {
         }
         // Watching (or listening) moves the video up the shelf; its practice mode and progress stay.
         VideoStorage.patchVideoRecord(record.id, { lastPracticed: Date.now() }).catch(console.error);
+        if (!record.podcast) setLastWay(record.id, 'watch');
         if (choice.kind === 'listen') {
           setListening({ record: { ...record, videoPath }, lm });
           setAppState(AppState.LISTEN);
@@ -278,6 +283,7 @@ export default function App() {
       }
 
       if (record.learningMode !== lm) await VideoStorage.patchVideoRecord(record.id, { learningMode: lm });
+      if (!record.podcast) setLastWay(record.id, choice.kind === 'custom' ? 'custom' : 'all');
       if (stale()) return;
       const bpm = record.blurPlaybackMode ?? BlurPlaybackMode.SENTENCE_BY_SENTENCE;
       if (choice.kind === 'custom') {
@@ -426,14 +432,13 @@ export default function App() {
        appState === AppState.LIBRARY ? <ReviewPage key="line" deck="line" /> :
        appState === AppState.CARDS ? <ReviewPage key="word" deck="word" /> :
        appState === AppState.PODCASTS && PodcastPicker ? (
-        <Home key="podcasts" onResume={handleResume} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} podcasts={{
+        <Home key="podcasts" onResume={handleResume} onOtherWay={otherWay} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} podcasts={{
           empty: <PodcastPicker onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
           add: close => <PodcastPicker onClose={close} onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
           rate: podcastRate,
-          otherWay: r => setPanel({ record: r, lm: r.learningMode ?? LearningMode.DICTATION }),
         }} />
        ) :
-       <Home key="videos" onResume={handleResume} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} />}
+       <Home key="videos" onResume={handleResume} onOtherWay={otherWay} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} />}
     </Shell>
   ) : (
     <PracticeProvider
@@ -482,13 +487,8 @@ export default function App() {
     <>
       {page}
       {panel && (
-        <CustomPanel
-          record={panel.record}
-          pace={paceOf(panel.lm, panel.record.blurPlaybackMode)}
-          read={panel.read}
-          onCancel={() => setPanel(null)}
-          onStart={choice => { setPanel(null); openPractice(panel.record, panel.lm, choice); }}
-        />
+        <CustomPanel record={panel.record} pace={paceOf(panel.lm, panel.record.blurPlaybackMode)} read={panel.read}
+          onCancel={() => setPanel(null)} onStart={choice => { setPanel(null); openPractice(panel.record, panel.lm, choice); }} />
       )}
       {ProHost && <ProHost />}
       <UpdateDialog />

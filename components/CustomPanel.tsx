@@ -8,7 +8,7 @@ import { CustomConfig, CustomPick, LEVELS, Level, LineLabel, MINUTE_CHOICES, Pac
 import { Listen, Reader } from '@pro';
 import { isAudioRecord } from '../utils/desktop';
 import { getLevelJob, prepareLevels, readLevels, subscribeLevels } from '../utils/levelPrep';
-import { formatTimeCode, getCustomConfig, getCustomPos, getWatchPrefs, ReadBy, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
+import { formatTimeCode, getCustomConfig, getCustomPos, getLastWay, getWatchPrefs, ReadBy, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
 
 // Asked before every practice session: section by section as before, or a
 // custom set — so many minutes, at a level, from where the last set stopped —
@@ -34,6 +34,22 @@ export async function nextPick(record: VideoRecord, cfg: CustomConfig, pace: Pac
   return pickCustom(subs, labels, cfg, getCustomPos(record.id), pace);
 }
 
+// A click on a video that was started before: the same way again, no panel (docs/watch.md).
+// null = ask with the panel: never started, a custom set whose level this video isn't graded
+// for yet (the level must not be dropped silently), or nothing to pick.
+// `practiceOnly` ("practise with dictation / blur"): a video last watched starts section by section.
+export async function resumeChoice(record: VideoRecord, lm: LearningMode, practiceOnly = false): Promise<PanelChoice | null> {
+  let way = getLastWay(record.id);
+  if (way === 'watch' && practiceOnly) way = 'all';
+  if (!way) return null;
+  if (way === 'watch') return { kind: Listen && isAudioRecord(record) ? 'listen' : 'watch' };
+  if (way === 'all') return { kind: 'all' };
+  const cfg = getCustomConfig();
+  if (needsLabels(cfg) && !(await readLevels(record.id, parseSRT(record.subtitleText)))) return null;
+  const pick = await nextPick(record, cfg, paceOf(lm, record.blurPlaybackMode));
+  return pick ? { kind: 'custom', cfg, pick } : null;
+}
+
 const CustomPanel: React.FC<{
   record: VideoRecord;
   pace: PaceMode;
@@ -43,12 +59,13 @@ const CustomPanel: React.FC<{
 }> = ({ record, pace, read: justRead, onCancel, onStart }) => {
   const t = useT();
   const hasAi = canCloze();
+  const last = getLastWay(record.id); // this video's own last way opens selected; a new video gets the last choice anywhere
   const [cfg, setCfg] = useState<CustomConfig>(() => {
-    const c = getCustomConfig();
+    const c = { ...getCustomConfig(), ...(last ? { on: last === 'custom' } : {}) };
     return hasAi ? c : { ...c, level: null };
   });
   const listen = !!Listen && isAudioRecord(record);
-  const [watch, setWatch] = useState(() => (listen && !!record.podcast) || getWatchPrefs().chosen);
+  const [watch, setWatch] = useState(() => (listen && !!record.podcast) || (last ? last === 'watch' : getWatchPrefs().chosen));
   // A podcast episode: intensive listening or dictation only (docs/private/podcast.md, 精听).
   const pod = listen && !!record.podcast;
   const [read, setRead] = useState(false);

@@ -126,6 +126,30 @@ const writeWatchPos = (edit: (all: Record<string, number>) => void) => {
 export const setWatchPos = (videoId: string, sec: number) => writeWatchPos(all => { all[videoId] = sec; });
 export const forgetWatchPos = (videoId: string) => writeWatchPos(all => { delete all[videoId]; });
 
+// How each video was last started (docs/watch.md): clicking it starts that again, no panel.
+// Unreadable or unknown = never started = the panel asks.
+export type LastWay = 'all' | 'custom' | 'watch';
+const STORAGE_KEY_LAST_WAY = 'linguaclip_last_way';
+const readLastWay = (): Record<string, unknown> => {
+  try {
+    const v = JSON.parse(localStorage.getItem(STORAGE_KEY_LAST_WAY) || '{}');
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
+};
+export const getLastWay = (videoId: string): LastWay | null => {
+  const w = readLastWay()[videoId];
+  return w === 'all' || w === 'custom' || w === 'watch' ? w : null;
+};
+export const setLastWay = (videoId: string, way: LastWay | null) => {
+  try {
+    const all = readLastWay();
+    if (way) all[videoId] = way; else delete all[videoId];
+    localStorage.setItem(STORAGE_KEY_LAST_WAY, JSON.stringify(all));
+  } catch { /* only costs a panel next time */ }
+};
+
 // How subtitles show, whether each line pauses at its end, whether the
 // start-of-practice panel last chose "watch", whether the controls are pinned,
 // and whether the subtitle list is open and how wide (% of the window). The reader

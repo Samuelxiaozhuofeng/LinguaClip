@@ -26,6 +26,8 @@ const WatchSummary: React.FC<{
   words?: KeepWords;
   actions: React.ReactNode; // the buttons before "dictate"
   top?: React.ReactNode; // above the saved lines (the podcast page asks how much was understood)
+  savedHead?: string; // the saved lines' heading, where it isn't "tick a few" (the watch page's: this time's saves)
+  tick?: number; // this many saved lines start ticked (the watch page: Enter dictates them)
   pickAll?: boolean; // every saved line starts ticked, and with none there's no dictate button (intensive listening's wrap-up)
   missed?: { line: Subtitle; on: boolean; saved: boolean }[]; // intensive listening's hard lines, above the saved ones (`on`: starts ticked)
   busy?: boolean; // the dictate button waits (adding the hard lines to review)
@@ -33,9 +35,9 @@ const WatchSummary: React.FC<{
   onJump: (line: Subtitle) => void;
   onWord: (w: Looked) => void;
   onDrill: (lines: Subtitle[]) => void;
-}> = ({ title, savedEmpty, saved, looked, words, actions, top, pickAll, missed = [], busy, onClose, onJump, onWord, onDrill }) => {
+}> = ({ title, savedEmpty, saved, looked, words, actions, top, savedHead, tick = 0, pickAll, missed = [], busy, onClose, onJump, onWord, onDrill }) => {
   const t = useT();
-  const [picked, setPicked] = useState<Set<number>>(() => new Set([...missed.filter(m => m.on).map(m => m.line.id), ...(pickAll ? saved.map(s => s.id) : [])]));
+  const [picked, setPicked] = useState<Set<number>>(() => new Set([...missed.filter(m => m.on).map(m => m.line.id), ...saved.slice(0, pickAll ? saved.length : tick).map(s => s.id)]));
   const toggle = (id: number) => setPicked(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const all = [...missed.map(m => m.line), ...saved];
   const chosen = all.filter(s => picked.has(s.id));
@@ -67,7 +69,7 @@ const WatchSummary: React.FC<{
           )}
           {!(missed.length && !saved.length) && (
             <section className="flex flex-col gap-2">
-              <p className="text-xs text-mute">{saved.length ? t('watch.savedHead', { n: saved.length }) : savedEmpty}</p>
+              <p className="text-xs text-mute">{saved.length ? savedHead ?? t('watch.savedHead', { n: saved.length }) : savedEmpty}</p>
               {saved.map(s => row(s))}
             </section>
           )}
