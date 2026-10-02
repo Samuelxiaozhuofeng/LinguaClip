@@ -3,13 +3,13 @@ use std::path::PathBuf;
 
 use crate::paths::own_dir as movies_dir;
 
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
   !id.is_empty()
     && id.len() <= 80
     && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
-fn valid_kind(kind: &str) -> bool {
+pub(crate) fn valid_kind(kind: &str) -> bool {
   kind == "words" || kind == "cloze" || kind == "breakdown" || kind == "segments" || kind == "levels" || kind == "trans"
 }
 

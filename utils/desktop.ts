@@ -6,7 +6,7 @@ import { homeDir, join } from '@tauri-apps/api/path';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { exists, readFile, readTextFile } from '@tauri-apps/plugin-fs';
 import { check, type Update } from '@tauri-apps/plugin-updater';
@@ -108,6 +108,25 @@ export const sweepClips = (keep: string[]) => invoke<number>('sweep_clips', { ke
 export const clipsInfo = () => invoke<{ dir: string; bytes: number }>('clips_info');
 export const clipPath = async (file: string) => join(await ownDir(), 'clips', file);
 
+// Backups (src-tauri/src/backup.rs, docs/backup.md). `dest` set = a backup the user saves by hand;
+// unset = into <own dir>/backups as today's automatic one ("auto") or a before-restore one ("pre").
+export const backupWrite = (dest: string | null, kind: 'auto' | 'pre', manifest: string, data: string, files: boolean) =>
+  invoke<string>('backup_write', { dest, kind, manifest, data, files });
+export const backupStage = (path: string) => invoke<string>('backup_stage', { path });
+export const backupList = () => invoke<{ path: string; manifest: string }[]>('backup_list');
+export const backupRead = (path: string) => invoke<{ manifest: string; data: string }>('backup_read', { path });
+export const backupUnpack = (path: string) => invoke<number>('backup_unpack', { path });
+export const backupKeptClips = () => invoke<string[] | null>('backup_kept_clips');
+export const backupRemove = (names: string[]) => invoke<void>('backup_remove', { names });
+const BACKUP_FILTER = { name: 'LinguaClip', extensions: ['zip'] };
+export async function pickBackupDest(name: string): Promise<string | null> {
+  return save({ defaultPath: name, filters: [BACKUP_FILTER] });
+}
+export async function pickBackupFile(): Promise<string | null> {
+  const selected = await open({ multiple: false, filters: [BACKUP_FILTER] });
+  return typeof selected === 'string' ? selected : null;
+}
+
 // Stable per-computer id (hash of the hardware UUID) + display name, for license seats.
 export const deviceInfo = () => invoke<{ id: string; name: string }>('device_info');
 
@@ -134,7 +153,7 @@ export type CacheKind = 'words' | 'cloze' | 'breakdown' | 'segments' | 'levels' 
 
 // ~/Movies/LinguaClip on macOS, ~/Videos/LinguaClip on Windows; must match
 // own_dir() in src-tauri/src/paths.rs.
-async function ownDir(): Promise<string> {
+export async function ownDir(): Promise<string> {
   return join(await homeDir(), IS_WINDOWS ? 'Videos' : 'Movies', 'LinguaClip');
 }
 

@@ -8,6 +8,8 @@ import '@fontsource/instrument-sans/600.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import RestoreFailed from './components/RestoreFailed';
+import { afterStart, bootRestore } from './utils/restore';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -21,9 +23,21 @@ const render = () => root.render(
   </React.StrictMode>
 );
 
-// Plain-browser `npm run dev`: fake the Tauri shell (dev/browserMock.ts).
-if (import.meta.env.DEV && !('__TAURI_INTERNALS__' in window)) {
-  import('./dev/browserMock').then(render);
-} else {
+// A restore the user started finishes here, before the app (and anything that writes) is up
+// (docs/backup.md); while it isn't done, only the failure screen shows.
+const boot = async () => {
+  const r = await bootRestore();
+  if ('pending' in r) {
+    root.render(<RestoreFailed pending={r.pending} error={r.error} />);
+    return;
+  }
   render();
+  afterStart();
+};
+
+// Plain-browser `npm run dev`: fake the Tauri shell (dev/browserMock.ts) first.
+if (import.meta.env.DEV && !('__TAURI_INTERNALS__' in window)) {
+  import('./dev/browserMock').then(boot);
+} else {
+  boot();
 }

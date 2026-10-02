@@ -1,4 +1,5 @@
 mod anki;
+mod backup;
 mod bailian;
 mod cache;
 mod clips;
@@ -59,6 +60,13 @@ pub fn run() {
       clips::cut_clip,
       clips::sweep_clips,
       clips::clips_info,
+      backup::backup_write,
+      backup::backup_stage,
+      backup::backup_list,
+      backup::backup_read,
+      backup::backup_unpack,
+      backup::backup_kept_clips,
+      backup::backup_remove,
       device::device_info,
       dicts::dict_list,
       dicts::dict_check,

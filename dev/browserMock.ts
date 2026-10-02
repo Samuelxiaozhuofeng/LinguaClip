@@ -16,6 +16,11 @@
  *   dev/fixtures/dict-sample.json (rows cut from the real ones; a picked path
  *   containing "nolang" adds one whose language is unknown); `dictFail = 'net'`
  *   etc. makes the next import / download fail with that code.
+ * - Backups (docs/backup.md): zips are plain objects kept in sessionStorage, so they outlive
+ *   the reload a restore does. The save dialog returns `pick` or ~/Desktop/<suggested name>;
+ *   the open dialog for a zip returns `pick` or the last one saved. `__MOCK__.putBackup(path,
+ *   { manifest, data })` plants one (a bad backup); `__MOCK__.failUnpack('msg')` makes every
+ *   backup_unpack fail (survives reloads; `failUnpack(null)` stops it).
  * - Rust commands are logged to `window.__MOCK__.calls`; fake import progress
  *   with `window.__MOCK__.emit('import-progress', {...})`.
  * - vite aliases @tauri-apps/plugin-http to this file, hence the `fetch` export;
@@ -32,6 +37,22 @@ const fsUrl = (path: string) => '/@fs' + path.split('/').map(p => encodeURICompo
 const cache = new Map<string, string>(); // write_cache stays in memory
 
 type Args = Record<string, any>;
+
+const OWN = `${__DEV_HOME__}/Movies/LinguaClip`;
+const BACKUPS = `${OWN}/backups`;
+type Zip = { manifest: string; data: string; files?: Record<string, string> };
+const zips = (): Record<string, Zip> => JSON.parse(sessionStorage.getItem('__mock_backups') || '{}');
+const setZips = (z: Record<string, Zip>) => sessionStorage.setItem('__mock_backups', JSON.stringify(z));
+const inBackups = (path: string) => path.startsWith(`${BACKUPS}/`) && !path.slice(BACKUPS.length + 1).includes('/');
+const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+const stamp = (d: Date, long: boolean) => long
+  ? `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}${pad(d.getMilliseconds(), 3)}`
+  : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const readZip = (path: string) => {
+  const z = zips()[path];
+  if (!inBackups(path) || !z) throw 'missing:backup';
+  return z;
+};
 
 const mock = {
   pick: null as string | null,
@@ -50,6 +71,8 @@ const mock = {
   updateFail: null as null | 'download' | 'install',
   localDicts: [] as Args[],
   dictFail: null as string | null,
+  putBackup: (path: string, zip: Zip) => setZips({ ...zips(), [path]: zip }),
+  failUnpack: (msg: string | null) => (msg ? sessionStorage.setItem('__mock_unpack_fail', msg) : sessionStorage.removeItem('__mock_unpack_fail')),
   emit,
 };
 (window as any).__MOCK__ = mock;
@@ -130,8 +153,63 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
         return [{ id, rows, tags: Object.fromEntries(Object.entries(src!.tags).filter(([k]) => used.has(k))) }];
       });
     }
+    case 'plugin:dialog|save': {
+      const pick = mock.pick ?? `${__DEV_HOME__}/Desktop/${args.options?.defaultPath}`;
+      mock.pick = null;
+      sessionStorage.setItem('__mock_last_saved', pick);
+      return pick;
+    }
+    case 'backup_write': {
+      const name = `LinguaClip-${args.kind}-${stamp(new Date(), args.kind === 'pre')}.zip`;
+      const path = args.dest ?? `${BACKUPS}/${name}`;
+      const files: Record<string, string> = {};
+      if (args.files) for (const [k, v] of cache) files[`files/${k.slice(OWN.length + 1)}`] = v;
+      setZips({ ...zips(), [path]: { manifest: args.manifest, data: args.data, files } });
+      return path;
+    }
+    case 'backup_stage': {
+      const z = zips()[args.path];
+      if (!z) throw 'missing:backup';
+      setZips({ ...zips(), [`${BACKUPS}/restore-staged.zip`]: z });
+      return `${BACKUPS}/restore-staged.zip`;
+    }
+    case 'backup_list':
+      return Object.entries(zips())
+        .filter(([p]) => inBackups(p) && !p.endsWith('/restore-staged.zip'))
+        .flatMap(([path, z]) => { try { return [{ path, manifest: z.manifest, at: JSON.parse(z.manifest).createdAt as number }]; } catch { return []; } })
+        .sort((a, b) => b.at - a.at)
+        .map(({ path, manifest }) => ({ path, manifest }));
+    case 'backup_read': {
+      const z = readZip(args.path);
+      return { manifest: z.manifest, data: z.data };
+    }
+    case 'backup_unpack': {
+      const fail = sessionStorage.getItem('__mock_unpack_fail');
+      if (fail) throw fail;
+      const files = Object.entries(readZip(args.path).files ?? {}).filter(([k]) => /^files\/[\w-]+\.\w+\.json$/.test(k));
+      for (const [k, v] of files) cache.set(`${OWN}/${k.slice(6)}`, v);
+      return files.length;
+    }
+    case 'backup_kept_clips': {
+      const ours = /\/(LinguaClip-(auto|pre)-[^/]*\.zip|restore-staged\.zip)$/; // anything else in backups/ is ignored
+      const all = Object.entries(zips()).filter(([p]) => inBackups(p) && ours.test(p));
+      try {
+        return [...new Set(all.flatMap(([, z]) => JSON.parse(z.manifest).clips as string[]))];
+      } catch { return null; }
+    }
+    case 'backup_remove': {
+      const z = zips();
+      for (const n of args.names as string[]) delete z[`${BACKUPS}/${n}`];
+      setZips(z);
+      return null;
+    }
     case 'plugin:dialog|open': {
       const exts: string[] = args.options?.filters?.[0]?.extensions ?? [];
+      if (args.options?.filters?.[0]?.name === 'LinguaClip') { // a backup (utils/desktop.ts pickBackupFile)
+        const pick = mock.pick ?? sessionStorage.getItem('__mock_last_saved');
+        mock.pick = null;
+        return pick;
+      }
       const pick = mock.pick ?? (exts.includes('srt') ? `${FIXTURE}.srt` : `${FIXTURE}.mp4`);
       mock.pick = null;
       return pick;

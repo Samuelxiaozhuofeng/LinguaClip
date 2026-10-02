@@ -26,7 +26,7 @@ await build({
       b.onResolve({ filter: /^@tauri-apps\// }, a => ({ path: a.path, namespace: 'stub' }));
       b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
         contents: `const no = () => { throw new Error('tauri'); };
-          export const fetch = globalThis.fetch, invoke = no, convertFileSrc = no, open = no, readTextFile = no,
+          export const fetch = globalThis.fetch, invoke = no, convertFileSrc = no, open = no, save = no, readTextFile = no,
             exists = no, readFile = no, listen = no, homeDir = no, join = no, getCurrentWebview = no, getCurrentWindow = no, openUrl = no, revealItemInDir = no,
             check = no, relaunch = no, getVersion = no;`,
       }));

@@ -10,7 +10,7 @@ fn clips_dir() -> Result<PathBuf, String> {
 }
 
 // Names come from the frontend (`<video id>_<start>`); keep them to plain file names.
-fn safe_name(name: &str) -> Result<&str, String> {
+pub(crate) fn safe_name(name: &str) -> Result<&str, String> {
   if !name.is_empty() && name.len() <= 200 && name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) && !name.starts_with('.') {
     Ok(name)
   } else {

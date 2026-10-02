@@ -17,6 +17,7 @@ import { useT, useLang, setLang, Lang } from '../utils/i18n';
 import { openExternal } from '../utils/desktop';
 import { ProFooter } from '@pro';
 import { UpdateRow } from './UpdateUI';
+import BackupRow from './BackupRow';
 
 type DeckByLang = NonNullable<AnkiCardTemplateConfig['deckByLang']>;
 
@@ -290,6 +291,7 @@ const Settings: React.FC = () => {
         </SettingsCards>
       )}
 
+      <BackupRow />
       <p className="mt-12 text-center text-xs text-mute">
         {ProFooter ? <ProFooter /> : (
           <button type="button" className="underline-offset-4 hover:text-ink hover:underline" onClick={() => openExternal(SPONSOR_URL).catch(err => console.error(err))}>

@@ -11,7 +11,8 @@
  */
 import { getAllCards, hasAudio, setClip, subscribeCards, type ReviewCard } from './review';
 import { getVideoRecord } from './videoStorage';
-import { clipPath, cutClip, pathExists, sweepClips } from './desktop';
+import { backupKeptClips, clipPath, cutClip, pathExists, sweepClips } from './desktop';
+import { clipFiles } from './backup';
 import { getPracticeConfig } from './storage';
 
 // Room around the line, so the lead-in / tail padding (up to 1s) still fits.
@@ -99,10 +100,15 @@ const fillOnce = async () => {
     if (n === 'stop') break;
     if (n === 'noVideo') { noVideo += line.filter(c => !c.clip).length; set({ noVideo }); }
   }
-  // Read again: the files the cards use right now are the ones to keep.
+  // Read again: the files the cards use right now are the ones to keep, and so are the ones
+  // any backup in <own dir>/backups needs (docs/backup.md). No cards at all (the database may
+  // have just been lost), or the backups unreadable: sweep nothing this time.
   const now = await getAllCards();
   set(counts(now));
-  await sweepClips(now.flatMap(c => c.clip ? [c.clip.file, ...(c.clip.image ? [c.clip.image] : [])] : []));
+  if (now.length === 0) return;
+  const kept = await backupKeptClips().catch(e => { console.error(e); return null; });
+  if (!kept) return;
+  await sweepClips([...clipFiles(now), ...kept]);
 };
 
 // Runs until nothing new came in meanwhile; a call while it runs asks for one more pass and

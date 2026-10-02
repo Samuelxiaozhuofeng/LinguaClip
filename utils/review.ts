@@ -339,6 +339,30 @@ export const deckCounts = (cards: ReviewCard[], now = Date.now()) => {
   return { line: count('line'), word: count('word') };
 };
 
+// --- Backup and restore (utils/backupData.ts, utils/restore.ts) ---
+
+// Both stores as they are, in one read. Throws when unreadable (never an empty deck instead).
+export const readAll = async (): Promise<{ cards: ReviewCard[]; meta: Record<string, unknown>[] }> => {
+  const t = (await db()).transaction([STORE, META], 'readonly');
+  const cards = t.objectStore(STORE).getAll();
+  const meta = t.objectStore(META).getAll();
+  await finished(t);
+  return { cards: cards.result, meta: meta.result };
+};
+
+// Restore: both stores replaced in one transaction. Runs before the app starts, so it
+// doesn't wait for the old-bookmark move (the backup's own `meta` says whether that is done).
+export const replaceAll = async (cards: ReviewCard[], meta: Record<string, unknown>[]) => {
+  const t = (await db()).transaction([STORE, META], 'readwrite');
+  const s = t.objectStore(STORE), m = t.objectStore(META);
+  s.clear();
+  m.clear();
+  cards.forEach(c => s.put(c));
+  meta.forEach(x => m.put(x));
+  await finished(t);
+  changed();
+};
+
 // --- One-time move of the old text-only bookmarks ---
 // Reads localStorage `linguaclip_saved_lines` and never writes it (it stays as
 // a backup). The "done" mark is written in the same transaction as the cards,

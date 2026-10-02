@@ -125,6 +125,18 @@ export const getVideoFromDB = async (id: string): Promise<any | null> => {
 };
 
 /**
+ * Restore (utils/restore.ts): every record replaced by `records`, in one transaction.
+ */
+export const replaceAllVideos = async (records: any[]): Promise<void> => {
+  const db = await initDB();
+  const tx = db.transaction([STORE_VIDEOS], 'readwrite');
+  const store = tx.objectStore(STORE_VIDEOS);
+  store.clear();
+  records.forEach(r => store.put(r));
+  return commit(tx, 'replace video records');
+};
+
+/**
  * Delete video record from IndexedDB
  */
 export const deleteVideoFromDB = async (id: string): Promise<void> => {
