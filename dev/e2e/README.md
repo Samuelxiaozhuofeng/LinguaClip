@@ -9,7 +9,41 @@ node dev/e2e/run.mjs
 - 要样片 `~/Movies/LinguaClip/Me at the zoo [jNQXAC9IVRw].mp4` + `.srt`（`dev/browserMock.ts` 的文件对话框返回它），缺了直接报「缺样片：路径」。
 - 每个流程打印 PASS / FAIL；失败的截图和 vite 日志在输出的临时目录里，后面依赖它的流程标 SKIP；有没过的退出码为 1。
 
-覆盖（按顺序，后一步接着前一步的状态）：
+## 临时脚本（针对某次改动补测）
+
+写在 scratchpad 里，从 `lib.mjs` 起步；Playwright、dev 服务、端口、浏览器都不用自己管，也不用去别的会话的 scratchpad 里找旧脚本。
+
+```js
+import { open, seed, record, SAMPLE, AUDIO } from '<仓库绝对路径>/dev/e2e/lib.mjs';
+const t = await open('<scratchpad 绝对路径>');   // vite.log 落在这里；返回 { page, see, gone, nav, errors, url, close }
+const { page, see, nav } = t;
+try {
+  // 跳过「添加视频」弹窗，直接把记录写进库；第三个参数是 localStorage（对象自动转 JSON）
+  await seed(page, [
+    record(SAMPLE, '.mp4', { id: 'v1', displayName: 'Zoo' }),
+    record(AUDIO, '.mp3', { id: 'p1', displayName: 'Quien', podcast: { show: 'Coffee Break Spanish', feed: 'https://x/feed', guid: 'g1', name: 'x' } }),
+  ], { linguaclip_watch_prefs: { listenIntro: true }, linguaclip_last_way: { v1: 'watch' } });
+
+  await nav('播客');                                                            // 顶栏：视频 / 播客 / 句子 / 单词 / 设置
+  await page.getByRole('button', { name: '继续精听' }).first().click();         // 播客卡片直接进精听页
+  await see(page.locator('header [aria-current=step]'), '步骤条');              // 当前步
+  await page.locator('header button').first().click();                          // 精听页返回
+
+  await nav('视频');
+  await page.getByRole('button', { name: '继续看剧' }).first().click();         // last_way = watch → 直接开播
+  await see(page.getByRole('button', { name: 'elephants', exact: true }), '看剧第 1 句字幕');
+  await page.screenshot({ path: `${t.out}/watch.png` });
+  if (t.errors.length) console.log('页面报错', t.errors);
+} finally { await t.close(); }
+```
+
+- `SAMPLE` = `~/Movies/LinguaClip/Me at the zoo [jNQXAC9IVRw]`（3 句英语），`AUDIO` = `~/Movies/LinguaClip/¿Quien quiere, puede [fe5743fc]`（一集西语播客，6 段）；都是不带扩展名的路径，旁边要有同名 `.srt`。
+- 没 `seed` 的新视频第一次点会弹「这次怎么练」面板：`page.getByRole('dialog', { name: '这次怎么练' })`，里面的练法是 `radio`，开始按钮是 `button`（写法见 `practice.mjs` / `watch.mjs`）。
+- 按钮名字：拿界面上的中文去 `utils/i18n.zh.ts` 里搜，别猜键名。`<audio>` / `<video>` 元素不可见，别 `see` 它；读播放位置用 `page.evaluate(() => document.querySelector('audio').currentTime)`。
+- 读库：`page.evaluate(async () => (await import('/utils/review.ts')).getAllCards())`（vite 直接给源文件，任何 `utils/*.ts` 的导出都能这样调）。
+- 同一类检查做第二次，就把它写成一个流程加进下面的回归。
+
+## 回归覆盖（按顺序，后一步接着前一步的状态）
 
 | 文件 | 流程 |
 |---|---|
