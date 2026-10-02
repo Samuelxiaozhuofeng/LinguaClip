@@ -1,0 +1,57 @@
+{
+  "brand": {
+    "name": "LinguaClip",
+    "en": "播客精听",
+    "icon": "icon.png"
+  },
+  "colors": {
+    "paper": "#F4F4F3",
+    "paperHi": "#FAFAFA",
+    "ink": "#1C1917",
+    "accent": "#E8492B"
+  },
+  "hook": "只听懂一半？",
+  "title": "把播客<br><em>听懂</em>",
+  "chips": [
+    "盲听 → 对稿",
+    "点词就查",
+    "难句听写"
+  ],
+  "viewport": [
+    1920,
+    1080
+  ],
+  "main": {
+    "src": "main.png",
+    "x0": 80,
+    "y0": 150,
+    "rings": [
+      [
+        560,
+        710,
+        261,
+        63
+      ],
+      [
+        741,
+        163,
+        175,
+        74
+      ]
+    ],
+    "arrow": [
+      0,
+      1
+    ]
+  },
+  "card": {
+    "label": "盲听完自测",
+    "src": "card.png",
+    "crop": [
+      438,
+      347,
+      1103,
+      340
+    ]
+  }
+}

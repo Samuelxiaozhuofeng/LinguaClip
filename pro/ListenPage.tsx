@@ -14,7 +14,7 @@ import { buildSections, sectionAt, sectionStart } from '../utils/sections';
 import { detectLang } from '../utils/dictionary';
 import { useJaVersion } from '../utils/japanese';
 import { settleSplits } from '../utils/jaSegments';
-import { addWord, lineCardsFor, type ReviewCard } from '../utils/review';
+import { addLine, addWord, lineCardsFor, type ReviewCard } from '../utils/review';
 import { addLooked, getLooked, lookedKey, useLookedVersion } from '../utils/readLooked';
 import { canCloze } from '../utils/aiDrills';
 import { videoSrcFromPath } from '../utils/desktop';
@@ -24,15 +24,16 @@ import { matches } from '../utils/shortcuts';
 import { IS_WINDOWS } from '../utils/platform';
 import { getLang, useT, type DictKey } from '../utils/i18n';
 import { getTransJob, prepareTrans, subscribeTrans } from './transPrep';
-import { HeardAsk, IntroCard, ListenBlind, PassCard, StepBar, rateText, type Said } from './ListenCoach';
+import { DrillBar, HeardAsk, IntroCard, ListenBlind, PassCard, StepBar, rateText, type Said } from './ListenCoach';
 import ListenBar from './ListenBar';
 import { noteHeard, recordRate, showKey, type Heard } from './listenLevel';
 import PodcastPicker from './PodcastPicker';
 import type { Pick } from './podcastShows';
 
 // Intensive listening to something with no picture — a podcast episode or a sound file
-//. One practice section at a time, in four steps: blind,
-// with the transcript, blind again, then dictating the lines saved (the section's summary);
+//. One practice section at a time, in three steps: blind (S / V mark a line hard),
+// the hard lines one by one with the text then without (none marked and little followed: the
+// whole transcript), then the section's summary — the hard lines and the saved ones to dictate;
 // "free listening" leaves the steps for blind / shown by hand. The line being said is lit and kept in view until the reader
 // scrolls away ("back to the current line", or 5 s without scrolling while it plays, brings
 // it back). Words look up like the reader's (ReaderLine), lines save with the same star.
@@ -46,6 +47,7 @@ import type { Pick } from './podcastShows';
 const MODES: WatchSubs[] = ['hide', 'show'];
 const SEEK = 5;
 type Word = Looked & { key: string; fields?: { definition: string; example: string } | null };
+type Mark = 'open' | 'ok' | 'more'; // a hard line: not worked on yet / got it now / needs more work
 
 const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice: () => void; onOpen?: (r: VideoRecord) => void }> = ({ record, onExit, onPractice, onOpen }) => {
   const t = useT();
@@ -79,6 +81,9 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const [pass, setPass] = useState(1);
   const [passMode, setPassMode] = useState<WatchSubs | null>(null); // C pressed during this pass
   const [passCard, setPassCard] = useState<number | null>(null); // the pass just heard
+  const [marks, setMarks] = useState<Map<number, Mark>>(new Map()); // hard lines, this visit (never stored: "saved" is the star)
+  const [queue, setQueue] = useState<number[] | null>(null); // step 2's hard lines, fixed as it starts
+  const [qAt, setQAt] = useState(0);
   const armed = useRef<number | null>(null); // the next pass, started by play too
   const effMode: WatchSubs = passes ? passMode ?? (pass === 2 ? 'show' : 'hide') : mode;
   const changeMode = (m: WatchSubs) => { if (passes) setPassMode(m); else setMode(m); };
@@ -115,8 +120,9 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const gap = useRef(0); // a looped line's next play, waiting out the gap (0: none)
   const stopGap = () => { window.clearTimeout(gap.current); gap.current = 0; };
   const resumeAfter = useRef(false); // a lookup paused playback: closing it plays again
-  const opts = useRef({ autoPause, through, passes, pass, sec });
-  opts.current = { autoPause, through, passes, pass, sec };
+  const target = queue?.[qAt] ?? null; // the hard line step 2 is on: playback stops at its end
+  const opts = useRef({ autoPause, through, passes, pass, sec, target });
+  opts.current = { autoPause, through, passes, pass, sec, target };
   const seek = useCallback((to: number, play = false) => {
     const a = audio.current;
     if (!a) return;
@@ -147,6 +153,8 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
       const s = sectionOf.get(line.id) ?? 0, end = sectionEnd(s);
       const last = sections[s]?.subtitles.at(-1);
       const lastAt = last ? indexOf.get(last.id) ?? -1 : -1;
+      const tgt = opts.current.target !== null ? indexOf.get(opts.current.target) ?? -1 : -1;
+      const tEnd = tgt >= 0 ? Math.min(lines[tgt].endTime, sectionEnd(sectionOf.get(lines[tgt].id) ?? 0)) : 0; // where pause() puts it back: a last line overlapping the next section ends with its section
       const pause = (i: number) => { // back to that line's end (never past its section's); the page's time too, not
         const back = Math.max(lines[i].startTime, Math.min(lines[i].endTime, sectionEnd(sectionOf.get(lines[i].id) ?? 0)) - 0.02);
         a.pause(); a.currentTime = back; setTime(back); // `now`, already in the next section: that would reset the passes
@@ -156,11 +164,14 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
         plays.current.n++;
         pause(was); // the gap is still this line (and this section)
         gap.current = window.setTimeout(() => { gap.current = 0; seek(line.startTime, true); }, LOOP_GAP_MS);
+      } else if (tgt >= 0 && before < tEnd && now >= tEnd && heldAt.current !== tgt) {
+        heldAt.current = tgt; // the hard line heard (from it or a line before it, however long the frame): the bar asks how it went
+        pause(tgt);
       } else if (!opts.current.through && lastAt >= 0 && before < end && now >= end && heldAt.current !== lastAt) {
         // Once: closing the summary and pressing play goes on past the section end.
         heldAt.current = lastAt;
         pause(lastAt);
-        if (opts.current.passes && opts.current.pass < 3) openPass(); else openSummary(false);
+        if (opts.current.passes && opts.current.pass < 2) openPass(); else openSummary(false);
       } else if (crossed && now - before < 0.5 && opts.current.autoPause && heldAt.current !== was) {
         heldAt.current = was;
         pause(was); // (and a line peeked at stays up while held)
@@ -299,7 +310,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const summed = useRef(-1); // the section last summed up: its passes are over
   function openSummary(ended: boolean) {
     summed.current = opts.current.sec;
-    setPassCard(null);
+    setPassCard(null); setQueue(null); setAddFail(false);
     armed.current = null;
     audio.current?.pause();
     stopGap();
@@ -316,38 +327,62 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     summed.current = -1; // heard again: its steps aren't over (the last section's end would skip them)
     setSummary(null);
     setFollow(true);
-    setPass(1); setPassMode(null); setPassCard(null); // "listen again": all three passes again
+    setPass(1); setPassMode(null); setPassCard(null); setQueue(null); // "listen again": all the steps again
     seek(sections[i]?.subtitles[0]?.startTime ?? 0, true);
   };
   // Ran to the very end: with passes left, the last section's next pass.
-  const onEnded = () => { if (passes && pass < 3 && summed.current !== sec) openPass(); else { setWatchPos(record.id, 0); openSummary(true); } };
+  const onEnded = () => { if (passes && pass < 2 && summed.current !== sec) openPass(); else { setWatchPos(record.id, 0); openSummary(true); } };
 
   // --- Three passes: the pass count belongs to one section; getting into another starts it at 1 ---
   const passSec = useRef(sec);
   useEffect(() => {
     if (sec === passSec.current) return;
     passSec.current = sec;
-    setPass(1); setPassMode(null); setPassCard(null); armed.current = null; summed.current = -1;
+    setPass(1); setPassMode(null); setPassCard(null); setQueue(null); armed.current = null; summed.current = -1;
   }, [sec]);
   function openPass() {
     audio.current?.pause(); stopGap();
     armed.current = opts.current.pass + 1; setPassCard(opts.current.pass);
   }
-  function startPass(n: number) { // back to this section's start: the count stays
+  // Step 2 works on the lines marked hard — unless little was followed: then marking missed too much, the whole transcript.
+  const secMarks = section ? section.subtitles.filter(l => marks.has(l.id)) : [];
+  const hard = said.get(sec)?.a === 'little' ? 0 : secMarks.length;
+  function startPass(n: number) { // back to this section's start (step 2: its first hard line): the count stays
     summed.current = -1;
     setPassCard(null); setPass(n); setPassMode(null); setFollow(true);
-    seek(sections[sec]?.subtitles[0]?.startTime ?? 0, true);
+    const q = n === 2 && hard ? secMarks.map(l => l.id) : null;
+    setQueue(q); setQAt(0);
+    seek(q ? secMarks[0].startTime : sections[sec]?.subtitles[0]?.startTime ?? 0, true);
   }
-  // Followed most of it blind: moving on is the main way — to the saved lines' dictation, else the next section.
+  const drillLine = target !== null ? lines[indexOf.get(target) ?? -1] : undefined;
+  const drillHide = () => { if (drillLine) { setPassMode('hide'); seek(drillLine.startTime, true); } };
+  const drillDone = (ok: boolean) => { // noted, then the next hard line with the text again; after the last, the summary
+    if (target === null || !queue) return;
+    setMarks(m => new Map(m).set(target, ok ? 'ok' : 'more'));
+    setPassMode(null); setFollow(true);
+    const next = qAt + 1 < queue.length ? lines[indexOf.get(queue[qAt + 1]) ?? -1] : undefined;
+    if (next) { setQAt(qAt + 1); seek(next.startTime, true); } else openSummary(false);
+  };
+  // Followed most of it blind with nothing marked: moving on is the main way — to the saved lines' dictation, else the next section.
   const hasSaved = section ? section.subtitles.some(l => savedIds.has(l.id)) : false;
-  const easy = passCard === 1 && said.get(sec)?.a === 'most';
+  const easy = passCard === 1 && said.get(sec)?.a === 'most' && !secMarks.length;
   const moveOn = () => { if (hasSaved || lastSec) openSummary(false); else goSection(sec + 1); };
   const cardMain = () => { if (easy) moveOn(); else if (passCard) startPass(passCard + 1); };
-  const goStep = (n: number) => { setSummary(null); if (n === 4) openSummary(false); else startPass(n); };
+  const goStep = (n: number) => { setSummary(null); if (n === 3) openSummary(false); else startPass(n); };
   const goFree = (on: boolean) => { // leaving the steps keeps playing; back on them, this section from step 1
     setFree(on);
-    if (on) { setPassCard(null); setPassMode(null); armed.current = null; } else goSection(sec);
+    if (on) { setPassCard(null); setPassMode(null); setQueue(null); armed.current = null; } else goSection(sec);
   };
+
+  // --- Hard lines: S (or the blind screen's button) marks / unmarks the line being said; seeing one with V marks it ---
+  const toggleMark = () => {
+    if (!cur) return;
+    const id = cur.id, on = marks.has(id);
+    toast.say(t(on ? 'listen.unmarked' : 'listen.marked'));
+    setMarks(m => { const n = new Map(m); if (on) n.delete(id); else n.set(id, 'open'); return n; });
+  };
+  useEffect(() => { if (peek !== null) setMarks(m => (m.has(peek) ? m : new Map(m).set(peek, 'open'))); }, [peek]);
+  const markedIds = useMemo(() => new Set(marks.keys()), [marks]);
 
   // --- Blind: V shows the line being said until playback reaches another one ---
   useEffect(() => { if (peek !== null && peek !== curId) setPeek(null); }, [curId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -361,9 +396,18 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     if (!said.has(sec)) { const way = noteHeard(showKey(record), a); setSaid(m => new Map(m).set(sec, { a, way })); }
   };
   const ask = <HeardAsk record={record} said={said.get(sec)} onAnswer={answer} onShow={p => setPickerShow(p)} />;
+  // The hard lines ticked go into review first (one at a time: a failure leaves the rest for "again", which adds nothing twice).
+  const [adding, setAdding] = useState(false);
+  const [addFail, setAddFail] = useState(false);
   const startDrill = async (picked: Subtitle[]) => {
+    setAdding(true); setAddFail(false);
+    try {
+      for (const l of picked) if (marks.has(l.id)) await addLine({ videoId: record.id, videoName: record.videoFileName, text: l.text, start: l.startTime, end: l.endTime }, 'missed');
+    } catch (e) { console.error(e); setAddFail(true); setAdding(false); return; }
     const cards = await lineCardsFor(record.id, picked).catch(() => [] as ReviewCard[]);
-    if (cards.length) setDrill(cards); else setDrillMissing(true);
+    setAdding(false);
+    if (cards.length < picked.length) setDrillMissing(true); // a star whose write failed has no card
+    if (cards.length) setDrill(cards);
   };
 
   // --- Keys (a dictation round, while open, keeps every key to itself) ---
@@ -387,7 +431,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     // ← / → change lines, like the watch page (⌘ too); ±5 s is the bar's buttons.
     else if (((plain || mod) && e.code === 'ArrowLeft') || matches(e, 'prev')) act = prev;
     else if (((plain || mod) && e.code === 'ArrowRight') || matches(e, 'next')) act = next;
-    else if (plain && e.code === 'KeyS') act = () => { if (cur) { toast.say(t(savedIds.has(cur.id) ? 'watch.unsaved' : 'watch.saved')); toggleSave(cur); } };
+    else if (plain && e.code === 'KeyS') act = toggleMark;
     else if (plain && e.code === 'KeyP') act = () => { setAutoPause(!autoPause); saveWatchPrefs({ autoPause: !autoPause }); };
     else if (plain && e.code === 'KeyC') act = () => changeMode(MODES[(MODES.indexOf(effMode) + 1) % MODES.length]);
     else if (plain && e.code === 'KeyV') act = togglePeek;
@@ -402,7 +446,8 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   }, []);
 
   const inSec = section ? section.subtitles.findIndex(l => l.id === curId) : -1;
-  const sumSaved = summary ? savedItems.filter(l => heard(l.id)) : [];
+  const sumSaved = summary ? savedItems.filter(l => heard(l.id) && !marks.has(l.id)) : [];
+  const sumMissed = summary ? lines.filter(l => marks.has(l.id) && heard(l.id)).map(l => ({ line: l, on: marks.get(l.id) !== 'ok', saved: savedIds.has(l.id) })) : [];
   const onward = summary && !summary.ended && !lastSec;
 
   return (
@@ -415,7 +460,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
           <ArrowLeft size={16} className="shrink-0" /><span className="truncate">{record.podcast ? `${record.podcast.show} · ${record.displayName}` : record.displayName}</span>
         </button>
         <div className="flex-1 flex justify-center">
-          {passes ? <StepBar step={summary ? 4 : pass} onStep={goStep} onHelp={help} />
+          {passes ? <StepBar step={summary ? 3 : pass} onStep={goStep} onHelp={help} />
             : <Seg<WatchSubs> size="sm" value={effMode} onChange={changeMode} options={MODES.map(m => ({ value: m, label: t(`listen.mode_${m}` as DictKey), title: t('listen.modeKey') }))} />}
         </div>
         {rate && <span className="text-[13px] text-mute whitespace-nowrap" title={t('listen.rateTitle')}>{rateText(rate, t)}</span>}
@@ -427,8 +472,8 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
         {failed ? (
           <p className="h-full flex items-center justify-center text-sm text-mute">{t('listen.failed')}</p>
         ) : effMode === 'hide' ? (
-          <ListenBlind image={record.podcast?.image} lines={section?.subtitles ?? []} at={inSec} saved={savedIds} onPick={pick} onPeek={togglePeek}
-            hint={passes ? t(pass === 3 ? 'listen.stepHint_3' : 'listen.stepHint_1') : t('listen.blindHint')}
+          <ListenBlind image={record.podcast?.image} lines={section?.subtitles ?? []} at={inSec} marked={markedIds} onPick={pick} onPeek={togglePeek} onMark={toggleMark}
+            hint={!passes ? t('listen.blindHint') : pass === 1 ? t('listen.stepHint_1') : null}
             peek={peek !== null && cur?.id === peek ? (
               <ReaderLine line={cur} ja={ja} jaVersion={jaVersion} kana={kana} looked={looked} playing saved={savedIds.has(cur.id)} hasTrans={hasAi}
                 transOpen={openT.has(cur.id)} transText={trans?.[indexOf.get(cur.id)!] ?? null} transPending={transBusy}
@@ -438,7 +483,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
           <div ref={scroller} className="h-full overflow-y-auto px-8"
             onWheel={leave} onTouchMove={leave} onPointerDown={e => { if (e.target === e.currentTarget) leave(); }} onPointerMove={() => { if (!follow) armBack(); }}>
             <div className="mx-auto max-w-[820px] py-[30vh]">
-              {passes && pass === 2 && <p className="mb-6 text-sm text-mute">{t('listen.stepHint_2')}</p>}
+              {passes && pass === 2 && <p className="mb-6 text-sm text-mute">{t(queue ? 'listen.stepHint_drill' : 'listen.stepHint_2')}</p>}
               {ja && <div className="mb-4"><JaBanner /></div>}
               {section?.subtitles.map(line => (
                 <ReaderLine key={line.id} line={line} ja={ja} jaVersion={jaVersion} kana={kana} looked={looked}
@@ -450,6 +495,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
           </div>
         )}
         {toast.view}
+        {queue && drillLine && !summary && <DrillBar n={qAt + 1} total={queue.length} onHide={drillHide} onDone={drillDone} />}
         {!follow && effMode !== 'hide' && (
           <Btn className="absolute right-8 bottom-5 shadow-card !bg-page border-line" onClick={() => setFollow(true)}><ArrowDown size={15} />{t('listen.backToLine')}</Btn>
         )}
@@ -471,7 +517,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
       {summary && !pickerShow && (
         <WatchSummary
           title={summary.ended || lastSec ? t('listen.allDone') : t('listen.sectionDone', { n: sec + 1 })}
-          savedEmpty={t('listen.savedEmpty')} saved={sumSaved} looked={words} pickAll={passes}
+          savedEmpty={t('listen.savedEmpty')} saved={sumSaved} missed={sumMissed} busy={adding} looked={words} pickAll={passes}
           top={canAsk && (!passes || pass === 1 || said.has(sec)) ? ask : null}
           words={{
             kept: w => kept.has((w as Word).key),
@@ -480,11 +526,11 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
             onKeepAll: () => words.filter(w => w.fields && !kept.has(w.key)).forEach(keepOne),
           }}
           actions={<>
-            {drillMissing && <span className="mr-auto text-[13px] text-mute">{t('watch.drillMissing')}</span>}
+            {(drillMissing || addFail) && <span className="mr-auto text-[13px] text-mute">{t(addFail ? 'listen.addFail' : 'watch.drillMissing')}</span>}
             <Btn onClick={onPractice}>{t('reader.pickPractice')}</Btn>
             <Btn onClick={() => goSection(sec)}>{t('listen.again')}</Btn>
             {onward && passes && <Btn onClick={() => { goFree(true); setThrough(true); goSection(sec + 1); }} title={t('listen.throughRestTitle')}>{t('listen.throughRest')}</Btn>}
-            {onward && <Btn tone={passes && sumSaved.length ? 'white' : 'accent'} autoFocus={passes && !sumSaved.length} onClick={() => goSection(sec + 1)}>{t('listen.next')}</Btn>}
+            {onward && <Btn tone={passes && (sumSaved.length || sumMissed.length) ? 'white' : 'accent'} autoFocus={passes && !sumSaved.length && !sumMissed.length} onClick={() => goSection(sec + 1)}>{t('listen.next')}</Btn>}
           </>}
           onClose={() => setSummary(null)}
           onJump={line => { setSummary(null); pick(line); }}
@@ -492,7 +538,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
           onDrill={picked => { setDrillMissing(false); startDrill(picked).catch(console.error); }} />
       )}
       {passCard !== null && !summary && !pickerShow && (
-        <PassCard done={passCard} ask={passCard === 1 && canAsk ? ask : null} on={easy ? t(hasSaved ? 'listen.toDrill' : lastSec ? 'listen.done' : 'listen.next') : null}
+        <PassCard hard={hard} ask={canAsk ? ask : null} on={easy ? t(hasSaved ? 'listen.toDrill' : lastSec ? 'listen.done' : 'listen.next') : null}
           onStart={() => startPass(passCard + 1)} onOn={moveOn} onClose={() => setPassCard(null)} />
       )}
       {pickerShow && <PodcastPicker initialShow={pickerShow} onClose={() => setPickerShow(null)} onOpen={r => onOpen?.(r)} />}

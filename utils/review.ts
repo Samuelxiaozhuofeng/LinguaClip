@@ -17,7 +17,7 @@ import type { SavedLine } from '../types';
 export type Deck = 'line' | 'word';
 // Files in <own dir>/clips; `from` = where the file starts in the source video, in seconds.
 export interface Clip { kind: 'video' | 'audio'; file: string; image?: string; from: number }
-export type Reason = 'wrong' | 'peek' | 'breakdown' | 'blur' | 'saved' | 'lookup';
+export type Reason = 'wrong' | 'peek' | 'breakdown' | 'blur' | 'saved' | 'lookup' | 'missed'; // missed: marked hard while listening (pro/ListenPage.tsx)
 
 type Stored<T> = { [K in keyof T]: T[K] extends Date ? number : T[K] extends Date | undefined ? number | undefined : T[K] };
 

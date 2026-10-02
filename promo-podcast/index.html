@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: 'Instrument Sans'; font-weight: 400; src: url(assets/fonts/instrument-sans-latin-400-normal.woff2); }
+      @font-face { font-family: 'Instrument Sans'; font-weight: 500; src: url(assets/fonts/instrument-sans-latin-500-normal.woff2); }
+      @font-face { font-family: 'Instrument Sans'; font-weight: 600; src: url(assets/fonts/instrument-sans-latin-600-normal.woff2); }
+      @font-face { font-family: 'Instrument Sans'; font-weight: 700; src: url(assets/fonts/instrument-sans-latin-700-normal.woff2); }
+      @font-face { font-family: 'Source Serif 4'; font-weight: 400; src: url(assets/fonts/source-serif-4-latin-400-normal.woff2); }
+      @font-face { font-family: 'Source Serif 4'; font-weight: 500; src: url(assets/fonts/source-serif-4-latin-500-normal.woff2); }
+      @font-face { font-family: 'Source Serif 4'; font-weight: 600; src: url(assets/fonts/source-serif-4-latin-600-normal.woff2); }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #FAFAFA; }
+      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #FAFAFA; color: #1C1917;
+        font-family: 'Instrument Sans', 'PingFang SC', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+      .layer { position: absolute; inset: 0; display: none; }
+      .abs { position: absolute; }
+      .serif { font-family: 'Source Serif 4', 'PingFang SC', Georgia, serif; }
+      .head { font-weight: 600; letter-spacing: -0.02em; line-height: 1.12; color: #1C1917; }
+      .red { color: #E8492B; }
+      .sheet { background: #fff; border-radius: 28px; box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 30px 80px rgba(28,25,23,.12); }
+      .pill { display: inline-flex; align-items: center; gap: 10px; border-radius: 999px; }
+      .cursor { position: absolute; left: 0; top: 0; z-index: 50; transform-origin: 6px 4px; filter: drop-shadow(0 3px 6px rgba(0,0,0,.25)); }
+      .click-ring { position: absolute; left: 0; top: 0; width: 60px; height: 60px; border-radius: 50%; border: 3px solid #E8492B; z-index: 49; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="60" data-width="1920" data-height="1080"></div>
+    <script type="module">
+      import { mountAct1 } from './js/act1.js';
+      import { mountListen } from './js/listen.js';
+      import { mountAct3 } from './js/act3.js';
+      import { mountEnd } from './js/end.js';
+      const DURATION = 60;
+      const root = document.getElementById('root');
+      window.__timelines = window.__timelines || {};
+      window.__hf = window.__hf || {}; window.__hf.buildReady = window.__hf.buildReady || {};
+      window.__hf.buildReady.main = (async () => {
+        await document.fonts.load('600 40px "Instrument Sans"'); await document.fonts.load('400 40px "Source Serif 4"');
+        const img = new Image(); img.src = 'assets/img/hook.jpg'; await img.decode();
+        const draws = [mountAct1(root), mountListen(root), mountAct3(root), mountEnd(root)];
+        const draw = t => { for (const d of draws) d(t); };
+        const st = { t: 0 };
+        const tl = gsap.timeline({ paused: true });
+        tl.to(st, { t: DURATION, duration: DURATION, ease: 'none', onUpdate: () => draw(st.t) });
+        window.__timelines.main = tl;
+        window.__draw = draw;
+        draw(0);
+        window.addEventListener('hf-seek', e => draw(e.detail.time));
+      })();
+    </script>
+  </body>
+</html>

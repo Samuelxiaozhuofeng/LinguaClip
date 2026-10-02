@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, PenLine, Plus } from 'lucide-react';
+import { Check, PenLine, Plus, Star } from 'lucide-react';
 import { Subtitle } from '../types';
 import { Btn, Card } from './ui';
 import { useT } from '../utils/i18n';
@@ -26,16 +26,29 @@ const WatchSummary: React.FC<{
   words?: KeepWords;
   actions: React.ReactNode; // the buttons before "dictate"
   top?: React.ReactNode; // above the saved lines (the podcast page asks how much was understood)
-  pickAll?: boolean; // every saved line starts ticked, and with none there's no dictate button (intensive listening's step 4)
+  pickAll?: boolean; // every saved line starts ticked, and with none there's no dictate button (intensive listening's wrap-up)
+  missed?: { line: Subtitle; on: boolean; saved: boolean }[]; // intensive listening's hard lines, above the saved ones (`on`: starts ticked)
+  busy?: boolean; // the dictate button waits (adding the hard lines to review)
   onClose: () => void;
   onJump: (line: Subtitle) => void;
   onWord: (w: Looked) => void;
   onDrill: (lines: Subtitle[]) => void;
-}> = ({ title, savedEmpty, saved, looked, words, actions, top, pickAll, onClose, onJump, onWord, onDrill }) => {
+}> = ({ title, savedEmpty, saved, looked, words, actions, top, pickAll, missed = [], busy, onClose, onJump, onWord, onDrill }) => {
   const t = useT();
-  const [picked, setPicked] = useState<Set<number>>(() => new Set(pickAll ? saved.map(s => s.id) : []));
+  const [picked, setPicked] = useState<Set<number>>(() => new Set([...missed.filter(m => m.on).map(m => m.line.id), ...(pickAll ? saved.map(s => s.id) : [])]));
   const toggle = (id: number) => setPicked(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const chosen = saved.filter(s => picked.has(s.id));
+  const all = [...missed.map(m => m.line), ...saved];
+  const chosen = all.filter(s => picked.has(s.id));
+  const row = (s: Subtitle, star = false) => (
+    <div key={s.id} className="flex items-start gap-3">
+      <input type="checkbox" checked={picked.has(s.id)} onChange={() => toggle(s.id)} aria-label={t('watch.pickLine')} className="mt-1.5 w-4 h-4 accent-accent shrink-0" />
+      <button type="button" onClick={() => onJump(s)} title={t('watch.jumpTo')} className="min-w-0 flex-1 text-left rounded-lg px-2 py-1 -my-1 hover:bg-shade">
+        <span className="font-serif text-[17px] leading-snug">{s.text}</span>
+        {star && <Star size={13} className="inline ml-1.5 -mt-1 text-accent fill-current" />}
+        <span className="ml-2 text-xs text-mute tabular-nums">{formatTimeCode(s.startTime)}</span>
+      </button>
+    </div>
+  );
   const keepable = words ? looked.filter(w => words.can(w) && !words.kept(w)).length : 0;
 
   return (
@@ -46,18 +59,18 @@ const WatchSummary: React.FC<{
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-2 flex flex-col gap-5">
           {top}
-          <section className="flex flex-col gap-2">
-            <p className="text-xs text-mute">{saved.length ? t('watch.savedHead', { n: saved.length }) : savedEmpty}</p>
-            {saved.map(s => (
-              <div key={s.id} className="flex items-start gap-3">
-                <input type="checkbox" checked={picked.has(s.id)} onChange={() => toggle(s.id)} aria-label={t('watch.pickLine')} className="mt-1.5 w-4 h-4 accent-accent shrink-0" />
-                <button type="button" onClick={() => onJump(s)} title={t('watch.jumpTo')} className="min-w-0 flex-1 text-left rounded-lg px-2 py-1 -my-1 hover:bg-shade">
-                  <span className="font-serif text-[17px] leading-snug">{s.text}</span>
-                  <span className="ml-2 text-xs text-mute tabular-nums">{formatTimeCode(s.startTime)}</span>
-                </button>
-              </div>
-            ))}
-          </section>
+          {missed.length > 0 && (
+            <section className="flex flex-col gap-2">
+              <p className="text-xs text-mute">{t('listen.missedHead', { n: missed.length })}</p>
+              {missed.map(m => row(m.line, m.saved))}
+            </section>
+          )}
+          {!(missed.length && !saved.length) && (
+            <section className="flex flex-col gap-2">
+              <p className="text-xs text-mute">{saved.length ? t('watch.savedHead', { n: saved.length }) : savedEmpty}</p>
+              {saved.map(s => row(s))}
+            </section>
+          )}
           {looked.length > 0 && (
             <section className="flex flex-col gap-2">
               <div className="flex items-center gap-3">
@@ -88,8 +101,8 @@ const WatchSummary: React.FC<{
         </div>
         <div className="px-6 pt-4 pb-6 flex flex-wrap items-center justify-end gap-2.5">
           {actions}
-          {!(pickAll && saved.length === 0) && <Btn tone="accent" disabled={chosen.length === 0} onClick={() => onDrill(chosen)} autoFocus title={chosen.length ? undefined : t('watch.pickHint')}>
-            <PenLine size={16} /> {chosen.length ? t('watch.drill', { n: chosen.length }) : t('watch.pickHint')}
+          {!(pickAll && all.length === 0) && <Btn tone="accent" disabled={chosen.length === 0 || busy} onClick={() => onDrill(chosen)} autoFocus title={chosen.length ? undefined : t('watch.pickHint')}>
+            <PenLine size={16} /> {!chosen.length ? t('watch.pickHint') : t(missed.some(m => picked.has(m.line.id)) ? 'listen.drillAdd' : 'watch.drill', { n: chosen.length })}
           </Btn>}
         </div>
       </Card>
