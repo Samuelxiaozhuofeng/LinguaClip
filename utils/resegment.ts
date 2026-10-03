@@ -87,21 +87,43 @@ function readStarts(content: string, count: number): number[] {
   return starts;
 }
 
-// A line the model left too long gets chopped evenly; better a clumsy cut than
-// a 30-word line, and this keeps the ceiling a promise rather than a request.
-function enforceCeiling(starts: number[], count: number): number[] {
+// Where a batch the model failed on gets cut: after every sentence end.
+export function ruleStarts(words: Word[]): number[] {
+  const starts = [0];
+  for (let i = 1; i < words.length; i++) if (ENDS_SENTENCE.test(words[i - 1].w)) starts.push(i);
+  return starts;
+}
+
+const MIN_PIECE = 3;
+const ENDS_CLAUSE = /[,;:—]["'”’)\]]?$/;
+
+// Cut point for words[a..b): after in-sentence punctuation, else at the longest
+// pause, else evenly; each side keeps at least MIN_PIECE words, ties go to the
+// one nearest the middle so a line is not nibbled three words at a time.
+function cutPoint(words: Word[], a: number, b: number): number {
+  const mid = (a + b) / 2;
+  const cands: number[] = [];
+  for (let c = a + MIN_PIECE; c <= b - MIN_PIECE; c++) cands.push(c);
+  const nearest = (cs: number[]) => cs.reduce((x, y) => (Math.abs(y - mid) < Math.abs(x - mid) ? y : x));
+  const punct = cands.filter(c => ENDS_CLAUSE.test(words[c - 1].w));
+  if (punct.length) return nearest(punct);
+  const gap = (c: number) => words[c].from - words[c - 1].to;
+  const longest = Math.max(...cands.map(gap));
+  if (longest > 0) return nearest(cands.filter(c => gap(c) === longest));
+  return a + Math.ceil((b - a) / Math.ceil((b - a) / MAX_WORDS));
+}
+
+// Keeps the ceiling a promise rather than a request: any line over MAX_WORDS is
+// cut again until every piece fits.
+export function enforceCeiling(starts: number[], words: Word[]): number[] {
   const out: number[] = [];
-  for (let i = 0; i < starts.length; i++) {
-    const a = starts[i];
-    const b = i + 1 < starts.length ? starts[i + 1] : count;
-    out.push(a);
-    const len = b - a;
-    if (len > MAX_WORDS) {
-      const pieces = Math.ceil(len / MAX_WORDS);
-      const size = Math.ceil(len / pieces);
-      for (let p = a + size; p < b; p += size) out.push(p);
-    }
-  }
+  const split = (a: number, b: number) => {
+    if (b - a <= MAX_WORDS) { out.push(a); return; }
+    const c = cutPoint(words, a, b);
+    split(a, c);
+    split(c, b);
+  };
+  starts.forEach((a, i) => split(a, i + 1 < starts.length ? starts[i + 1] : words.length));
   return out;
 }
 
@@ -167,10 +189,16 @@ export function mostlyCjk(words: Word[]): boolean {
   return words.filter(w => CJK.test(w.w)).length * 2 > words.length;
 }
 
-// Returns null whenever anything at all goes wrong; the caller then keeps
-// whisper's own line breaks, which are usable, just longer.
+// Returns null only when there is no AI, nothing to cut, CJK, or a bug; the
+// caller then keeps whisper's own line breaks. A batch the model fails on is
+// cut at sentence ends instead, so one bad call no longer sinks the rest.
 export async function resegment(words: Word[]): Promise<string | null> {
-  if (!canResegment() || words.length === 0 || mostlyCjk(words)) return null;
+  if (words.length === 0 || mostlyCjk(words)) return null;
+  // No AI configured: same sentence-end cut + ceiling the failed batches get.
+  if (!canResegment()) {
+    const srt = buildSrt(words, enforceCeiling(ruleStarts(words), words));
+    return srt.trim() ? srt : null;
+  }
   try {
     const groups = batches(words);
     // An hour of speech is a dozen-odd calls at ~12s each; run them side by
@@ -178,15 +206,26 @@ export async function resegment(words: Word[]): Promise<string | null> {
     const offsets: number[] = [];
     let running = 0;
     for (const group of groups) { offsets.push(running); running += group.length; }
-    // One failed batch sinks the whole re-cut, so the rest stop asking.
-    let failed = false;
+    // Two failures in a row and batches not yet sent skip the AI. braked is
+    // sticky so a slow success landing later cannot lift the brake; calls
+    // already in flight are left to finish.
+    let streak = 0;
+    let braked = false;
     const results = await Promise.all(groups.map(g => withAiSlot('segment', async () => {
-      if (failed) return [];
-      try { return await ask(g); } catch (err) { failed = true; throw err; }
+      if (braked) return ruleStarts(g);
+      try {
+        const starts = await ask(g);
+        streak = 0;
+        return starts;
+      } catch (err) {
+        console.error('resegment batch failed, cutting at sentence ends:', err);
+        if (++streak >= 2) braked = true;
+        return ruleStarts(g);
+      }
     })));
     const starts: number[] = [];
     results.forEach((local, i) => { for (const n of local) starts.push(offsets[i] + n); });
-    const srt = buildSrt(words, enforceCeiling(starts, words.length));
+    const srt = buildSrt(words, enforceCeiling(starts, words));
     return srt.trim() ? srt : null;
   } catch (err) {
     console.error('resegment failed, keeping whisper line breaks:', err);
