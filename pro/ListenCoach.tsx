@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, Eye, EyeOff, Flag, Headphones } from 'lucide-react';
 import type { Subtitle, VideoRecord } from '../types';
 import { Btn, Card } from '../components/ui';
 import { t as tr, useT, type DictKey } from '../utils/i18n';
-import { recordRate, showLang, suggestShows, type Heard, type Rate, type Way } from './listenLevel';
+import { noteHeard, recordRate, showKey, showLang, suggestShows, type Heard, type Rate, type Way } from './listenLevel';
 import type { Pick } from './podcastShows';
 
 // The listening page's coaching: the three
@@ -18,9 +18,9 @@ export const podcastRate = (r: VideoRecord): string | null => { const x = record
 // from there; a hard one stands taller), "mark hard" (S), and the one line asked for with V,
 // shown until playback moves to another.
 export const ListenBlind: React.FC<{
-  image?: string; lines: Subtitle[]; at: number; marked: Set<number>; peek: React.ReactNode | null; hint: string | null;
+  image?: string; lines: Subtitle[]; at: number; marked: Set<number>; peek: React.ReactNode | null; hint: string | null; drill?: boolean;
   onPick: (l: Subtitle) => void; onPeek: () => void; onMark: () => void;
-}> = ({ image, lines, at, marked, peek, hint, onPick, onPeek, onMark }) => {
+}> = ({ image, lines, at, marked, peek, hint, drill, onPick, onPeek, onMark }) => {
   const t = useT();
   return (
     <div className="h-full overflow-y-auto flex flex-col items-center justify-center gap-6 px-8 py-6 text-center">
@@ -38,8 +38,8 @@ export const ListenBlind: React.FC<{
         ))}
       </div>
       <div className="flex gap-2">
-        <Btn size="sm" tone={peek ? 'accent-soft' : 'white'} aria-pressed={!!peek} onClick={e => { e.currentTarget.blur(); onPeek(); }} title={t('listen.peekTitle')}>
-          {peek ? <EyeOff size={14} /> : <Eye size={14} />}{peek ? t('listen.peekHide') : t('listen.peek')}
+        <Btn size="sm" tone={peek ? 'accent-soft' : 'white'} aria-pressed={!!peek} onClick={e => { e.currentTarget.blur(); onPeek(); }} title={drill ? undefined : t('listen.peekTitle')}>
+          {peek ? <EyeOff size={14} /> : <Eye size={14} />}{drill ? t('listen.drillShow') : peek ? t('listen.peekHide') : t('listen.peek')}
         </Btn>
         {at >= 0 && (
           <Btn size="sm" tone={marked.has(lines[at].id) ? 'accent-soft' : 'white'} aria-pressed={marked.has(lines[at].id)} onClick={e => { e.currentTarget.blur(); onMark(); }} title={t('listen.markTitle')}>
@@ -58,6 +58,17 @@ export const ListenBlind: React.FC<{
 // in a row for this show bring the hint and up to two recommended shows (a click opens that
 // show's episodes).
 export type Said = { a: Heard; way: Way | null };
+// The page's side of it: the answers, per section this visit, and the question itself — asked only
+// while it tells something: after a blind listen of the section. Answered once per section.
+export function useHeardAsk(record: VideoRecord, sec: number, blind: boolean, onShow: (p: Pick) => void) {
+  const [said, setSaid] = useState<Map<number, Said>>(new Map());
+  const blindSecs = useRef(new Set<number>());
+  useEffect(() => { if (blind) blindSecs.current.add(sec); }, [blind, sec]);
+  const answer = (a: Heard) => { // noted outside the state update: StrictMode runs those twice
+    if (!said.has(sec)) { const way = noteHeard(showKey(record), a); setSaid(m => new Map(m).set(sec, { a, way })); }
+  };
+  return { said, canAsk: blindSecs.current.has(sec), ask: <HeardAsk record={record} said={said.get(sec)} onAnswer={answer} onShow={onShow} /> };
+}
 export const HeardAsk: React.FC<{ record: VideoRecord; said?: Said; onAnswer: (a: Heard) => void; onShow: (p: Pick) => void }> = ({ record, said, onAnswer, onShow }) => {
   const t = useT();
   const answer = (a: Heard) => { if (!said) onAnswer(a); };
@@ -167,16 +178,15 @@ export const IntroCard: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   );
 };
 
-// Step 2 on the hard lines: which one this is, and — stopped at its end — again without the
-// text, or how it went (either goes on to the next).
-export const DrillBar: React.FC<{ n: number; total: number; onHide: () => void; onDone: (ok: boolean) => void }> = ({ n, total, onHide, onDone }) => {
+// Step 2 on the hard lines: which one this is, which blind play of it, "show the text" and
+// "got it, next" — once the text is up, just "next".
+export const DrillBar: React.FC<{ n: number; total: number; play: number; tries: number; shown: boolean; onShow: () => void; onNext: () => void }> = ({ n, total, play, tries, shown, onShow, onNext }) => {
   const t = useT();
   return (
     <div className="absolute left-1/2 -translate-x-1/2 bottom-5 z-10 flex items-center gap-2 pl-4 pr-2 py-2 rounded-full bg-page border border-line shadow-card">
-      <span className="text-[13px] text-mute whitespace-nowrap tabular-nums mr-1">{t('listen.drillOf', { n, total })}</span>
-      <Btn size="sm" onClick={e => { e.currentTarget.blur(); onHide(); }}><EyeOff size={14} />{t('listen.drillHide')}</Btn>
-      <Btn size="sm" onClick={e => { e.currentTarget.blur(); onDone(false); }}>{t('listen.drillMore')}</Btn>
-      <Btn size="sm" tone="accent" onClick={e => { e.currentTarget.blur(); onDone(true); }}>{t('listen.drillOk')}</Btn>
+      <span className="text-[13px] text-mute whitespace-nowrap tabular-nums mr-1">{t('listen.drillOf', { n, total })}{!shown && ` · ${t('listen.drillPlay', { n: play, total: tries })}`}</span>
+      {!shown && <Btn size="sm" onClick={e => { e.currentTarget.blur(); onShow(); }}><Eye size={14} />{t('listen.drillShow')}</Btn>}
+      <Btn size="sm" tone="accent" onClick={e => { e.currentTarget.blur(); onNext(); }}>{t(shown ? 'listen.drillNext' : 'listen.drillGot')}</Btn>
     </div>
   );
 };

@@ -15,9 +15,9 @@ const ListenBar: React.FC<{
   speed: number; onSpeed: (s: number) => void;
   loop: boolean; onLoop: () => void;
   autoPause: boolean; onAutoPause: () => void;
-  extra: React.ReactNode;
+  extra: React.ReactNode; keys?: string;
   onSeek: (s: number) => void; onPrev: () => void; onNext: () => void; onBack: () => void; onFwd: () => void; onToggle: () => void;
-}> = ({ time, duration, playing, band, ticks, speed, onSpeed, loop, onLoop, autoPause, onAutoPause, extra, onSeek, onPrev, onNext, onBack, onFwd, onToggle }) => {
+}> = ({ time, duration, playing, band, ticks, speed, onSpeed, loop, onLoop, autoPause, onAutoPause, extra, keys, onSeek, onPrev, onNext, onBack, onFwd, onToggle }) => {
   const t = useT();
   const scrub = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.type === 'pointermove' && !e.buttons) return;
@@ -59,7 +59,7 @@ const ListenBar: React.FC<{
           <Btn square flat onClick={onNext} title={t('transport.nextLine')} aria-label={t('transport.nextLine')} className="!text-ink"><SkipForward size={18} /></Btn>
         </div>
         <div className="flex-1 min-w-0 flex justify-end">
-          <Stamp className="truncate">{t('listen.keys')}</Stamp>
+          <Stamp className="truncate">{keys ?? t('listen.keys')}</Stamp>
         </div>
       </div>
     </footer>

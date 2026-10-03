@@ -161,7 +161,9 @@ export type ReadBy = 'all' | 'section';
 export type ReaderSize = 's' | 'm' | 'l'; // the reader's video column (docs/reader.md「右侧视频大小」)
 // listenSubs / podLang / listenThrough: the podcast page's (docs/private/podcast.md) — how much text shows, which
 // language's shows are listed, whether a section's end plays on (free listening). listenIntro: the four-step card was seen.
-export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean; pin: boolean; list: boolean; listPct: number; readBy: ReadBy; kana: boolean; autoClip: boolean; listenSubs: WatchSubs; podLang: string; listenThrough: boolean; listenIntro: boolean; readerSize: ReaderSize };
+// listenTries: step 2 plays each hard line this many times blind before showing its text.
+export type WatchPrefs = { subs: WatchSubs; autoPause: boolean; chosen: boolean; pin: boolean; list: boolean; listPct: number; readBy: ReadBy; kana: boolean; autoClip: boolean; listenSubs: WatchSubs; podLang: string; listenThrough: boolean; listenIntro: boolean; listenTries: number; readerSize: ReaderSize };
+export const LISTEN_TRIES = [2, 3, 4, 5];
 export const LIST_PCT = { min: 20, max: 50, def: 30 };
 
 export const getWatchPrefs = (): WatchPrefs => {
@@ -170,11 +172,11 @@ export const getWatchPrefs = (): WatchPrefs => {
     const pct = typeof v.listPct === 'number' && Number.isFinite(v.listPct) ? Math.min(LIST_PCT.max, Math.max(LIST_PCT.min, v.listPct)) : LIST_PCT.def;
     return {
       subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen === true, pin: v.pin === true, list: v.list === true, listPct: pct, readBy: v.readBy === 'section' ? 'section' : 'all', kana: v.kana !== false, autoClip: v.autoClip === true,
-      listenSubs: v.listenSubs === 'blur' || v.listenSubs === 'show' ? 'show' : 'hide', podLang: typeof v.podLang === 'string' ? v.podLang : '', listenThrough: v.listenThrough === true, listenIntro: v.listenIntro === true,
+      listenSubs: v.listenSubs === 'blur' || v.listenSubs === 'show' ? 'show' : 'hide', podLang: typeof v.podLang === 'string' ? v.podLang : '', listenThrough: v.listenThrough === true, listenIntro: v.listenIntro === true, listenTries: LISTEN_TRIES.includes(v.listenTries) ? v.listenTries : 3,
       readerSize: v.readerSize === 's' || v.readerSize === 'l' ? v.readerSize : 'm',
     };
   } catch {
-    return { subs: 'show', autoPause: false, chosen: false, pin: false, list: false, listPct: LIST_PCT.def, readBy: 'all', kana: true, autoClip: false, listenSubs: 'hide', podLang: '', listenThrough: false, listenIntro: false, readerSize: 'm' };
+    return { subs: 'show', autoPause: false, chosen: false, pin: false, list: false, listPct: LIST_PCT.def, readBy: 'all', kana: true, autoClip: false, listenSubs: 'hide', podLang: '', listenThrough: false, listenIntro: false, listenTries: 3, readerSize: 'm' };
   }
 };
 
