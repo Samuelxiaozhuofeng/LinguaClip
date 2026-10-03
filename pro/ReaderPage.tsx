@@ -11,7 +11,7 @@ import { JaBanner } from '../components/JaSetup';
 import { useClip } from '../components/ReviewSession';
 import { useLookup, aroundOf } from '../hooks/useLookup';
 import { lineAt, parseSRT } from '../utils/srtParser';
-import { buildSections } from '../utils/sections';
+import { buildSections, sectionLengthOf } from '../utils/sections';
 import { detectLang } from '../utils/dictionary';
 import { useJaVersion } from '../utils/japanese';
 import { settleSplits } from '../utils/jaSegments';
@@ -21,7 +21,7 @@ import type { DefinitionState } from '../components/DefinitionPanel';
 import { getWordTokens, tokenizeText } from '../utils/textTokenizer';
 import { canCloze } from '../utils/aiDrills';
 import { getTransJob, prepareTrans, subscribeTrans } from './transPrep';
-import { formatTimeCode, getAudioPaddingConfig, getPracticeConfig, getWatchPrefs, ReadBy, ReaderSize, saveWatchPrefs } from '../utils/storage';
+import { formatTimeCode, getAudioPaddingConfig, getWatchPrefs, ReadBy, ReaderSize, saveWatchPrefs } from '../utils/storage';
 import { IS_WINDOWS } from '../utils/platform';
 import { getLang, useT } from '../utils/i18n';
 
@@ -58,7 +58,7 @@ type Clip = { kind: 'line' | 'from' | 'section'; view: boolean; from: number; to
 const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: number) => void }> = ({ record, by, onExit }) => {
   const t = useT();
   const lines = useMemo(() => [...parseSRT(record.subtitleText)].sort((a, b) => a.startTime - b.startTime), [record.subtitleText]);
-  const sections = useMemo(() => buildSections(lines, getPracticeConfig().sectionLength), [lines]);
+  const sections = useMemo(() => buildSections(lines, sectionLengthOf(record)), [lines]);
   const indexOf = useMemo(() => new Map(lines.map((l, i) => [l.id, i])), [lines]);
   // Where reading stopped last time: the line to scroll to, and (by section) its section.
   const [resumeAt] = useState(() => {

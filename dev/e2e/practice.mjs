@@ -29,7 +29,8 @@ const dictate = async ({ page, see }, text) => {
 export default [
   {
     name: '添加视频 → 首页出现卡片',
-    run: async ({ page, see }) => {
+    run: async ({ page, see, nav }) => {
+      await nav('视频'); // an empty library opens on the podcast page (docs/starter.md)
       await page.getByRole('button', { name: '添加视频' }).first().click();
       const add = page.getByRole('dialog', { name: '添加视频' });
       await add.getByRole('button', { name: '选择本机视频' }).click();

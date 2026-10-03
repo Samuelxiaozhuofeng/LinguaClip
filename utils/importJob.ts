@@ -197,9 +197,10 @@ export function startLocalImport(path: string, lang: string, opts: LocalImportOp
   return startImport(path, lang, false, 1080, opts);
 }
 
-// Resolves once the card is saved (the import itself goes on in the background).
-export function startPodcastImport(episode: PodcastImport): Promise<void> {
-  return startImport(episode.audio, episode.lang, true, 1080, {}, episode);
+// Resolves once the card is saved (the import itself goes on in the background). `subs`: a
+// starter episode's own transcript (docs/starter.md) — downloaded only, nothing transcribed.
+export function startPodcastImport(episode: PodcastImport, subs?: LocalImportOptions['subs']): Promise<void> {
+  return startImport(episode.audio, episode.lang, true, 1080, subs ? { subs } : {}, episode);
 }
 
 // A local video whose sound could not be read: converting it to a plain mp4

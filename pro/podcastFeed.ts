@@ -95,3 +95,36 @@ export function parseFeed(xml: string, feed: string): Show {
   episodes.sort((a, b) => (b.date ?? 0) - (a.date ?? 0));
   return { feed, title: text(kid(channel, 'title')) || feed, image: /^https?:\/\//i.test(image) ? image : undefined, lang: asrLang(text(kid(channel, 'language'))), episodes };
 }
+
+// The ready-made starter episodes' list (docs/starter.md; shown by Starter.tsx).
+export type StarterItem = {
+  id: string; version: number; lang: string; level: 1 | 2 | 3;
+  title: string; show: string; about: string; seconds: number; bytes: number;
+  // srtFor: the same lines written for one UI language (Japanese: kanji for Chinese readers, kana for English ones); else srt.
+  audio: string; srt: string; srtFor: { zh?: string; en?: string }; trans: { zh?: string; en?: string }; credit: string;
+};
+
+const https = (u: unknown): u is string => typeof u === 'string' && /^https:\/\//.test(u);
+const str = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
+
+// The list as it came over the network: anything malformed is dropped, item by item.
+export function parseStarter(raw: unknown): StarterItem[] {
+  const items = (raw as { v?: unknown; items?: unknown })?.v === 1 ? (raw as { items: unknown }).items : null;
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((it): StarterItem[] => {
+    const x = it as Record<string, any>;
+    if (!str(x?.id) || !Number.isInteger(x.version) || !str(x.lang) || ![1, 2, 3].includes(x.level)) return [];
+    if (!str(x.title) || !str(x.show) || !https(x.audio) || !https(x.srt) || !str(x.credit)) return [];
+    const trans: StarterItem['trans'] = {};
+    if (https(x.trans?.zh)) trans.zh = x.trans.zh;
+    if (https(x.trans?.en)) trans.en = x.trans.en;
+    const srtFor: StarterItem['srtFor'] = {};
+    if (https(x.srtFor?.zh)) srtFor.zh = x.srtFor.zh;
+    if (https(x.srtFor?.en)) srtFor.en = x.srtFor.en;
+    return [{
+      id: x.id, version: x.version, lang: x.lang, level: x.level, title: x.title, show: x.show,
+      about: str(x.about) ? x.about : '', seconds: Number(x.seconds) || 0, bytes: Number(x.bytes) || 0,
+      audio: x.audio, srt: x.srt, srtFor, trans, credit: x.credit,
+    }];
+  });
+}

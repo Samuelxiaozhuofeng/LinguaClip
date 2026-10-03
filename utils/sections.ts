@@ -1,4 +1,12 @@
-import { Subtitle, VideoSection } from '../types';
+import { Subtitle, VideoRecord, VideoSection } from '../types';
+import { getPracticeConfig } from './storage';
+
+// The ready-made starter episodes (docs/starter.md) are cut into 2-minute sections, so a
+// first try reaches its summary soon; everything else follows Settings. Every caller of
+// buildSections takes its length from here, so the card and the page agree.
+export const STARTER_FEED = 'linguaclip:starter';
+export const sectionLengthOf = (r?: Pick<VideoRecord, 'podcast'> | null): number =>
+  r?.podcast?.feed === STARTER_FEED ? 2 : getPracticeConfig().sectionLength;
 
 // Cutting a video into practice-sized chunks. Lives on its own because both the
 // practice page (which practises a section) and the home shelf (which shows

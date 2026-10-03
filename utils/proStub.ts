@@ -19,5 +19,7 @@ export const podcastRate = (_r: VideoRecord): string | null => null; // an episo
 export const ProFooter: React.FC | null = null;
 // Activation / manage dialogs + license check at launch, mounted once at the root.
 export const ProHost: React.FC | null = null;
+// The ready-made starter episodes (docs/starter.md): lands a user with no videos on the podcast page, opens a finished download.
+export const StarterHost: React.FC<{ here: boolean; onLand: () => void; onOpen: (r: VideoRecord) => void }> | null = null;
 // No self-update: it would swap a self-built copy for the official build.
 export const UPDATES = false;

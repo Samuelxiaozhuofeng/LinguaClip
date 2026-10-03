@@ -49,6 +49,7 @@ export default [
     run: async (ctx) => {
       const { page, see, gone, nav } = ctx;
       // Add the clip, bookmark its first line, move on to line 2.
+      await nav('视频'); // an empty library opens on the podcast page (docs/starter.md)
       await page.getByRole('button', { name: '添加视频' }).first().click();
       const add = page.getByRole('dialog', { name: '添加视频' });
       await add.getByRole('button', { name: '选择本机视频' }).click();

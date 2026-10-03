@@ -4,7 +4,7 @@ import { LearningMode, VideoRecord } from '../types';
 import * as VideoStorage from '../utils/videoStorage';
 import { forgetCustomPos, forgetWatchPos, formatTimeCode, getCustomPos, getLastWay, getPracticeConfig, getWatchPos, setLastWay } from '../utils/storage';
 import { parseSRT } from '../utils/srtParser';
-import { buildSections, sectionAt } from '../utils/sections';
+import { buildSections, sectionAt, sectionLengthOf } from '../utils/sections';
 import { fileNameFromPath, isAudioRecord, isVideoFile, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
 import { cancelImport, canConvertRetry, formatImportError, isCookieError, openYouTubeLogin, retryImport, subscribeImportJobs } from '../utils/importJob';
 import { Btn, Menu, MenuItem, inputCls } from './ui';
@@ -89,7 +89,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
         const way = getLastWay(v.id);
         const customSec = way === 'custom' ? getCustomPos(v.id) : way === 'watch' ? getWatchPos(v.id) : 0;
         const end = subs[subs.length - 1]?.endTime ?? 0;
-        const sections = buildSections(subs, sectionLength);
+        const sections = buildSections(subs, sectionLengthOf(v));
         if (sections.length === 0) continue;
         if (v.podcast) { // where intensive listening is (the section it starts again from), not dictation
           byId.set(v.id, { part: sectionAt(sections, getWatchPos(v.id)), parts: sections.length, line: 0, lines: 0, listen: true });

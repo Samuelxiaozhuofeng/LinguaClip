@@ -10,7 +10,7 @@ import { JaBanner } from '../components/JaSetup';
 import { useSavedLines } from '../hooks/useSavedLines';
 import { useLookup, aroundOf } from '../hooks/useLookup';
 import { lineAt, parseSRT } from '../utils/srtParser';
-import { buildSections, sectionAt, sectionStart } from '../utils/sections';
+import { buildSections, sectionAt, sectionLengthOf, sectionStart } from '../utils/sections';
 import { detectLang } from '../utils/dictionary';
 import { useJaVersion } from '../utils/japanese';
 import { settleSplits } from '../utils/jaSegments';
@@ -18,7 +18,7 @@ import { addLine, addWord, lineCardsFor, type ReviewCard } from '../utils/review
 import { addLooked, getLooked, lookedKey, useLookedVersion } from '../utils/readLooked';
 import { canCloze } from '../utils/aiDrills';
 import { videoSrcFromPath } from '../utils/desktop';
-import { getPracticeConfig, getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos, type WatchSubs } from '../utils/storage';
+import { getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos, type WatchSubs } from '../utils/storage';
 import { LOOP_GAP_MS, loopMore, setLoopOn, useLoop } from '../utils/loop';
 import { matches } from '../utils/shortcuts';
 import { IS_WINDOWS } from '../utils/platform';
@@ -52,7 +52,7 @@ type Mark = 'open' | 'ok' | 'more'; // a hard line: not worked on yet / got it n
 const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice: () => void; onOpen?: (r: VideoRecord) => void }> = ({ record, onExit, onPractice, onOpen }) => {
   const t = useT();
   const lines = useMemo(() => [...parseSRT(record.subtitleText)].sort((a, b) => a.startTime - b.startTime), [record.subtitleText]);
-  const sections = useMemo(() => buildSections(lines, getPracticeConfig().sectionLength), [lines]);
+  const sections = useMemo(() => buildSections(lines, sectionLengthOf(record)), [lines]);
   const sectionOf = useMemo(() => new Map(sections.flatMap((s, i) => s.subtitles.map(l => [l.id, i] as const))), [sections]);
   const indexOf = useMemo(() => new Map(lines.map((l, i) => [l.id, i])), [lines]);
   const dictLang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
@@ -292,12 +292,13 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const saveRef = useRef(toggleSave);
   saveRef.current = toggleSave;
   const onSave = useCallback((line: Subtitle) => saveRef.current(line), []);
-  const hasAi = canCloze();
+  const [hasTrans, setHasTrans] = useState(canCloze); // no AI: still there when translations came ready-made (docs/starter.md)
   const toast = useToast(); // S has no star under the finger: say what it did
   const [trans, setTrans] = useState<(string | null)[] | null>(null);
   const [transBusy, setTransBusy] = useState(false);
   const [openT, setOpenT] = useState<Set<number>>(new Set());
   useEffect(() => subscribeTrans(() => { const job = getTransJob(record.id); if (job) setTrans(job.lines); }), [record.id]);
+  useEffect(() => { if (!hasTrans) prepareTrans(record.id, lines.map(l => l.text), getLang() === 'en' ? 'en' : 'zh').then(l => { if (l.some(Boolean)) { setTrans(l); setHasTrans(true); } }).catch(() => {}); }, [record.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const onTrans = useCallback((line: Subtitle) => {
     if (!transBusy && !(trans && trans.every(Boolean))) {
       setTransBusy(true);
@@ -406,11 +407,23 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   // The hard lines ticked go into review first (one at a time: a failure leaves the rest for "again", which adds nothing twice).
   const [adding, setAdding] = useState(false);
   const [addFail, setAddFail] = useState(false);
-  const startDrill = async (picked: Subtitle[]) => {
+  const addMissed = async (picked: Subtitle[]) => {
     setAdding(true); setAddFail(false);
     try {
       for (const l of picked) if (marks.has(l.id)) await addLine({ videoId: record.id, videoName: record.videoFileName, text: l.text, start: l.startTime, end: l.endTime }, 'missed');
-    } catch (e) { console.error(e); setAddFail(true); setAdding(false); return; }
+      return true;
+    } catch (e) { console.error(e); setAddFail(true); setAdding(false); return false; }
+  };
+  // "Save and stop here": the ticked hard lines into review, and next visit starts at the next section.
+  const keepEnd = async (picked: Subtitle[]) => {
+    if (!(await addMissed(picked))) return;
+    const to = lastSec ? 0 : sectionStart(sections[sec + 1]);
+    if (audio.current) { audio.current.pause(); audio.current.currentTime = to; } // leaving saves where the audio is
+    setWatchPos(record.id, to);
+    onExit();
+  };
+  const startDrill = async (picked: Subtitle[]) => {
+    if (!(await addMissed(picked))) return;
     const cards = await lineCardsFor(record.id, picked).catch(() => [] as ReviewCard[]);
     setAdding(false);
     if (cards.length < picked.length) setDrillMissing(true); // a star whose write failed has no card
@@ -483,7 +496,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
           <ListenBlind image={record.podcast?.image} lines={section?.subtitles ?? []} at={inSec} marked={markedIds} onPick={pick} onPeek={togglePeek} onMark={toggleMark}
             hint={!passes ? t('listen.blindHint') : pass === 1 ? t('listen.stepHint_1') : null}
             peek={peek !== null && cur?.id === peek ? (
-              <ReaderLine line={cur} ja={ja} jaVersion={jaVersion} kana={kana} looked={looked} playing saved={savedIds.has(cur.id)} hasTrans={hasAi}
+              <ReaderLine line={cur} ja={ja} jaVersion={jaVersion} kana={kana} looked={looked} playing saved={savedIds.has(cur.id)} hasTrans={hasTrans}
                 transOpen={openT.has(cur.id)} transText={trans?.[indexOf.get(cur.id)!] ?? null} transPending={transBusy}
                 onWord={onWord} onListen={pick} onView={pick} onTrans={onTrans} onSave={onSave} onPick={pick} />
             ) : null} />
@@ -495,7 +508,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
               {ja && <div className="mb-4"><JaBanner /></div>}
               {section?.subtitles.map(line => (
                 <ReaderLine key={line.id} line={line} ja={ja} jaVersion={jaVersion} kana={kana} looked={looked}
-                  playing={line.id === curId} saved={savedIds.has(line.id)} hasTrans={hasAi} transOpen={openT.has(line.id)}
+                  playing={line.id === curId} saved={savedIds.has(line.id)} hasTrans={hasTrans} transOpen={openT.has(line.id)}
                   transText={trans?.[indexOf.get(line.id)!] ?? null} transPending={transBusy}
                   onWord={onWord} onListen={pick} onView={pick} onTrans={onTrans} onSave={onSave} onPick={pick} />
               ))}
@@ -543,7 +556,8 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
           onClose={() => setSummary(null)}
           onJump={line => { setSummary(null); pick(line); }}
           onWord={w => { lookLine.current = w.line; lookup(w.word, w.line.text, aroundOf(lines, lines.indexOf(w.line))); }}
-          onDrill={picked => { setDrillMissing(false); startDrill(picked).catch(console.error); }} />
+          onDrill={picked => { setDrillMissing(false); startDrill(picked).catch(console.error); }}
+          onKeep={picked => { keepEnd(picked).catch(console.error); }} />
       )}
       {passCard !== null && !summary && !pickerShow && (
         <PassCard hard={hard} ask={canAsk ? ask : null} on={easy ? t(hasSaved ? 'listen.toDrill' : lastSec ? 'listen.done' : 'listen.next') : null}

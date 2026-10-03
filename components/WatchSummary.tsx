@@ -31,11 +31,12 @@ const WatchSummary: React.FC<{
   pickAll?: boolean; // every saved line starts ticked, and with none there's no dictate button (intensive listening's wrap-up)
   missed?: { line: Subtitle; on: boolean; saved: boolean }[]; // intensive listening's hard lines, above the saved ones (`on`: starts ticked)
   busy?: boolean; // the dictate button waits (adding the hard lines to review)
+  onKeep?: (lines: Subtitle[]) => void; // intensive listening's "save and stop here": the ticked lines kept, no dictation
   onClose: () => void;
   onJump: (line: Subtitle) => void;
   onWord: (w: Looked) => void;
   onDrill: (lines: Subtitle[]) => void;
-}> = ({ title, savedEmpty, saved, looked, words, actions, top, savedHead, tick = 0, pickAll, missed = [], busy, onClose, onJump, onWord, onDrill }) => {
+}> = ({ title, savedEmpty, saved, looked, words, actions, top, savedHead, tick = 0, pickAll, missed = [], busy, onKeep, onClose, onJump, onWord, onDrill }) => {
   const t = useT();
   const [picked, setPicked] = useState<Set<number>>(() => new Set([...missed.filter(m => m.on).map(m => m.line.id), ...saved.slice(0, pickAll ? saved.length : tick).map(s => s.id)]));
   const toggle = (id: number) => setPicked(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -103,6 +104,7 @@ const WatchSummary: React.FC<{
         </div>
         <div className="px-6 pt-4 pb-6 flex flex-wrap items-center justify-end gap-2.5">
           {actions}
+          {onKeep && <Btn disabled={busy} onClick={() => onKeep(chosen)}>{t(chosen.length ? 'listen.keepEnd' : 'listen.end')}</Btn>}
           {!(pickAll && all.length === 0) && <Btn tone="accent" disabled={chosen.length === 0 || busy} onClick={() => onDrill(chosen)} autoFocus title={chosen.length ? undefined : t('watch.pickHint')}>
             <PenLine size={16} /> {!chosen.length ? t('watch.pickHint') : t(missed.some(m => picked.has(m.line.id)) ? 'listen.drillAdd' : 'watch.drill', { n: chosen.length })}
           </Btn>}

@@ -7,7 +7,7 @@ import Shell from './components/Shell';
 import Studio from './components/Studio';
 import WatchPage from './components/WatchPage';
 import CustomPanel, { PanelChoice, nextPick, paceOf, resumeChoice } from './components/CustomPanel';
-import { Listen, PodcastPicker, ProHost, Reader, podcastRate } from '@pro';
+import { Listen, PodcastPicker, ProHost, Reader, StarterHost, podcastRate } from '@pro';
 import type { ReadBy } from './utils/storage';
 import { DialogHost, dialog } from './components/Dialog';
 import { UpdateDialog } from './components/UpdateUI';
@@ -491,6 +491,8 @@ export default function App() {
           onCancel={() => setPanel(null)} onStart={choice => { setPanel(null); openPractice(panel.record, panel.lm, choice); }} />
       )}
       {ProHost && <ProHost />}
+      {StarterHost && <StarterHost here={appState === AppState.PODCASTS} onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)}
+        onLand={() => setAppState(s => (s === AppState.UPLOAD ? AppState.PODCASTS : s))} />}
       <UpdateDialog />
       <DialogHost />
     </>

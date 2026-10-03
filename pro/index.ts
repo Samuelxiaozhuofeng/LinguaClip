@@ -14,5 +14,6 @@ export const Listen: ProListen | null = ListenPage;
 export { podcastRate } from './ListenCoach';
 export { default as ProFooter } from './ProFooter';
 export { ProHost } from './LicenseDialogs';
+export { StarterHost } from './Starter';
 // The official build updates itself from linguaclipapp.com (docs/update.md).
 export const UPDATES = true;

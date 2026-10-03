@@ -16,6 +16,10 @@ export type TransCacheFile = { v: 1; srt: string; to: TransTo; lines: (string | 
 
 const srtOf = (texts: string[]) => hashSrt(texts.join('\n'));
 
+// Translations that came ready-made (a starter episode, docs/starter.md), saved as if asked for.
+export const writeTransCache = (recordId: string, texts: string[], to: TransTo, lines: (string | null)[]): Promise<void> =>
+  writeCacheText(recordId, 'trans', JSON.stringify({ v: 1, srt: srtOf(texts), to, lines } satisfies TransCacheFile));
+
 // Throws when the payload is not a lines array of the right length (batch retry).
 export function parseTransResponse(content: string, n: number): (string | null)[] {
   const lines = extractLines(content);

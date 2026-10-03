@@ -111,4 +111,18 @@ assert.deepEqual(P.suggestShows('easier', 'x', null), [], 'unknown language: non
 assert.equal(P.showLang({ id: 'x', podcast: { feed: cbs.feed } }), 'es', 'a listed show: its own language');
 assert.equal(P.showLang({ id: 'y', subtitleText: srt }), 'en', 'pasted: guessed from the transcript');
 
+// --- the starter list (from our site: malformed items are dropped one by one) ---
+const item = { id: 'en-1', version: 1, lang: 'en', level: 1, title: 'T', show: 'VOA', about: 'a', seconds: 200, bytes: 3e6,
+  audio: 'https://linguaclipapp.com/starter/en-1.mp3', srt: 'https://linguaclipapp.com/starter/en-1.srt', trans: { zh: 'https://x/zh.json', en: 'http://x/en.json' }, credit: 'VOA, public domain' };
+const one = P.parseStarter({ v: 1, items: [item] });
+assert.equal(one.length, 1);
+assert.deepEqual(one[0].trans, { zh: 'https://x/zh.json' }, 'only https translations');
+assert.deepEqual(one[0].srtFor, {}, 'no per-language transcript: the plain one');
+assert.deepEqual(P.parseStarter({ v: 1, items: [{ ...item, srtFor: { en: 'https://x/kana.srt', zh: 'file:///x' } }] })[0].srtFor, { en: 'https://x/kana.srt' });
+assert.deepEqual(P.parseStarter({ v: 2, items: [item] }), [], 'a newer format: nothing');
+assert.deepEqual(P.parseStarter(null), []);
+assert.deepEqual(P.parseStarter({ v: 1, items: 'x' }), []);
+const bad = [{ ...item, audio: 'javascript:alert(1)' }, { ...item, level: 4 }, { ...item, credit: '' }, { ...item, version: '1' }, null];
+assert.deepEqual(P.parseStarter({ v: 1, items: [...bad, { ...item, id: 'ok' }] }).map(i => i.id), ['ok'], 'bad items dropped, good kept');
+
 console.log('podcast helpers ok');

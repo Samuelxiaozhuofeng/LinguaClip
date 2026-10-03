@@ -9,6 +9,8 @@ import { getWatchPrefs, saveWatchPrefs } from '../utils/storage';
 import { getLang, useLang, useT } from '../utils/i18n';
 import { SHOWS, SHOW_LANGS, asrOf, type Pick, type ShowLang } from './podcastShows';
 import { appleFeed, classifyPaste, epKey, episodeName, loadFeed, type Episode, type Show } from './podcastFeed';
+import { Starter } from './Starter';
+import { STARTER_FEED } from '../utils/sections';
 
 // Picking a podcast episode to import: the recommended shows by
 // language and a box for an Apple Podcasts link or an RSS address; a show opens its
@@ -137,12 +139,16 @@ const PodcastPicker: React.FC<{ onClose?: () => void; onOpen: (r: VideoRecord) =
     </span>
   );
 
+  // The ready-made starter episodes, until the user has imported a podcast of their own.
+  const ownPodcast = [...mine.values()].some(r => r.podcast?.feed !== STARTER_FEED);
   const shows = (
     <>
       <div className="flex items-center justify-between gap-4">
-        <span className="text-xs font-semibold tracking-wider text-mute uppercase">{t('podcast.recommended')}</span>
+        <span className="text-sm text-mute">{t('podcast.langPick')}</span>
         <Seg<ShowLang> size="sm" value={lang} onChange={setLang} options={SHOW_LANGS.map(l => ({ value: l, label: langLabel(l, ui) }))} />
       </div>
+      {!ownPodcast && <Starter lang={lang} mine={mine} onOpen={r => { onOpen(r); onClose?.(); }} onLoaded={loadMine} />}
+      <span className="pt-2 text-xs font-semibold tracking-wider text-mute uppercase">{t('podcast.recommended')}</span>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {SHOWS.filter(p => p.lang === lang).map(p => (
           <button key={p.id} type="button" onClick={() => open(p.feed, p)}
