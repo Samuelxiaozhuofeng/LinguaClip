@@ -9,7 +9,7 @@ import ReviewSession from '../components/ReviewSession';
 import { useSavedLines } from '../hooks/useSavedLines';
 import { JaBanner } from '../components/JaSetup';
 import { useClip } from '../components/ReviewSession';
-import { useLookup } from '../hooks/useLookup';
+import { useLookup, aroundOf } from '../hooks/useLookup';
 import { lineAt, parseSRT } from '../utils/srtParser';
 import { buildSections } from '../utils/sections';
 import { detectLang } from '../utils/dictionary';
@@ -51,7 +51,7 @@ const firstMeaning = (d: DefinitionState, key: string | null): string => {
 
 // What the small player is doing: one line (heard, or seen), on from a line, or a section.
 // A word looked up this time: its key (the watch page's mark), and what its card would get.
-type Word = Looked & { key: string; fields?: { definition: string; example: string } | null };
+type Word = Looked & { key: string; fields?: { definition: string; example: string; ai: string } | null };
 
 type Clip = { kind: 'line' | 'from' | 'section'; view: boolean; from: number; to: number; line?: Subtitle; section?: number; done?: boolean };
 
@@ -93,7 +93,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     const key = keyOf(word);
     setWords(ws => (ws.some(w => w.key === key) ? ws : [...ws, { word, line, key }]));
     lookLine.current = line;
-    lookup(word, line.text);
+    lookup(word, line.text, aroundOf(lines, lines.indexOf(line)));
     if (autoClip) lineClip(line, true);
   }, [record.id, ja, autoClip]); // eslint-disable-line react-hooks/exhaustive-deps
   // The meaning found, for the hint on the watch page.
@@ -103,25 +103,28 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     if (def.dict || def.data) setGloss(record.id, def.word, ja, firstMeaning(def, key));
     const k = keyOf(def.word);
     const fields = keepFields(def, key);
-    setWords(ws => ws.map(w => (w.key === k && !w.fields ? { ...w, fields } : w)));
+    setWords(ws => ws.map(w => (w.key === k && (!w.fields || (fields && fields.ai !== w.fields.ai && def.context === w.line.text)) ? { ...w, fields } : w)));
   }, [def]); // eslint-disable-line react-hooks/exhaustive-deps
-  // A kept word is its key (頼む for 頼まれた, lowercased): find a line with a word keyed the same.
+  // A kept word is its key (頼む for 頼まれた, lowercased): find a line with a word keyed the same;
+  // a phrase (figure out), a line holding its words in a row.
   const again = (word: string) => {
-    lookLine.current = lines.find(l => getWordTokens(tokenizeText(l.text)).some(w => lookedKey(w.value, ja) === word)) ?? null;
-    lookup(word, lookLine.current?.text);
+    const keys = (l: Subtitle) => getWordTokens(tokenizeText(l.text)).map(w => lookedKey(w.value, ja));
+    lookLine.current = lines.find(l => keys(l).includes(word))
+      ?? lines.find(l => ` ${keys(l).join(' ')} `.includes(` ${word} `) || (ja && l.text.includes(word))) ?? null;
+    lookup(word, lookLine.current?.text, lookLine.current ? aroundOf(lines, lines.indexOf(lookLine.current)) : '');
   };
   // Kept from the definition card, or from the summary (a failed write puts the "+" back).
-  const keep = (word: string, l: Subtitle, definition: string, example: string) => {
+  const keep = (word: string, l: Subtitle, definition: string, example: string, ai = '') => {
     const k = keyOf(word);
     setKept(s => new Set(s).add(k));
-    addWord({ videoId: record.id, videoName: record.videoFileName, text: l.text, start: l.startTime, end: l.endTime }, word, definition, example)
+    addWord({ videoId: record.id, videoName: record.videoFileName, text: l.text, start: l.startTime, end: l.endTime }, word, definition, example, ai)
       .catch(e => { console.error(e); setKept(s => { const n = new Set(s); n.delete(k); return n; }); });
   };
-  const keepWord = (word: string, definition: string, example: string) => {
+  const keepWord = (word: string, definition: string, example: string, ai: string) => {
     const l = lookLine.current;
-    if (l) keep(word, l, definition, example);
+    if (l) keep(word, l, definition, example, ai);
   };
-  const keepOne = (w: Word) => { if (w.fields) keep(w.word, w.line, w.fields.definition, w.fields.example); };
+  const keepOne = (w: Word) => { if (w.fields) keep(w.word, w.line, w.fields.definition, w.fields.example, w.fields.ai); };
 
   // --- Saved lines: the same bookmark as watching / practising ---
   const { savedIds, savedItems, toggleSave } = useSavedLines({ videoId: record.id, fullSubtitles: lines, videoFileName: record.videoFileName });
@@ -410,7 +413,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
           </>}
           onClose={() => setSummary(false)}
           onJump={line => { setSummary(false); lineClip(line, true); }}
-          onWord={w => { lookLine.current = w.line; lookup(w.word, w.line.text); }}
+          onWord={w => { lookLine.current = w.line; lookup(w.word, w.line.text, aroundOf(lines, lines.indexOf(w.line))); }}
           onDrill={picked => { setDrillMissing(false); startDrill(picked).catch(console.error); }} />
       )}
       {drill && <ReviewSession cards={drill} onClose={() => setDrill(null)} />}

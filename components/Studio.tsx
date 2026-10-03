@@ -13,7 +13,7 @@ import ShortcutLegend, { usePinnedLegend } from './ShortcutLegend';
 import Timeline from './Timeline';
 import SavedDrawer from './SavedDrawer';
 import DefinitionPanel from './DefinitionPanel';
-import { useLookup } from '../hooks/useLookup';
+import { useLookup, aroundOf } from '../hooks/useLookup';
 import { tokenizeText, getWordTokens } from '../utils/textTokenizer';
 import { useT } from '../utils/i18n';
 import { useLoop } from '../utils/loop';
@@ -146,9 +146,9 @@ const Studio: React.FC = () => {
   const offerBtn = offer && currentSub && offer.start === currentSub.startTime && (
     <Btn className={bdActive || isBlur ? 'mt-3' : ''} onClick={() => record(offer.reason, true)}><Bookmark size={16} /> {t('studio.addToReview')}</Btn>
   );
-  const keepWord = (word: string, definition: string, example: string) => {
+  const keepWord = (word: string, definition: string, example: string, ai: string) => {
     if (!currentSub || !videoId) return;
-    addWord({ videoId, videoName, text: currentSub.text, start: currentSub.startTime, end: currentSub.endTime }, word, definition, example).catch(console.error);
+    addWord({ videoId, videoName, text: currentSub.text, start: currentSub.startTime, end: currentSub.endTime }, word, definition, example, ai).catch(console.error);
   };
   const openRetry = () => {
     if (isPlaying) actions.onTogglePlay();
@@ -218,7 +218,7 @@ const Studio: React.FC = () => {
 
   // --- Word lookup (shared by both modes) ---
   const dictLang = useMemo(() => detectLang(lineTexts), [lineTexts]);
-  const { def, lookup, explain, closeDef } = useLookup(dictLang, currentSub?.text ?? '');
+  const { def, lookup, explain, closeDef } = useLookup(dictLang, currentSub?.text ?? '', aroundOf(fullSubtitles, lineIndex));
 
   useEffect(closeDef, [currentSubtitleIndex, currentSectionIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -335,7 +335,7 @@ const Studio: React.FC = () => {
                 </div>
               ) : isBlur ? (
                 <div className="flex flex-col items-center gap-5">
-                  <BlurLine text={currentSub.text} onLookup={lookup} onReveal={() => record('blur')} />
+                  <BlurLine key={currentSub.id} text={currentSub.text} onLookup={lookup} onReveal={() => record('blur')} />
                   {isStep && (!isPlaying || loopOn) && (
                     <Btn tone="accent" onClick={actions.onContinue}>{t('common.nextLine')} <ChevronRight size={16} /></Btn>
                   )}

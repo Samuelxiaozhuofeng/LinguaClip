@@ -121,12 +121,16 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
     const chunks: BlobPart[] = [];
     const originalTime = video.currentTime;
     const wasPlaying = !video.paused;
+    // Recorded at 1×: at 2× the clip would sound sped up and, timed in real time, run past the line.
+    const originalRate = video.playbackRate;
+    video.playbackRate = 1;
     const blobType = mimeType || 'audio/webm';
 
     return new Promise((resolve, reject) => {
         let done = false;
         const teardown = () => {
             try { tap.source.disconnect(dest); } catch { /* already disconnected */ }
+            video.playbackRate = originalRate;
         };
 
         recorder.ondataavailable = e => {

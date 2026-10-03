@@ -4,6 +4,7 @@ import * as AI from '../utils/ai';
 import { DictEntry, Seg, Sense, senseToAnki } from '../utils/dictionary';
 import { Btn, Card, Stamp } from './ui';
 import { useT } from '../utils/i18n';
+import { escHtml } from '../utils/anki';
 
 // Single word-definition surface for both learning modes: a small card beside the
 // clicked word (below it, or above when there's more room there), closed by Esc, the X or a click outside. A dictionary entry is
@@ -19,6 +20,7 @@ export interface DefinitionState {
   anchor?: DOMRect; // the clicked word, where the card opens
   dict: DictEntry[] | null;
   context?: string; // the line the word was clicked in, for the AI pick
+  around?: string; // the lines before and after it, for the cultural meaning
   data: AI.WordDefinition | null;
   loading: boolean;
   aiLoading?: boolean;
@@ -42,14 +44,33 @@ const placeBeside = (a: DOMRect | undefined): React.CSSProperties => {
     : { width, left, bottom: vh - a.top + gap, maxHeight: above };
 };
 
-const aiHtml = (d: AI.WordDefinition) => `<b>${d.word}</b> <i>(${d.partOfSpeech})</i><br/>${d.definition}`;
+// AI text is plain text: escaped before it becomes card HTML.
+const aiHtml = (d: AI.WordDefinition) => `<b>${escHtml(d.word)}</b> <i>(${escHtml(d.partOfSpeech)})</i><br/>${escHtml(d.definition)}`;
+
+// The AI's word on this line (what it means here, the cultural meaning), kept apart from the
+// dictionary's: its own field on a word card, its own block after the meaning on an Anki card.
+export const aiNoteOf = (def: DefinitionState): string =>
+  (def.dict ? [def.pick?.note, def.pick?.culture] : [def.data?.culture]).filter(Boolean).join('\n');
+const withAiBlock = (definition: string, ai: string) =>
+  ai ? `${definition}<div class="ai">AI：${escHtml(ai).replace(/\n/g, '<br>')}</div>` : definition;
 
 // What a word card gets when kept without opening the card (the reader's summary): the
 // first sense of the entry spelled `prefer` (else the first entry), else the AI's answer.
-export const keepFields = (def: DefinitionState, prefer: string | null): { definition: string; example: string } | null => {
+export const keepFields = (def: DefinitionState, prefer: string | null): { definition: string; example: string; ai: string } | null => {
   const entry = def.dict?.find(e => e.word === prefer) ?? def.dict?.[0];
-  if (entry?.senses[0]) return senseToAnki(entry, entry.senses[0]);
-  return def.data ? { definition: aiHtml(def.data), example: '' } : null;
+  if (entry?.senses[0]) return { ...senseToAnki(entry, entry.senses[0]), ai: aiNoteOf(def) };
+  return def.data ? { definition: aiHtml(def.data), example: '', ai: aiNoteOf(def) } : null;
+};
+
+// The AI's cultural meaning, at the top of the card (plain text, never HTML).
+const CultureNote: React.FC<{ text: string }> = ({ text }) => {
+  const t = useT();
+  return (
+    <div className="rounded-lg bg-accent-soft px-3 py-2 text-sm leading-relaxed whitespace-pre-line">
+      <div className="text-xs text-accent font-medium mb-0.5 flex items-center gap-1"><Sparkles size={12} /> {t('definition.culture')}</div>
+      {text}
+    </div>
+  );
 };
 
 const SegText: React.FC<{ line: Seg[] }> = ({ line }) => (
@@ -84,7 +105,7 @@ const AddBtn: React.FC<{ id: string; add: AddState; onAdd: (id: string) => void 
   );
 };
 
-const SenseRow: React.FC<{ sense: Sense; picked: boolean; note?: string; action: React.ReactNode }> = ({ sense, picked, note, action }) => {
+const SenseRow: React.FC<{ sense: Sense; picked: boolean; note?: string; culture?: string; action: React.ReactNode }> = ({ sense, picked, note, culture, action }) => {
   const ref = useRef<HTMLLIElement>(null);
   useEffect(() => { if (picked) ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, [picked]);
   return (
@@ -95,6 +116,7 @@ const SenseRow: React.FC<{ sense: Sense; picked: boolean; note?: string; action:
         <SegText line={sense.text} />
         {sense.examples[0] && <div className="mt-0.5 text-[13px] text-mute"><SegText line={sense.examples[0]} /></div>}
         {picked && note && <div className="mt-1.5 text-sm text-accent">AI：{note}</div>}
+        {picked && culture && <div className="mt-2"><CultureNote text={culture} /></div>}
       </div>
       {action}
     </li>
@@ -106,7 +128,7 @@ const DefinitionPanel: React.FC<{
   onClose: () => void;
   onWordToAnki?: WordToAnki;
   onExplain?: () => void;
-  onKeepWord?: (word: string, definition: string, example: string) => void;
+  onKeepWord?: (word: string, definition: string, example: string, ai: string) => void;
 }> = ({ def, onClose, onWordToAnki, onExplain, onKeepWord }) => {
   const t = useT();
   const [add, setAdd] = useState<AddState>({ sent: new Set(), busy: null, failed: null });
@@ -124,7 +146,7 @@ const DefinitionPanel: React.FC<{
     const fields = fieldsOf(id);
     if (!onKeepWord || !def.word || !fields) return;
     setKept(k => new Set(k).add(id));
-    onKeepWord(def.word, fields.definition, fields.example ?? '');
+    onKeepWord(def.word, fields.definition, fields.example ?? '', aiNoteOf(def));
   };
 
   const send = async (id: string) => {
@@ -133,7 +155,7 @@ const DefinitionPanel: React.FC<{
     if (!fields) return;
     setAdd(a => ({ ...a, busy: id, failed: null }));
     try {
-      await onWordToAnki(def.word, fields.definition, fields.example);
+      await onWordToAnki(def.word, withAiBlock(fields.definition, aiNoteOf(def)), fields.example);
       setAdd(a => ({ sent: new Set(a.sent).add(id), busy: null, failed: null }));
     } catch {
       setAdd(a => ({ ...a, busy: null, failed: id }));
@@ -182,6 +204,7 @@ const DefinitionPanel: React.FC<{
           {def.pick && pickIndex === null && (
             <p className="text-sm text-accent">{t('definition.noPick')}{def.pick.note && ` ${def.pick.note}`}</p>
           )}
+          {def.pick?.culture && pickIndex === null && <CultureNote text={def.pick.culture} />}
           {def.dict.map((e, ei) => (
             <div key={ei} className="space-y-3">
               <div className="flex items-baseline gap-3 flex-wrap">
@@ -194,7 +217,7 @@ const DefinitionPanel: React.FC<{
               <ul className="space-y-1">
                 {e.senses.map((s, si) => {
                   const picked = ++n === pickIndex;
-                  return <SenseRow key={si} sense={s} picked={picked} note={def.pick?.note} action={action(`${ei}:${si}`)} />;
+                  return <SenseRow key={si} sense={s} picked={picked} note={def.pick?.note} culture={def.pick?.culture} action={action(`${ei}:${si}`)} />;
                 })}
               </ul>
             </div>
@@ -206,6 +229,7 @@ const DefinitionPanel: React.FC<{
             <h4 className="font-serif text-2xl leading-none break-words">{def.data.word}</h4>
             <Stamp tone="shade" className="mt-2">{def.data.partOfSpeech}</Stamp>
             <p className="text-sm leading-relaxed mt-2">{def.data.definition}</p>
+            {def.data.culture && <div className="mt-3"><CultureNote text={def.data.culture} /></div>}
           </div>
           {action('ai')}
         </div>

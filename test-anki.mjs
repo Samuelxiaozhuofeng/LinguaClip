@@ -42,6 +42,11 @@ assert.equal(boldWord('明日あなたと話したいです', '話したい'), '
 assert.equal(boldWord('Is it (really) true?', '(really)'), 'Is it <b>(really)</b> true?', 'regex characters are literal');
 assert.equal(boldWord('Hello there.', 'bye'), 'Hello there.', 'not in sentence → unchanged');
 assert.equal(boldWord('Hello.', '  '), 'Hello.');
+// Subtitle text is text: tags and & in the line come out escaped, the word still bolded.
+assert.equal(boldWord('Tom & <b>Jerry</b> "run"', 'jerry'), 'Tom &amp; &lt;b&gt;<b>Jerry</b>&lt;/b&gt; &quot;run&quot;', 'escaped, word bolded');
+assert.equal(boldWord('<img src=x onerror="alert(1)">', 'img'), '&lt;<b>img</b> src=x onerror=&quot;alert(1)&quot;&gt;', 'no live tag');
+assert.equal(boldWord('a & b', 'amp'), 'a &amp; b', 'never matches inside an entity');
+assert.equal(boldWord('R&D <x>', ''), 'R&amp;D &lt;x&gt;', 'no word: still escaped');
 
 // --- LinguaClip note type: first field is the sentence (Anki rejects an empty first field) ---
 assert.equal(Object.values(LINGUACLIP_FIELDS)[0], 'sentence');
@@ -51,6 +56,7 @@ assert.ok(Object.values(LINGUACLIP_FIELDS).includes('audio'));
 // --- LinguaClip notes: the kept word in <b>; no dictionary here, so no kana ---
 assert.equal(rubySentence('I want a coffee.', 'a'), 'I want <b>a</b> coffee.');
 assert.equal(rubySentence('Hello there.', 'bye'), 'Hello there.', 'not in the line → unchanged');
+assert.equal(rubySentence('Tom & <b>Jerry</b>', 'Jerry'), 'Tom &amp; &lt;b&gt;<b>Jerry</b>&lt;/b&gt;', 'own card escapes too');
 assert.equal(rubySentence('明日あなたと話したいです', '話したい'), '明日あなたと<b>話したい</b>です');
 assert.equal(rubySentence('何か[笑]', undefined), '何か[笑]', 'brackets stay text: no Anki furigana syntax');
 // --- the card: a word note keeps its sound and picture for the back ---

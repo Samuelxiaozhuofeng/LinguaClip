@@ -263,11 +263,15 @@ const L = [{ word: 'llegar', phonetic: '', senses: [], source: 'local' }];
 globalThis.fakeLocal = { es: { llegar: L } };
 store.clear();
 net['en.wiktionary.org'] = reply(404, {});
-assert.deepEqual(sw.getDictSources('en'), { online: true, local: true, localFirst: true, autoPick: false }, 'defaults: English interface local first, AI pick off');
-assert.deepEqual(sw.getDictSources('zh'), { online: true, local: true, localFirst: false, autoPick: false }, 'defaults: Chinese interface online first');
+assert.deepEqual(sw.getDictSources('en'), { online: true, local: true, localFirst: true, autoPick: false, aiAlways: false, aiCulture: false }, 'defaults: English interface local first, AI pick off');
+assert.deepEqual(sw.getDictSources('zh'), { online: true, local: true, localFirst: false, autoPick: false, aiAlways: false, aiCulture: false }, 'defaults: Chinese interface online first');
 sw.saveDictSources({ autoPick: true });
 assert.equal(sw.getDictSources('zh').autoPick, true, 'AI pick kept once ticked');
 sw.saveDictSources({ autoPick: false });
+sw.saveDictSources({ aiAlways: true, aiCulture: true });
+assert.equal(sw.getDictSources('zh').aiAlways && sw.getDictSources('zh').aiCulture, true, 'every-lookup and cultural meaning kept once set');
+assert.equal(sw.getDictSources('zh').autoPick, false, 'aiAlways alone does not turn the auto pick on (an older version reads only autoPick)');
+sw.saveDictSources({ aiAlways: false, aiCulture: false });
 sw.saveDictSources({ localFirst: false });
 assert.deepEqual(await runSw('llegar', 'es'), ['local'], 'online default lacks the word → local still asked');
 assert.deepEqual(hits, ['en.wiktionary.org']);
@@ -297,7 +301,7 @@ sw.saveDictSources({ local: true });
 assert.deepEqual(await runSw('llegar', 'es'), ['local'], 'offline → local answers');
 assert.equal(await runSw('zzz', 'es'), 'offline', 'offline and local lacks it → still "unreachable"');
 store.set('linguaclip_dict_sources', '{bad');
-assert.deepEqual(sw.getDictSources('zh'), { online: true, local: true, localFirst: false, autoPick: false }, 'unreadable → defaults, never all off');
+assert.deepEqual(sw.getDictSources('zh'), { online: true, local: true, localFirst: false, autoPick: false, aiAlways: false, aiCulture: false }, 'unreadable → defaults, never all off');
 
 console.log('test-dictionary: all passed');
 

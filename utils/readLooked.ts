@@ -45,7 +45,8 @@ const write = (key: string, edit: (all: Store) => void, quiet = false) => {
 // dictionary a Japanese line is one whole-line "word", and marking that marks nothing useful.
 export const lookedKey = (word: string, ja: boolean): string | null => {
   if (ja) return jaReady() ? jaKey(word).trim() || null : null;
-  const k = word.toLowerCase().replace(/[^\p{L}\p{N}'’-]/gu, '');
+  // A phrase keeps one space between its words (figure out, not figureout).
+  const k = word.toLowerCase().replace(/[^\p{L}\p{N}'’\s-]/gu, '').replace(/\s+/g, ' ').trim();
   return k || null;
 };
 

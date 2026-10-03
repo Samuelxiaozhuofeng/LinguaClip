@@ -94,8 +94,8 @@ export const addNote = async (
   // brought up to the current template first; anyone else's gets plain bold text.
   const own = template.modelName === LINGUACLIP_NAME;
   if (own) await syncLinguaClipTemplate(url).catch(console.error);
-  const sentence = own ? rubySentence(data.sentence, data.word) : data.word ? boldWord(data.sentence, data.word) : data.sentence;
-  const word = own && data.word ? rubyHtml(furigana(data.word, readingOf(data.word))) : data.word;
+  const sentence = own ? rubySentence(data.sentence, data.word) : boldWord(data.sentence, data.word || '');
+  const word = own && data.word ? rubyHtml(furigana(data.word, readingOf(data.word))) : escHtml(data.word || '');
   const picture: any[] = [];
   const audio: any[] = [];
 
@@ -104,9 +104,9 @@ export const addNote = async (
     if (!appKey) return;
 
     if (appKey === 'sentence') fields[ankiField] = sentence;
-    else if (appKey === 'videoName') fields[ankiField] = data.videoName;
-    else if (appKey === 'timestamp') fields[ankiField] = data.timestamp;
-    else if (appKey === 'word') fields[ankiField] = word || '';
+    else if (appKey === 'videoName') fields[ankiField] = escHtml(data.videoName);
+    else if (appKey === 'timestamp') fields[ankiField] = escHtml(data.timestamp);
+    else if (appKey === 'word') fields[ankiField] = word;
     else if (appKey === 'definition') fields[ankiField] = data.definition || '';
     else if (appKey === 'example') fields[ankiField] = data.example || '';
     else if (appKey === 'context') fields[ankiField] = sentence; // Context is usually the full sentence
@@ -141,19 +141,24 @@ export const addNote = async (
   return invokeAnki('addNote', { note }, url);
 };
 
-// Wrap the looked-up word in <b> where it sits in the sentence. Whole-word match
-// first (so "a" doesn't light up inside "want"); scripts without spaces (Japanese)
-// fall back to the first plain occurrence.
+// Subtitle lines, words and AI replies are text: in an Anki field they must not become tags.
+export const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// Wrap the looked-up word in <b> where it sits in the sentence, as escaped HTML. Whole-word
+// match first (so "a" doesn't light up inside "want"); scripts without spaces (Japanese)
+// fall back to the first plain occurrence. Matched on the raw text, each piece escaped after.
 export const boldWord = (sentence: string, word: string): string => {
   const w = word.trim();
-  if (!w) return sentence;
+  if (!w) return escHtml(sentence);
   const esc = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const whole = new RegExp(`(?<![\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])`, 'iu');
-  const re = whole.test(sentence) ? whole : new RegExp(esc, 'iu');
-  return sentence.replace(re, (m) => `<b>${m}</b>`);
+  const m = whole.exec(sentence) ?? new RegExp(esc, 'iu').exec(sentence);
+  if (!m) return escHtml(sentence);
+  const end = m.index + m[0].length;
+  return `${escHtml(sentence.slice(0, m.index))}<b>${escHtml(m[0])}</b>${escHtml(sentence.slice(end))}`;
 };
 
-const rubyHtml = (parts: Ruby[]) => parts.map(p => p.rt ? `<ruby>${p.s}<rt>${p.rt}</rt></ruby>` : p.s).join('');
+const rubyHtml = (parts: Ruby[]) => parts.map(p => p.rt ? `<ruby>${escHtml(p.s)}<rt>${escHtml(p.rt)}</rt></ruby>` : escHtml(p.s)).join('');
 
 // The line for a LinguaClip note: kanji with their kana (Japanese, dictionary loaded),
 // the kept word in <b>. Plain text otherwise, as before.
@@ -207,10 +212,11 @@ rt { font-size: .45em; opacity: .65; }
 .front .word rt, .front b rt { visibility: hidden !important; }
 .def, .ex { margin-top: 12px; font-size: 16px; text-align: left; }
 .ex { opacity: .75; }
+.def .ai { margin-top: 8px; padding: 6px 10px; border-radius: 6px; background: rgba(217, 164, 65, .12); font-size: 15px; }
 .src { margin-top: 16px; font-size: 12px; opacity: .5; }`;
 
 // Bump when the template or CSS above changes: each machine rewrites the note type once per version and front.
-const TEMPLATE_VERSION = 2;
+const TEMPLATE_VERSION = 3;
 const TEMPLATE_KEY = 'linguaclip_anki_tpl';
 
 // Rewrite the LinguaClip note type's card to the current one (the user chose this over

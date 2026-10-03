@@ -7,7 +7,7 @@ import { formatCombo, useShortcuts, ActionId } from '../utils/shortcuts';
 import { useLoop, setLoopTimes, LOOP_TIMES } from '../utils/loop';
 import { LearningMode, BlurPlaybackMode } from '../types';
 
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5];
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 // The remote along the bottom of the practice sheet: save / Anki / mute on the left,
 // the play controls in the middle, a "…" on the right for the rarer settings (speed,
@@ -81,7 +81,7 @@ const Transport: React.FC<{ menuItems: MenuItem[]; menuPanel?: React.ReactNode; 
         )}>
           <div className="px-2.5 py-2 flex flex-col gap-2">
             <span className="text-xs text-mute">{t('transport.speed')}</span>
-            <Seg size="sm" className="w-full [&>button]:flex-1" value={playbackSpeed} onChange={actions.onSetPlaybackSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
+            <Seg size="sm" className="w-full [&>button]:flex-1 [&>button]:px-0" value={playbackSpeed} onChange={actions.onSetPlaybackSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
           </div>
           <div className="px-2.5 py-2 flex flex-col gap-2">
             <span className="text-xs text-mute">{t('transport.loopTimes')}</span>

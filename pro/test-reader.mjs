@@ -53,6 +53,7 @@ assert.deepEqual(R.getLooked('v1'), []);
 
 // 2. Other languages: lowercased, punctuation dropped; kept once, newest last.
 assert.equal(R.lookedKey('Hello,', false), 'hello');
+assert.equal(R.lookedKey('Figure  out!', false), 'figure out', 'a phrase keeps one space between its words');
 R.addLooked('v2', 'Went', false);
 R.addLooked('v2', 'there', false);
 R.addLooked('v2', 'went', false);

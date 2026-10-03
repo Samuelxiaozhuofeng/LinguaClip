@@ -8,7 +8,7 @@ import WatchSummary, { type Looked } from '../components/WatchSummary';
 import ReviewSession from '../components/ReviewSession';
 import { JaBanner } from '../components/JaSetup';
 import { useSavedLines } from '../hooks/useSavedLines';
-import { useLookup } from '../hooks/useLookup';
+import { useLookup, aroundOf } from '../hooks/useLookup';
 import { lineAt, parseSRT } from '../utils/srtParser';
 import { buildSections, sectionAt, sectionStart } from '../utils/sections';
 import { detectLang } from '../utils/dictionary';
@@ -46,7 +46,7 @@ import type { Pick } from './podcastShows';
 
 const MODES: WatchSubs[] = ['hide', 'show'];
 const SEEK = 5;
-type Word = Looked & { key: string; fields?: { definition: string; example: string } | null };
+type Word = Looked & { key: string; fields?: { definition: string; example: string; ai: string } | null };
 type Mark = 'open' | 'ok' | 'more'; // a hard line: not worked on yet / got it now / needs more work
 
 const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice: () => void; onOpen?: (r: VideoRecord) => void }> = ({ record, onExit, onPractice, onOpen }) => {
@@ -159,7 +159,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
         const back = Math.max(lines[i].startTime, Math.min(lines[i].endTime, sectionEnd(sectionOf.get(lines[i].id) ?? 0)) - 0.02);
         a.pause(); a.currentTime = back; setTime(back); // `now`, already in the next section: that would reset the passes
       };
-      if (crossed && now - before < 0.5 && loopMore(plays.current.at === was ? plays.current.n : 1)) {
+      if (crossed && now - before < 0.5 * Math.max(1, a.playbackRate) && loopMore(plays.current.at === was ? plays.current.n : 1)) {
         if (plays.current.at !== was) plays.current = { at: was, n: 1 };
         plays.current.n++;
         pause(was); // the gap is still this line (and this section)
@@ -172,7 +172,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
         heldAt.current = lastAt;
         pause(lastAt);
         if (opts.current.passes && opts.current.pass < 2) openPass(); else openSummary(false);
-      } else if (crossed && now - before < 0.5 && opts.current.autoPause && heldAt.current !== was) {
+      } else if (crossed && now - before < 0.5 * Math.max(1, a.playbackRate) && opts.current.autoPause && heldAt.current !== was) {
         heldAt.current = was;
         pause(was); // (and a line peeked at stays up while held)
       }
@@ -266,26 +266,26 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     const key = keyOf(word);
     setWords(ws => (ws.some(w => w.key === key) ? ws : [...ws, { word, line, key }]));
     lookLine.current = line;
-    lookup(word, line.text);
+    lookup(word, line.text, aroundOf(lines, lines.indexOf(line)));
   }, [record.id, ja]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!def.word || def.loading) return;
     const k = keyOf(def.word);
     const fields = keepFields(def, lookedKey(def.word, ja));
-    setWords(ws => ws.map(w => (w.key === k && !w.fields ? { ...w, fields } : w)));
+    setWords(ws => ws.map(w => (w.key === k && (!w.fields || (fields && fields.ai !== w.fields.ai && def.context === w.line.text)) ? { ...w, fields } : w)));
   }, [def]); // eslint-disable-line react-hooks/exhaustive-deps
   const closeLookup = () => {
     closeDef();
     if (resumeAfter.current && !summaryRef.current) seek(resumeFrom.current, true);
     resumeAfter.current = false;
   };
-  const keep = (word: string, l: Subtitle, definition: string, example: string) => {
+  const keep = (word: string, l: Subtitle, definition: string, example: string, ai = '') => {
     const k = keyOf(word);
     setKept(s => new Set(s).add(k));
-    addWord({ videoId: record.id, videoName: record.videoFileName, text: l.text, start: l.startTime, end: l.endTime }, word, definition, example)
+    addWord({ videoId: record.id, videoName: record.videoFileName, text: l.text, start: l.startTime, end: l.endTime }, word, definition, example, ai)
       .catch(e => { console.error(e); setKept(s => { const n = new Set(s); n.delete(k); return n; }); });
   };
-  const keepOne = (w: Word) => { if (w.fields) keep(w.word, w.line, w.fields.definition, w.fields.example); };
+  const keepOne = (w: Word) => { if (w.fields) keep(w.word, w.line, w.fields.definition, w.fields.example, w.fields.ai); };
 
   // --- Saved lines (the same star as reading / watching) and translation ---
   const { savedIds, savedItems, toggleSave } = useSavedLines({ videoId: record.id, fullSubtitles: lines, videoFileName: record.videoFileName });
@@ -542,7 +542,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
           </>}
           onClose={() => setSummary(null)}
           onJump={line => { setSummary(null); pick(line); }}
-          onWord={w => { lookLine.current = w.line; lookup(w.word, w.line.text); }}
+          onWord={w => { lookLine.current = w.line; lookup(w.word, w.line.text, aroundOf(lines, lines.indexOf(w.line))); }}
           onDrill={picked => { setDrillMissing(false); startDrill(picked).catch(console.error); }} />
       )}
       {passCard !== null && !summary && !pickerShow && (
@@ -553,7 +553,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
       {drill && <ReviewSession cards={drill} onClose={() => setDrill(null)} onFinish={passes && onward ? () => { setDrill(null); goSection(sec + 1); } : undefined} />}
       {intro && <IntroCard onClose={closeIntro} />}
       {def.word !== null && (
-        <DefinitionPanel key={def.word} def={def} onClose={closeLookup} onExplain={explain} onKeepWord={lookLine.current ? (w, d, x) => keep(w, lookLine.current!, d, x) : undefined} />
+        <DefinitionPanel key={def.word} def={def} onClose={closeLookup} onExplain={explain} onKeepWord={lookLine.current ? (w, d, x, ai) => keep(w, lookLine.current!, d, x, ai) : undefined} />
       )}
     </div>
   );

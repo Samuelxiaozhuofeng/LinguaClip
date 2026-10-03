@@ -33,6 +33,7 @@ export interface ReviewCard {
   word?: string;         // word deck only
   definition?: string;
   example?: string;
+  ai?: string;           // the AI's word on this line (plain text): what it means here, the cultural meaning
   reasons: Reason[];
   saved: boolean;        // bookmarked by hand
   clip?: Clip;           // its own copy of the line (utils/clips.ts), so it plays after the video is deleted
@@ -231,11 +232,12 @@ export const addLine = async (ref: LineRef, reason: Reason) => {
   await update(id, old => old ? withReason({ ...old, videoPath: full.videoPath ?? old.videoPath }, reason) : newCard({ id, deck: 'line', ...full }, reason));
 };
 
-export const addWord = async (ref: LineRef, word: string, definition: string, example: string) => {
+// Kept again without an AI note (none asked this time): the earlier note stays.
+export const addWord = async (ref: LineRef, word: string, definition: string, example: string, ai = '') => {
   if (!ref.videoId || !word) return;
   const id = wordCardId(ref.videoId, ref.start, word);
   const full = await withPath(ref);
-  await update(id, old => old ? { ...old, definition, example } : newCard({ id, deck: 'word', ...full, word, definition, example }, 'lookup'));
+  await update(id, old => old ? { ...old, definition, example, ...(ai ? { ai } : {}) } : newCard({ id, deck: 'word', ...full, word, definition, example, ...(ai ? { ai } : {}) }, 'lookup'));
 };
 
 

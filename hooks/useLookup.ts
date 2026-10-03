@@ -8,7 +8,8 @@ import { lookupJa } from '../utils/jaLookup';
 // Word lookup behind the definition popup, shared by the practice page and review.
 // Dictionary first. AI answers instead when the dictionary has nothing (or no
 // dictionary covers the language).
-export const useLookup = (dictLang: DictLang | null, currentContext: string) => {
+// `currentAround` / `around`: the lines before and after, for the AI's cultural meaning.
+export const useLookup = (dictLang: DictLang | null, currentContext: string, currentAround = '') => {
   const t = useT();
   const [def, setDef] = useState<DefinitionState>(emptyDefinition);
   const seqRef = useRef(0);
@@ -26,8 +27,10 @@ export const useLookup = (dictLang: DictLang | null, currentContext: string) => 
   }, []);
 
   // `line` overrides the hook's context: a word looked up again from a list, not from the line on screen.
-  const lookup = async (word: string, line?: string) => {
+  const lookup = async (word: string, line?: string, around?: string) => {
     const context = line ?? currentContext;
+    const near = around ?? (line === undefined ? currentAround : '');
+    const { autoPick, aiAlways, aiCulture } = getDictSources();
     const seq = ++seqRef.current;
     const mine = () => seq === seqRef.current;
     const ai = AI.aiReady();
@@ -42,8 +45,8 @@ export const useLookup = (dictLang: DictLang | null, currentContext: string) => 
     }
     if (!mine()) return;
     if (dict) {
-      setDef({ ...emptyDefinition, word, anchor, dict, context });
-      if (ai && getDictSources().autoPick && senseList(dict).length > 3) runPick(seq, word, context, dict);
+      setDef({ ...emptyDefinition, word, anchor, dict, context, around: near });
+      if (ai && autoPick && (aiAlways || senseList(dict).length > 3)) runPick(seq, word, context, dict, near);
       return;
     }
     if (!ai) {
@@ -51,7 +54,7 @@ export const useLookup = (dictLang: DictLang | null, currentContext: string) => 
       return setDef({ ...emptyDefinition, word, anchor, failed: true, error });
     }
     try {
-      const data = await AI.getWordDefinition(word, context);
+      const data = await AI.getWordDefinition(word, context, near, aiCulture);
       if (mine()) setDef({ ...emptyDefinition, word, anchor, data });
     } catch (e) {
       if (mine()) setDef({ ...emptyDefinition, word, anchor, failed: true, error: (e as Error).message });
@@ -59,18 +62,22 @@ export const useLookup = (dictLang: DictLang | null, currentContext: string) => 
   };
 
   // AI points at the dictionary meaning this sentence uses.
-  const runPick = async (seq: number, word: string, ctx: string | undefined, dict: DictEntry[]) => {
+  const runPick = async (seq: number, word: string, ctx: string | undefined, dict: DictEntry[], around = '') => {
     setDef(d => ({ ...d, aiLoading: true, aiError: undefined }));
     try {
-      const pick = await AI.pickSense(word, ctx ?? '', senseList(dict).map(s => s.line));
+      const pick = await AI.pickSense(word, ctx ?? '', senseList(dict).map(s => s.line), around, getDictSources().aiCulture);
       if (seq === seqRef.current) setDef(d => ({ ...d, pick, aiLoading: false }));
     } catch (e) {
       if (seq === seqRef.current) setDef(d => ({ ...d, aiLoading: false, aiError: (e as Error).message }));
     }
   };
-  const explain = () => { if (def.word && def.dict) runPick(seqRef.current, def.word, def.context, def.dict); };
+  const explain = () => { if (def.word && def.dict) runPick(seqRef.current, def.word, def.context, def.dict, def.around); };
 
   const closeDef = () => { seqRef.current++; setDef(emptyDefinition); };
 
   return { def, lookup, explain: AI.aiReady() ? explain : undefined, closeDef };
 };
+
+// The line before and after line `i`, for `around`.
+export const aroundOf = (lines: { text: string }[], i: number): string =>
+  i < 0 ? '' : [lines[i - 1]?.text, lines[i + 1]?.text].filter(Boolean).join('\n');

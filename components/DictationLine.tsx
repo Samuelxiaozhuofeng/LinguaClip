@@ -7,6 +7,7 @@ import {
 import { ArrowRight } from 'lucide-react';
 import { Btn } from './ui';
 import { useT } from '../utils/i18n';
+import { usePhraseDrag } from '../hooks/usePhraseDrag';
 import { matches } from '../utils/shortcuts';
 import { useJaVersion } from '../utils/japanese';
 import { wordSpans } from '../utils/wordTimes';
@@ -201,6 +202,8 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     refs.current[slots[Math.min(limit, slots.length - 1)] ?? firstBlank()]?.focus();
   };
 
+  // A phrase dragged across the answer: the line's own text from its first word to its last.
+  const { bind, inSel } = usePhraseDrag((a, b) => onLookup(tokens.slice(groups[a].key, groups[b].key + 1).map(tk => tk.value).join('')));
   const lookup = (raw: string) => {
     const w = raw.replace(/[.,/#!$%^&*;:{}=\-_`~()?"'\u3000-\u303f\uff01-\uff0f\uff1a-\uff20]/g, '');
     if (w) onLookup(w);
@@ -239,8 +242,8 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
                     {r.inputWord}
                   </span>
                 )}
-                <button type="button" onClick={e => { e.currentTarget.blur(); lookup(wordAt(gi)); }} title={r ? t('dictation.expected', { word: r.targetWord }) : t('common.lookup')}
-                  className={`rounded-md -mx-1 px-1 hover:bg-accent-soft ${!r ? '' : r.inputWord ? 'text-accent underline decoration-2 underline-offset-[8px]' : 'underline decoration-faint decoration-2 underline-offset-[8px]'}`}>
+                <button type="button" {...bind(gi)} onClick={e => { e.currentTarget.blur(); lookup(wordAt(gi)); }} title={r ? t('dictation.expected', { word: r.targetWord }) : t('common.lookup')}
+                  className={`rounded-md -mx-1 px-1 hover:bg-accent-soft ${inSel(gi) ? 'bg-accent-soft' : ''} ${!r ? '' : r.inputWord ? 'text-accent underline decoration-2 underline-offset-[8px]' : 'underline decoration-faint decoration-2 underline-offset-[8px]'}`}>
                   {g.word.value}
                 </button>
                 <span className="text-mute">{g.punct}</span>

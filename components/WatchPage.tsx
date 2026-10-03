@@ -7,7 +7,7 @@ import WatchList from './WatchList';
 import WatchSummary, { Looked } from './WatchSummary';
 import DefinitionPanel from './DefinitionPanel';
 import ReviewSession from './ReviewSession';
-import { useLookup } from '../hooks/useLookup';
+import { useLookup, aroundOf } from '../hooks/useLookup';
 import { useSavedLines } from '../hooks/useSavedLines';
 import { useAnkiIntegration } from '../hooks/useAnkiIntegration';
 import { lineAt, parseSRT } from '../utils/srtParser';
@@ -25,7 +25,7 @@ import { DictKey, useT } from '../utils/i18n';
 // of the lines saved this time; leaving midway just leaves. Its own page: the practice
 // session, its sections and its progress are never touched.
 
-const SPEEDS = [0.75, 0.9, 1, 1.25];
+const SPEEDS = [0.75, 0.9, 1, 1.25, 1.5, 2];
 const SUBS: WatchSubs[] = ['show', 'blur', 'hide'];
 const IDLE_MS = 2500; // the pointer hides after this long still; both bars show this long on entry
 const TOP_ZONE = 88; // px from the top edge that bring the back button up
@@ -95,7 +95,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
         setCur(c => (c.at === at && c.on === on ? c : { at, on }));
         const was = lineAt(lines, before);
         if (autoPauseRef.current && !busy() && !v.paused && was >= 0 && was !== heldAt.current
-          && before < lines[was].endTime && now >= lines[was].endTime && now - before < 0.5) {
+          && before < lines[was].endTime && now >= lines[was].endTime && now - before < 0.5 * Math.max(1, v.playbackRate)) {
           v.pause();
           heldAt.current = was;
           const back = Math.max(lines[was].startTime, lines[was].endTime - 0.02);
@@ -161,23 +161,27 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   const { def, lookup, explain, closeDef } = useLookup(dictLang, shown?.text ?? '');
   const lookLine = useRef<Subtitle | null>(null);
   const resumeAfter = useRef(false);
-  const onWord = (word: string, line: Subtitle, fromList = false) => {
+  // Pressing a word pauses already: dragging across a phrase, the line must not move on.
+  const pauseForLookup = () => {
     const v = videoRef.current;
     if (v && !v.paused && !busy()) { resumeAfter.current = true; v.pause(); }
+  };
+  const unpause = () => {
+    if (resumeAfter.current && !summary) videoRef.current?.play().catch(() => {});
+    resumeAfter.current = false;
+  };
+  const onWord = (word: string, line: Subtitle, fromList = false) => {
+    pauseForLookup();
     lookLine.current = line;
     if (!fromList) {
       setLooked(l => (l.some(x => x.word.toLowerCase() === word.toLowerCase()) ? l : [...l, { word, line }]));
     }
-    lookup(word, line.text);
+    lookup(word, line.text, aroundOf(lines, lines.indexOf(line)));
   };
-  const closeLookup = () => {
-    closeDef();
-    if (resumeAfter.current && !summary) videoRef.current?.play().catch(() => {});
-    resumeAfter.current = false;
-  };
-  const keepWord = (word: string, definition: string, example: string) => {
+  const closeLookup = () => { closeDef(); unpause(); };
+  const keepWord = (word: string, definition: string, example: string, ai: string) => {
     const l = lookLine.current;
-    if (l) addWord({ videoId: record.id, videoName: record.videoFileName, text: l.text, start: l.startTime, end: l.endTime }, word, definition, example).catch(console.error);
+    if (l) addWord({ videoId: record.id, videoName: record.videoFileName, text: l.text, start: l.startTime, end: l.endTime }, word, definition, example, ai).catch(console.error);
   };
   const wordToAnki = async (word: string, definition: string, example?: string) => {
     if (!lookLine.current) return;
@@ -365,7 +369,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
       {shown && (
         <div data-watch-line className="absolute inset-x-0 px-6 flex justify-center text-center transition-[bottom] duration-200" style={{ bottom: showBottom ? 132 : 44 }}>
           <WatchLine key={shown.id} videoId={record.id} ja={dictLang === 'ja'} text={shown.text} subs={prefs.subs} revealed={revealed === shown.id}
-            onReveal={() => setRevealed(shown.id)} onWord={w => onWord(w, shown)} />
+            onReveal={() => setRevealed(shown.id)} onWord={w => onWord(w, shown)} onPress={pauseForLookup} onCancel={unpause} />
         </div>
       )}
 
@@ -414,7 +418,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
             }>
               <div className="px-2.5 py-2 flex flex-col gap-2">
                 <span className="text-xs text-mute">{t('transport.speed')}</span>
-                <Seg<number> size="sm" className="w-full [&>button]:flex-1" value={speed} onChange={setSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
+                <Seg<number> size="sm" className="w-full [&>button]:flex-1 [&>button]:px-0" value={speed} onChange={setSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
                 <span className="text-xs text-mute">{withKey(t('watch.keySubs'), 'C')}</span>
                 <Seg size="sm" className="w-full [&>button]:flex-1" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey) }))} />
               </div>

@@ -5,6 +5,7 @@ import { useJaVersion } from '../utils/japanese';
 import { getGloss, getLooked, lookedKey, useLookedVersion } from '../utils/readLooked';
 import type { WatchSubs } from '../utils/storage';
 import { bareWord } from './BlurLine';
+import { usePhraseDrag } from '../hooks/usePhraseDrag';
 
 // Watch mode's subtitle, laid over the picture. Shown: every word looks up on a
 // click. Blurred / hidden: a click shows this one line (the next line covers
@@ -17,8 +18,10 @@ const WatchLine: React.FC<{
   subs: WatchSubs;
   revealed: boolean;
   onReveal: () => void;
-  onWord: (word: string) => void;
-}> = ({ videoId, ja, text, subs, revealed, onReveal, onWord }) => {
+  onWord: (word: string) => void; // a word, or a phrase dragged across
+  onPress?: () => void; // a word pressed: the page pauses, so the line stays put while dragging
+  onCancel?: () => void; // let go outside the line: nothing looked up
+}> = ({ videoId, ja, text, subs, revealed, onReveal, onWord, onPress, onCancel }) => {
   const t = useT();
   const jaVersion = useJaVersion();
   const lookedVersion = useLookedVersion();
@@ -34,6 +37,7 @@ const WatchLine: React.FC<{
     }
     return out;
   }, [videoId, ja, tokens, lookedVersion, t]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { bind, inSel } = usePhraseDrag((a, b) => onWord(tokens.slice(a, b + 1).map(tk => tk.value).join('')), onPress, onCancel);
   const box = 'inline-block max-w-full px-4 py-1.5 rounded-xl bg-black/60 text-white font-serif text-[clamp(20px,2.4vw,34px)] leading-snug';
 
   if (subs === 'hide' && !revealed) {
@@ -55,8 +59,8 @@ const WatchLine: React.FC<{
         if (tk.type === TokenType.WORD) {
           const word = bareWord(tk.value);
           return word ? (
-            <button key={i} type="button" onClick={e => { e.currentTarget.blur(); onWord(word); }} title={seen.get(tk.index) ?? t('common.lookup')}
-              className={`inline rounded px-0.5 hover:bg-white/25 ${seen.has(tk.index) ? 'border-b-2 border-dotted border-accent' : ''}`}>{tk.value}</button>
+            <button key={i} type="button" {...bind(i)} onClick={e => { e.currentTarget.blur(); onWord(word); }} title={seen.get(tk.index) ?? t('common.lookup')}
+              className={`inline rounded px-0.5 hover:bg-white/25 ${inSel(i) ? 'bg-white/25' : ''} ${seen.has(tk.index) ? 'border-b-2 border-dotted border-accent' : ''}`}>{tk.value}</button>
           ) : <span key={i}>{tk.value}</span>;
         }
         if (tk.type === TokenType.SPACE) return <span key={i}> </span>;

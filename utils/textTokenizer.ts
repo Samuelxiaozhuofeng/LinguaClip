@@ -213,6 +213,12 @@ export const compareWords = (tokens: Token[], wordInputs: string[]): WordCompari
 // looked up as it (諦めた → 諦める). Not in the line: none, so nothing is marked wrongly.
 export const targetWords = (words: string[], word: string): number[] => {
   const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}'’-]/gu, '');
+  // A phrase (figure it out): its words in a row — before single words, or "can not" would find "cannot".
+  const parts = getWordTokens(tokenizeText(word)).map(t => norm(t.value));
+  if (parts.length > 1) {
+    const s = words.findIndex((_, k) => parts.every((p, j) => words[k + j] !== undefined && norm(words[k + j]) === p));
+    if (s >= 0) return parts.map((_, j) => s + j);
+  }
   const i = words.findIndex(w => norm(w) === norm(word));
   if (i >= 0 || !word.trim()) return i >= 0 ? [i] : [];
   if (!hasKana(word + words.join(''))) return [];

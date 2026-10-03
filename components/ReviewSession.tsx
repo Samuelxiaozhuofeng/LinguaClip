@@ -14,7 +14,9 @@ import DefinitionPanel from './DefinitionPanel';
 import { WordFace, GradeBar } from './WordReview';
 import { matches, formatCombo, getCombo } from '../utils/shortcuts';
 import { useLoop, getLoop, setLoopOn, loopMore, holdPageLoop, LOOP_GAP_MS } from '../utils/loop';
-import { useLookup } from '../hooks/useLookup';
+import { useLookup, aroundOf } from '../hooks/useLookup';
+import { getVideoFromDB } from '../utils/fileSystemAccess';
+import { parseSRT } from '../utils/srtParser';
 import { detectLang } from '../utils/dictionary';
 import type { DeckLang } from '../utils/deckLang';
 import { useT } from '../utils/i18n';
@@ -135,12 +137,23 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
     const l = card && langOf ? langOf(card) : undefined;
     return l ? (l === 'other' ? null : l) : detectLang(queue.map(c => c.text));
   }, [queue, card, langOf]);
-  const { def, lookup, explain, closeDef } = useLookup(dictLang, card?.text ?? '');
+  // The lines around the card's line, for the AI's cultural meaning: from its video's subtitles (none once the video is deleted).
+  const [around, setAround] = useState('');
+  useEffect(() => {
+    let live = true;
+    setAround('');
+    if (card?.videoId) getVideoFromDB(card.videoId).then(r => {
+      const lines = r ? [...parseSRT(r.subtitleText)].sort((a, b) => a.startTime - b.startTime) : [];
+      if (live) setAround(aroundOf(lines, lines.findIndex(l => Math.abs(l.startTime - card.start) < 0.01)));
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [card?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { def, lookup, explain, closeDef } = useLookup(dictLang, card?.text ?? '', around);
   useEffect(closeDef, [card]); // eslint-disable-line react-hooks/exhaustive-deps
-  const keepWord = (word: string, definition: string, example: string) => {
+  const keepWord = (word: string, definition: string, example: string, ai: string) => {
     if (!card) return;
     const videoPath = relinked.current.get(card.videoId) ?? card.videoPath;
-    addWord({ videoId: card.videoId, videoName: card.videoName, videoPath, text: card.text, start: card.start, end: card.end }, word, definition, example).catch(console.error);
+    addWord({ videoId: card.videoId, videoName: card.videoName, videoPath, text: card.text, start: card.start, end: card.end }, word, definition, example, ai).catch(console.error);
   };
 
   // Line loop (docs/loop.md): a sentence card being typed replays after each play, until

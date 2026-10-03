@@ -6,6 +6,7 @@ import type { WordFront } from '../types';
 import { sentenceParts } from '../utils/textTokenizer';
 import { furigana, hasKanji, readingOf, useJaVersion } from '../utils/japanese';
 import { useT } from '../utils/i18n';
+import { usePhraseDrag } from '../hooks/usePhraseDrag';
 
 // A word card's two faces (think first, then turn it) and the four FSRS buttons
 // every review card ends on.
@@ -37,6 +38,15 @@ const MARK = 'text-accent font-semibold underline decoration-2 underline-offset-
 const Sentence: React.FC<{ text: string; word: string; turned: boolean; onLookup: (w: string) => void; className: string }> = ({ text, word, turned, onLookup, className }) => {
   const jaVersion = useJaVersion();
   const groups = useMemo(() => sentenceParts(text, word), [text, word, jaVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { bind, inSel } = usePhraseDrag((a, b) => { if (turned) onLookup(groups.slice(a, b + 1).flatMap(g => g.pieces.map(p => p.s)).join('')); });
+  // A phrase is underlined in one go: the spaces and punctuation between its words too.
+  const marked = groups.map(g => !!g.word && g.pieces.some(p => p.target));
+  const inside = (gi: number) => {
+    let a = gi, b = gi;
+    while (a > 0 && !groups[a - 1].word) a--;
+    while (b < groups.length - 1 && !groups[b + 1].word) b++;
+    return a > 0 && b < groups.length - 1 && marked[a - 1] && marked[b + 1];
+  };
   return (
     <p className={className}>
       {groups.map((g, gi) => {
@@ -44,9 +54,9 @@ const Sentence: React.FC<{ text: string; word: string; turned: boolean; onLookup
           const rt = p.rt && (p.target ? turned && <rt>{p.rt}</rt> : <rt className="opacity-0 group-hover:opacity-100 transition-opacity">{p.rt}</rt>);
           return <span key={k} className={p.target ? MARK : undefined}>{rt ? <ruby>{p.s}{rt}</ruby> : p.s}</span>;
         });
-        if (!g.word) return <span key={gi}>{pieces}</span>;
+        if (!g.word) return <span key={gi} className={inside(gi) ? MARK : undefined}>{pieces}</span>;
         return turned
-          ? <button key={gi} type="button" onClick={e => { e.currentTarget.blur(); onLookup(g.word!); }} className="group rounded-md hover:bg-accent-soft">{pieces}</button>
+          ? <button key={gi} type="button" {...bind(gi)} onClick={e => { e.currentTarget.blur(); onLookup(g.word!); }} className={`group rounded-md hover:bg-accent-soft ${inSel(gi) ? 'bg-accent-soft' : ''}`}>{pieces}</button>
           : <span key={gi} className="group">{pieces}</span>;
       })}
     </p>
@@ -72,6 +82,7 @@ export const WordFace: React.FC<{ card: ReviewCard; front: WordFront; turned: bo
         {head.map((p, k) => p.rt ? <ruby key={k}>{p.s}<rt>{p.rt}</rt></ruby> : <span key={k}>{p.s}</span>)}
       </p>
       <Html html={card.definition} className="text-[16px] leading-relaxed" />
+      {card.ai && <p className="text-[14px] leading-relaxed whitespace-pre-line rounded-xl bg-accent-soft px-4 py-2.5">AI：{card.ai}</p>}
       <div className="px-5 py-3 rounded-2xl bg-shade flex items-center justify-between gap-4">
         <Sentence text={card.text} word={word} turned onLookup={onLookup} className="font-serif text-[24px] leading-[2]" />
         <button type="button" onClick={e => { e.currentTarget.blur(); onReplay(); }} className="press shrink-0 h-9 px-3.5 rounded-full bg-page border border-line text-[13px] flex items-center gap-1.5">

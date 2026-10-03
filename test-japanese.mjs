@@ -149,15 +149,21 @@ assert.deepEqual(mark('もう諦めたよ', '諦める'), ['諦めたよ'], 'kep
 assert.deepEqual(mark('今日はいい天気ですね', '散歩'), [], 'not in the line: nothing marked');
 assert.deepEqual(mark('I gave up on it.', 'Gave'), ['gave']);
 assert.deepEqual(mark('I gave up on it.', 'surrender'), []);
+assert.deepEqual(mark('I finally figured it out, right?', 'figured it out'), ['figured', 'it', 'out'], 'a phrase: every word of it');
+assert.deepEqual(mark("Don't Break a leg!", 'break a leg'), ['Break', 'a', 'leg'], 'phrase ignoring case');
+assert.deepEqual(mark('break the leg, a leg', 'break a leg'), [], 'phrase words not in a row: nothing marked');
+assert.deepEqual(mark('You cannot win, but you can not care.', 'can not'), ['can', 'not'], 'a phrase is never matched as one glued word');
 
 const show = (line, w) => ja.sentenceParts(line, w).map(g => g.pieces.map(p => (p.target ? '<' : '') + p.s + (p.rt ? `(${p.rt})` : '') + (p.target ? '>' : '')).join('')).join('|');
 assert.equal(show('もう諦めるしかないのかな。', '諦める'), 'もう|<諦(あきら)><める>しか|ないのかな|。');
 assert.equal(show('もう諦めたよ', '諦める'), 'もう|<諦(あきら)><めたよ>');
 assert.equal(show('今日は晴れ', '散歩'), '今日(きょう)は|晴(は)れ', 'not in the line: nothing marked');
 assert.equal(show('I gave up.', 'gave'), 'I| |<gave>| |up|.');
+assert.equal(show('I gave up.', 'gave up'), 'I| |<gave>| |<up>|.', 'a phrase: each of its words marked');
 assert.equal(ja.sentenceParts('天気ですね', '天気').map(g => g.word ?? '').join(','), '天気ですね', 'groups keep the word to look up');
 
 // The Anki field: kana as <ruby>, the kept word bold; brackets in the line stay text.
+assert.equal(ja.rubySentence('<b>音楽</b>&諦める', '諦める'), '&lt;b&gt;<ruby>音楽<rt>おんがく</rt></ruby>&lt;/b&gt;&amp;<b><ruby>諦<rt>あきら</rt></ruby>める</b>', 'tags and & escaped, furigana and bold kept');
 assert.equal(ja.rubySentence('[音楽]もう諦める', '諦める'), '[<ruby>音楽<rt>おんがく</rt></ruby>]もう<b><ruby>諦<rt>あきら</rt></ruby>める</b>');
 
 console.log('test-japanese: all checks passed');

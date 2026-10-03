@@ -5,6 +5,7 @@ import { sentenceParts } from '../utils/textTokenizer';
 import { lookedKey } from '../utils/readLooked';
 import { formatTimeCode } from '../utils/storage';
 import { useT } from '../utils/i18n';
+import { usePhraseDrag } from '../hooks/usePhraseDrag';
 
 // One subtitle line in the reader: its time, its words (each looks up on a click,
 // the ones looked up before underlined), furigana over the kanji when on, and on
@@ -36,6 +37,7 @@ const ReaderLine: React.FC<{
   const t = useT();
   const groups = useMemo(() => sentenceParts(line.text).map(g => ({ ...g, key: g.word ? lookedKey(g.word, ja) : null })),
     [line.text, ja, jaVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { bind, inSel } = usePhraseDrag((a, b) => onWord(groups.slice(a, b + 1).flatMap(g => g.pieces.map(p => p.s)).join(''), line));
   const icon = 'w-9 h-9 rounded-lg inline-flex items-center justify-center text-mute hover:text-ink hover:bg-line';
   return (
     <div data-line={line.id} data-playing={playing || undefined}
@@ -52,8 +54,8 @@ const ReaderLine: React.FC<{
             if (!g.word) return <span key={gi}>{pieces}</span>;
             const seen = !!g.key && looked.has(g.key);
             return (
-              <button key={gi} type="button" onClick={e => { e.currentTarget.blur(); onWord(g.word!, line); }} title={t('common.lookup')}
-                className={`inline rounded-md hover:bg-accent-soft ${seen ? 'border-b-2 border-dotted border-accent' : ''}`}>{pieces}</button>
+              <button key={gi} type="button" {...bind(gi)} onClick={e => { e.currentTarget.blur(); onWord(g.word!, line); }} title={t('common.lookup')}
+                className={`inline rounded-md hover:bg-accent-soft ${inSel(gi) ? 'bg-accent-soft' : ''} ${seen ? 'border-b-2 border-dotted border-accent' : ''}`}>{pieces}</button>
             );
           })}
         </p>

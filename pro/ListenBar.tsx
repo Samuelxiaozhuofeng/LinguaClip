@@ -7,7 +7,7 @@ import { useT } from '../utils/i18n';
 // The listening page's bottom bar: the timeline (section ticks, this section's band), speed,
 // line loop, pause at line ends, the page's own switches (`extra`), and the transport.
 
-const SPEEDS = [0.75, 0.9, 1, 1.25];
+const SPEEDS = [0.75, 0.9, 1, 1.25, 1.5, 2];
 
 const ListenBar: React.FC<{
   time: number; duration: number; playing: boolean;
@@ -41,8 +41,9 @@ const ListenBar: React.FC<{
         <span className="w-12 text-xs tabular-nums text-mute">{formatTimeCode(duration)}</span>
       </div>
       <div className="mt-2 flex items-center gap-3">
-        <div className="flex-1 min-w-0 flex items-center gap-2">
-          <Seg<number> size="sm" value={speed} onChange={onSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
+        {/* Never narrower than its buttons: in a narrow window the key hints on the right give way. */}
+        <div className="flex-1 min-w-fit flex items-center gap-2">
+          <Seg<number> size="sm" className="shrink-0 [&>button]:px-1.5" value={speed} onChange={onSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
           <Btn size="sm" tone={loop ? 'accent-soft' : 'white'} aria-pressed={loop} onClick={onLoop} title={t('listen.loopTitle')}><Repeat size={14} />{t('listen.loop')}</Btn>
           <Btn size="sm" tone={autoPause ? 'accent-soft' : 'white'} aria-pressed={autoPause} onClick={onAutoPause} title={t('watch.autoPauseTitle')}>{t('watch.autoPause')}</Btn>
           {extra}

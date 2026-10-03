@@ -8,6 +8,7 @@ export interface WordDefinition {
     word: string;
     definition: string;
     partOfSpeech: string;
+    culture?: string; // asked for only with Settings → Look up → "cultural meaning" on
 }
 
 // The prompt template is the user's, so the JSON contract is pinned here
@@ -25,8 +26,15 @@ const readJson = (content: string): WordDefinition => {
     if (typeof parsed.definition !== 'string') {
         throw new Error(`model returned unexpected keys: ${Object.keys(parsed).join(', ')}`);
     }
-    return { word: parsed.word ?? '', definition: parsed.definition, partOfSpeech: parsed.partOfSpeech ?? '' };
+    const culture = (parsed as { culture?: unknown }).culture;
+    return { word: parsed.word ?? '', definition: parsed.definition, partOfSpeech: parsed.partOfSpeech ?? '', ...(typeof culture === 'string' && culture.trim() ? { culture: culture.trim() } : {}) };
 };
+
+const answerLang = () => (getLang() === 'zh' ? 'Simplified Chinese' : 'English');
+
+// The extra ask behind "cultural meaning": the lines around it, and one more JSON key.
+const aroundText = (around: string) => (around.trim() ? `\nThe lines around it, for context:\n${around.trim()}\n` : '');
+const CULTURE_KEY = () => `"culture": "<in ${answerLang()}, 1-3 sentences: the connotation, cultural background, reference or wordplay behind it here; if it simply means what it says, say so in a few words>"`;
 
 // Word lookup can use AI: the same check chat() makes before asking.
 export const aiReady = (): boolean => !!getEndpoint() && !!getAIConfig().model?.trim();
@@ -82,31 +90,33 @@ const jsonOf = (content: string): Record<string, unknown> => {
     return JSON.parse(match[0]);
 };
 
-export const getWordDefinition = async (word: string, context: string): Promise<WordDefinition> => {
+export const getWordDefinition = async (word: string, context: string, around = '', culture = false): Promise<WordDefinition> => {
     const config = getAIConfig();
     const prompt = (config.promptTemplate || DEFAULT_PROMPT)
         .replace('{word}', word)
         .replace('{context}', context);
-    const content = await chat(prompt + JSON_RULE);
+    const rule = culture ? `${aroundText(around)}${JSON_RULE.replace('string}.', `string, ${CULTURE_KEY()}}.`)}` : JSON_RULE;
+    const content = await chat(prompt + rule);
     return orGeneric(() => readJson(content));
 };
 
-export interface SensePick { index: number | null; note: string }
+export interface SensePick { index: number | null; note: string; culture?: string }
 
 // Which of the dictionary's numbered meanings the sentence uses. The model only
 // answers with a number (1-based) into the list it was shown, so it cannot
 // reword the dictionary; a number outside the list counts as "none fits".
-export const pickSense = async (word: string, context: string, lines: string[]): Promise<SensePick> => {
-    const language = getLang() === 'zh' ? 'Simplified Chinese' : 'English';
+export const pickSense = async (word: string, context: string, lines: string[], around = '', culture = false): Promise<SensePick> => {
     const prompt = `The word "${word}" appears in this sentence: "${context}".\n`
+        + (culture ? aroundText(around) : '')
         + `Its dictionary meanings, numbered:\n${lines.join('\n')}\n\n`
         + `Which single number is the meaning used in this sentence? Reply with a single JSON object and nothing else (no markdown fence): `
-        + `{"index": <that number, or 0 if none fits>, "note": "<one short sentence in ${language} on what it means here>"}`;
+        + `{"index": <that number, or 0 if none fits>, "note": "<one short sentence in ${answerLang()} on what it means here>"${culture ? `, ${CULTURE_KEY()}` : ''}}`;
     const content = await chat(prompt);
     const parsed = orGeneric(() => jsonOf(content));
     const n = Number(parsed.index);
     return {
         index: Number.isInteger(n) && n >= 1 && n <= lines.length ? n : null,
         note: typeof parsed.note === 'string' ? parsed.note : '',
+        ...(culture && typeof parsed.culture === 'string' && parsed.culture.trim() ? { culture: parsed.culture.trim() } : {}),
     };
 };

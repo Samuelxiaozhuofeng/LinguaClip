@@ -176,13 +176,9 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
     };
   }, [checkVideoTime, videoRef]);
 
-  // Handle Volume/Speed changes directly on ref
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.volume = volume;
-      videoRef.current.playbackRate = playbackSpeed;
-    }
-  }, [volume, playbackSpeed, videoRef]);
+  // Volume and speed apart: a volume change while an Anki clip records at 1× must not put the speed back.
+  useEffect(() => { if (videoRef.current) videoRef.current.volume = volume; }, [volume, videoRef]);
+  useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = playbackSpeed; }, [playbackSpeed, videoRef]);
 
   // Seek + autoplay when the line changes. Deliberately not keyed on isPlaying:
   // otherwise the end-of-line pause flips isPlaying and this would restart the video.

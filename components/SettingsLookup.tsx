@@ -4,6 +4,8 @@ import { useT, useLang } from '../utils/i18n';
 import { DictLang, DictSources, dictOptions, getDictChoice, getDictSources, saveDictChoice, saveDictSources } from '../utils/dictionary';
 import SettingsLocalDict from './SettingsLocalDict';
 
+type AutoMode = 'off' | 'many' | 'always';
+
 // Settings → Look up (docs/dictionary.md「查词顺序与开关」): the order a clicked
 // word goes through, then one card each — online, local, AI (`children`, the prompt).
 const DictionaryPicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
@@ -86,10 +88,16 @@ const SettingsLookup: React.FC<{ onSaved: () => void; aiReady: boolean; goAI: ()
       )}
       {dicts.map(d => <Step key={d.key} n={steps.indexOf(d.key)} title={d.title} sub={d.sub} on={d.on} setOn={d.setOn}>{d.body}</Step>)}
       <Step n={steps.length - 1} title="AI" sub={t('lookup.aiSub')}>
-        <label className={`flex items-center gap-2 text-sm ${aiReady ? 'cursor-pointer' : 'text-mute'}`}>
-          <input type="checkbox" checked={src.autoPick} disabled={!aiReady} onChange={e => set({ autoPick: e.target.checked })} />
-          {t('lookup.autoPick')}
-        </label>
+        <div className={`space-y-2 text-sm ${aiReady ? '' : 'text-mute'}`}>
+          <div>{t('lookup.autoPick')}</div>
+          <Seg<AutoMode> size="sm" className={aiReady ? '' : 'pointer-events-none opacity-60'} value={!src.autoPick ? 'off' : src.aiAlways ? 'always' : 'many'}
+            onChange={m => set({ autoPick: m !== 'off', aiAlways: m === 'always' })}
+            options={[{ value: 'off', label: t('lookup.autoOff') }, { value: 'many', label: t('lookup.autoMany') }, { value: 'always', label: t('lookup.autoAlways') }]} />
+          <label className={`flex items-center gap-2 ${aiReady ? 'cursor-pointer' : ''}`}>
+            <input type="checkbox" checked={src.aiCulture} disabled={!aiReady} onChange={e => set({ aiCulture: e.target.checked })} />
+            {t('lookup.culture')}
+          </label>
+        </div>
         {children}
       </Step>
     </div>
