@@ -21,7 +21,7 @@ import type { DefinitionState } from '../components/DefinitionPanel';
 import { getWordTokens, tokenizeText } from '../utils/textTokenizer';
 import { canCloze } from '../utils/aiDrills';
 import { getTransJob, prepareTrans, subscribeTrans } from './transPrep';
-import { formatTimeCode, getAudioPaddingConfig, getPracticeConfig, getWatchPrefs, ReadBy, saveWatchPrefs } from '../utils/storage';
+import { formatTimeCode, getAudioPaddingConfig, getPracticeConfig, getWatchPrefs, ReadBy, ReaderSize, saveWatchPrefs } from '../utils/storage';
 import { IS_WINDOWS } from '../utils/platform';
 import { getLang, useT } from '../utils/i18n';
 
@@ -74,6 +74,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   useEffect(() => { settleSplits(record.id, lines.map(l => l.text)).catch(() => {}); }, [record.id, lines]);
   const [kana, setKana] = useState(() => getWatchPrefs().kana);
   const [autoClip, setAutoClip] = useState(() => getWatchPrefs().autoClip);
+  const [size, setSize] = useState(() => getWatchPrefs().readerSize);
   const scroller = useRef<HTMLDivElement>(null);
 
   // --- Looked-up words: kept for the watch page, listed on the side ---
@@ -291,6 +292,9 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   };
   const setKanaPref = (on: boolean) => { setKana(on); saveWatchPrefs({ kana: on }); };
   const setAutoClipPref = (on: boolean) => { setAutoClip(on); saveWatchPrefs({ autoClip: on }); };
+  const setSizePref = (s: ReaderSize) => { setSize(s); saveWatchPrefs({ readerSize: s }); };
+  // Video showing: the side column grows to the chosen share, always leaving the lines 600px.
+  const asideW = !clip?.view || size === 's' ? '380px' : `max(380px, min(${size === 'l' ? 55 : 45}%, calc(100% - 600px)))`;
   const goSection = (i: number) => {
     if (by === 'section') { setSec(i); jumpTo(i === 0 ? 0 : sections[i].subtitles[0]?.startTime ?? 0); return; }
     scroller.current?.querySelector(`[data-section="${i}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -319,9 +323,9 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
         <Btn tone="accent" onClick={leave}>{t('reader.done')}</Btn>
       </header>
 
-      <div className="flex-1 min-h-0 flex gap-8 pl-10 pr-8">
-        <div ref={scroller} onScroll={onScroll} className="flex-1 min-w-0 overflow-y-auto pb-5">
-          <div className="mx-auto max-w-[780px] pt-5">
+      <div className="flex-1 min-h-0 flex justify-center gap-7 pl-10 pr-8">
+        <div ref={scroller} onScroll={onScroll} className="flex-1 min-w-0 max-w-[812px] overflow-y-auto pb-5">
+          <div className="max-w-[780px] pt-5">
           {ja && <div className="mb-4"><JaBanner /></div>}
           {resumeNote && resumeAt && (
             <div ref={noteRef} className="sticky top-0 z-10 -mt-5 mb-1 px-3 py-2.5 bg-paper flex items-center gap-3 text-[13px] text-mute">
@@ -362,15 +366,17 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
           </div>
         </div>
 
-        <aside className="w-[380px] shrink-0 py-5 flex flex-col gap-4 min-h-0">
+        <aside style={{ width: asideW }} className="shrink-0 py-5 pl-7 border-l border-line flex flex-col gap-4 min-h-0">
           <div className={`card !shadow-none overflow-hidden shrink-0 ${clip?.view ? '' : 'hidden'}`}>
-            <div className="relative aspect-video bg-ink">
+            <div className="relative aspect-video max-h-[calc(100vh-200px)] bg-ink">
               {video('absolute inset-0 w-full h-full object-contain')}
               <button type="button" onClick={closePlayer} title={t('reader.closePlayer')} aria-label={t('reader.closePlayer')}
                 className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/45 text-white inline-flex items-center justify-center hover:bg-black/70"><X size={16} /></button>
             </div>
             <div className="px-3.5 py-3 flex items-center gap-2">
               <span className="flex-1 min-w-0 text-xs text-mute truncate">{status}</span>
+              <Seg<ReaderSize> size="sm" value={size} onChange={setSizePref}
+                options={(['s', 'm', 'l'] as const).map(v => ({ value: v, label: t(`reader.size_${v}`), title: t('reader.sizeTitle') }))} />
               <Btn size="sm" square onClick={togglePause} title={t(done || paused ? 'reader.resume' : 'reader.pause')} aria-label={t(done || paused ? 'reader.resume' : 'reader.pause')}>
                 {done ? <RotateCcw size={14} /> : paused ? <Play size={14} /> : <Pause size={14} />}
               </Btn>
@@ -386,10 +392,10 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
             {lookedList.length === 0
               ? <p className="mt-2 text-[13px] text-mute leading-relaxed">{t('reader.lookedEmpty')}</p>
               : (
-                <ul className="mt-1.5 overflow-y-auto min-h-0 -mx-1">
+                <ul className="mt-2.5 flex flex-wrap gap-2 overflow-y-auto min-h-0">
                   {[...lookedList].reverse().map(w => (
                     <li key={w}>
-                      <button type="button" onClick={() => again(w)} className="w-full px-1 py-2 text-left text-[15px] font-medium border-b border-line hover:text-accent">{w}</button>
+                      <button type="button" onClick={() => again(w)} className="px-3 py-1.5 rounded-full bg-shade text-[14px] font-medium hover:text-accent">{w}</button>
                     </li>
                   ))}
                 </ul>
