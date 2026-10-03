@@ -2,20 +2,21 @@ import React, { useState } from 'react';
 import { Field, Group, Seg } from './ui';
 import { useT } from '../utils/i18n';
 import { JaDictRow } from './JaSetup';
-import { getWatchPrefs, saveWatchPrefs, LISTEN_TRIES } from '../utils/storage';
+import { getWatchPrefs, saveWatchPrefs, LISTEN_TRIES, getWeekStats, setPracticeFlag } from '../utils/storage';
 
 interface SettingsPracticeProps {
   sectionLength: number;
   setSectionLength: (value: number) => void;
 }
 
-// Settings → Practice: how a video is cut into sections, intensive listening's hard-line plays, and Japanese splitting.
+// Settings → Practice: how a video is cut into sections, intensive listening's hard-line plays, Japanese splitting, and the home screen's week.
 const SettingsPractice: React.FC<SettingsPracticeProps> = ({
   sectionLength,
   setSectionLength,
 }) => {
   const t = useT();
   const [tries, setTries] = useState(() => getWatchPrefs().listenTries);
+  const [week, setWeek] = useState(getWeekStats);
   const SECTION_OPTS = [
     { value: 0, label: t('settingsGeneral.optFull') },
     { value: 1, label: '1' },
@@ -48,6 +49,16 @@ const SettingsPractice: React.FC<SettingsPracticeProps> = ({
 
       <Group title={t('settings.group.japanese')}>
         <JaDictRow />
+      </Group>
+
+      <Group title={t('settings.group.home')}>
+        <div>
+          <label className="flex items-center gap-2.5 text-sm cursor-pointer">
+            <input type="checkbox" checked={week} onChange={e => { setWeek(e.target.checked); setPracticeFlag('weekStats', e.target.checked); }} className="w-4 h-4 accent-accent" />
+            {t('settingsGeneral.weekStats')}
+          </label>
+          <p className="mt-1.5 text-xs text-mute leading-relaxed">{t('settingsGeneral.weekStatsHint')}</p>
+        </div>
       </Group>
     </div>
   );

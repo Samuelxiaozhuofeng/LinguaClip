@@ -84,4 +84,33 @@ const pt = (from, to, note = 'x') => ({ from, to, note });
   assert.equal(parseBreakdownResponse('{"lang":"en","points":[', n), null);
 }
 
+// 3. Sounds: missing stays missing (an older cache → asked later), a bad list
+//    only costs the sounds ([] = do not ask again), bad points still lose it all.
+{
+  const points = [pt(1, 3)];
+  const missing = validateBreakdown({ lang: 'en', points }, n);
+  assert.deepEqual(missing, { lang: 'en', points });
+  assert.equal('sounds' in missing, false);
+  assert.deepEqual(validateBreakdown({ lang: 'en', points, sounds: [] }, n).sounds, []);
+  assert.deepEqual(
+    validateBreakdown({ lang: 'en', points, sounds: [pt(1, 2, ' was → wuz '), pt(3, 4, 'b')] }, n).sounds,
+    [pt(1, 2, 'was → wuz'), pt(3, 4, 'b')],
+  );
+  // may cover the whole line when it is short enough
+  assert.deepEqual(validateBreakdown({ lang: 'en', points: [pt(0, 3)], sounds: [pt(0, 4)] }, 5).sounds, [pt(0, 4)]);
+  const badSounds = {
+    pastEnd: [pt(8, 10)],
+    overlap: [pt(1, 3), pt(3, 4)],
+    tooLong: [pt(0, 6)],
+    emptyNote: [pt(1, 2, ' ')],
+    fourSounds: [pt(0, 0), pt(2, 2), pt(4, 4), pt(6, 6)],
+    notArray: 'x',
+    nullValue: null,
+  };
+  for (const [name, sounds] of Object.entries(badSounds)) {
+    assert.deepEqual(validateBreakdown({ lang: 'en', points, sounds }, n), { lang: 'en', points, sounds: [] }, `sounds should be []: ${name}`);
+  }
+  assert.equal(validateBreakdown({ lang: 'en', points: [pt(3, 1)], sounds: [pt(1, 2)] }, n), null);
+}
+
 console.log('breakdown: all checks passed');

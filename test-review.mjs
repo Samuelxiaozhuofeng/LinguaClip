@@ -114,6 +114,15 @@ assert.ok(!R.isRemembered({ ...stable, start: -1 }));
 assert.ok(!R.isRemembered(fresh));
 assert.equal(R.deckCounts([stable, fresh], now).line.remembered, 1);
 
+// "Got it": out of review, counts as remembered; getting stuck again takes it off, bookmarking doesn't.
+const got = { ...fresh, mastered: now };
+assert.ok(!R.isDue(got, now + DAY * 365));
+assert.ok(R.isRemembered(got));
+assert.equal(R.deckCounts([got], now).line.due, 0);
+for (const r of ['wrong', 'peek', 'breakdown', 'blur', 'missed']) assert.ok(!('mastered' in R.withReason(got, r)), `${r} keeps "got it"`);
+assert.equal(R.withReason(got, 'saved').mastered, now);
+assert.ok(R.isDue(R.withReason(got, 'wrong'), now));
+
 // Language decks (utils/deckLang.ts): a card's language is its video's — set by hand,
 // else guessed from the whole subtitle file; orphans by their siblings' lines.
 const outL = join(tmpdir(), `decklang-${process.pid}.mjs`);

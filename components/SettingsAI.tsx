@@ -49,11 +49,13 @@ export const AiAfterImport: React.FC<{
   setSegmentModel: (v: string) => void;
   autoBreakdown: boolean;
   setAutoBreakdown: (v: boolean) => void;
+  breakdownSounds: boolean;
+  setBreakdownSounds: (v: boolean) => void;
   autoCloze: boolean;
   setAutoCloze: (v: boolean) => void;
   jaCheck: boolean;
   setJaCheck: (v: boolean) => void;
-}> = ({ aiReady, goAI, segmentModel, setSegmentModel, autoBreakdown, setAutoBreakdown, autoCloze, setAutoCloze, jaCheck, setJaCheck }) => {
+}> = ({ aiReady, goAI, segmentModel, setSegmentModel, autoBreakdown, setAutoBreakdown, breakdownSounds, setBreakdownSounds, autoCloze, setAutoCloze, jaCheck, setJaCheck }) => {
   const t = useT();
   return (
     <Group title={t('settings.group.aiTidy')}>
@@ -68,6 +70,11 @@ export const AiAfterImport: React.FC<{
           <Check checked={autoCloze} onChange={setAutoCloze} disabled={!aiReady} label={t('settingsAI.autoCloze')} />
         </div>
         {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.afterImportHint')}</span> : <NeedAi goAI={goAI} />}
+      </div>
+
+      <div>
+        <Check checked={breakdownSounds} onChange={setBreakdownSounds} disabled={!aiReady} label={t('settingsAI.breakdownSounds')} />
+        {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.breakdownSoundsHint')}</span> : <NeedAi goAI={goAI} />}
       </div>
 
       <div>

@@ -1,7 +1,7 @@
 import { fetch } from '@tauri-apps/plugin-http';
 import { readJsonBody } from './aiConfig';
 import { withAiSlot } from './aiLimit';
-import { BREAKDOWN_MIN_WORDS, Breakdown, breakdownRules, clozeRouter, spaceWords, validateBreakdown } from './aiDrills';
+import { BREAKDOWN_MIN_WORDS, Breakdown, breakdownRules, clozeRouter, soundsOn, spaceWords, validateBreakdown } from './aiDrills';
 import { readCacheText, writeCacheText } from './desktop';
 import { parseSRT } from './srtParser';
 
@@ -49,7 +49,7 @@ export function batchPrompt(lines: string[], lang: 'zh' | 'en'): string {
   return `下面有 ${lines.length} 句口语转录，每句按「序号<TAB>词」列出。
 
 对每一句，挑出最值得学的 1 到 3 个点：固定搭配、短语动词、从句、时态或其他语法结构。
-只输出 JSON，格式：{"lines":[{"lang":"en","points":[{"from":1,"to":3,"note":"…"}]},{"lang":"en","points":[…]}]}
+只输出 JSON，格式：{"lines":[{"lang":"en","points":[{"from":1,"to":3,"note":"…"}]${soundsOn() ? ',"sounds":[{"from":2,"to":3,"note":"…"}]' : ''}},{"lang":"en","points":[…]}]}
 - lines 的长度必须等于 ${lines.length}，第 n 项对应第 n 句；序号都是该句自己的词序号。
 ${breakdownRules(lang)}
 

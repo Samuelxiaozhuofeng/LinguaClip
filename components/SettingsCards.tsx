@@ -6,7 +6,7 @@ import { getClipProgress, retryClips, subscribeClips } from '../utils/clips';
 import { downloadConvertTool, loadConvertTool, useConvertTool } from '../utils/convertTool';
 import ConvertToolRow from './ConvertToolRow';
 import { useT } from '../utils/i18n';
-import { getAudioPaddingConfig, getPracticeConfig, getWordFront, saveAudioPaddingConfig, savePracticeConfig } from '../utils/storage';
+import { getAudioPaddingConfig, getMasteredBtn, getPracticeConfig, getWordFront, saveAudioPaddingConfig, savePracticeConfig, setPracticeFlag } from '../utils/storage';
 import type { WordFront } from '../types';
 
 // Cards keep their own clip of the line (utils/clips.ts): on / off, which kind, and how far along.
@@ -90,6 +90,7 @@ const WordFrontPicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
 const SettingsCards: React.FC<{ onSaved: () => void; children: React.ReactNode }> = ({ onSaved, children }) => {
   const t = useT();
   const [autoAdd, setAutoAdd] = useState(() => getPracticeConfig().autoAddReview ?? false);
+  const [masteredBtn, setMasteredBtn] = useState(getMasteredBtn);
   const [audioPadding, setPadding] = useState(getAudioPaddingConfig);
   const setAudioPadding = (v: typeof audioPadding) => { setPadding(v); saveAudioPaddingConfig(v); onSaved(); };
   return (
@@ -103,6 +104,16 @@ const SettingsCards: React.FC<{ onSaved: () => void; children: React.ReactNode }
               onChange={e => { setAutoAdd(e.target.checked); savePracticeConfig({ ...getPracticeConfig(), autoAddReview: e.target.checked }); onSaved(); }}
             />
             {t('settingsGeneral.autoAddReviewLabel')}
+          </label>
+        </Field>
+        <Field label={t('settingsCards.mastered')} hint={t('settingsCards.masteredHint')}>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={masteredBtn}
+              onChange={e => { setMasteredBtn(e.target.checked); setPracticeFlag('masteredBtn', e.target.checked); onSaved(); }}
+            />
+            {t('settingsCards.masteredLabel')}
           </label>
         </Field>
         <WordFrontPicker onSaved={onSaved} />

@@ -23,7 +23,7 @@ import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribe
 import { cancelSegments, getSegJob, subscribeSeg } from '../utils/jaSegments';
 import { deckCounts, deleteVideoCards, getAllCards, keepOrphans, subscribeCards } from '../utils/review';
 import { clipVideoNow } from '../utils/clips';
-import { getToday } from '../utils/today';
+import WeekStats from './WeekStats';
 
 // Home does two things: pick up the video you were on, and add a new one (the top
 // bar's "+", or a drop). The most recent video leads as a big frame with its play
@@ -378,10 +378,6 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
     );
   };
 
-  // "Today: 12 min · 18 lines · 34 lines remembered" — each part only once it's above zero.
-  const today = getToday();
-  const todayWhat = [today.sec >= 60 && t('home.todayMin', { n: Math.floor(today.sec / 60) }), today.lines && t('home.reviewLine', { n: today.lines })].filter(Boolean).join(' · ');
-  const stats = [todayWhat && t('home.today', { what: todayWhat }), remembered > 0 && t('home.remembered', { n: remembered })].filter(Boolean).join(' · ');
   const lead = videos?.find(v => !v.importJob);
   const rest = (videos ?? []).filter(v => v !== lead);
 
@@ -452,7 +448,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
 
           <div className="mt-7 mb-3.5 flex items-baseline justify-between gap-4 text-[13px] text-mute">
             <span className="font-medium text-ink">{t(podcasts ? (lead ? 'home.otherPodcasts' : 'nav.podcasts') : lead ? 'home.others' : 'nav.videos')}</span>
-            {stats && <span title={t('home.rememberedTitle')}>{stats}</span>}
+            <WeekStats remembered={remembered} />
           </div>
           {rest.length === 0 ? (
             <p className="py-2 text-sm text-mute">{t(podcasts ? 'home.onlyOnePodcast' : 'home.onlyOne')}</p>

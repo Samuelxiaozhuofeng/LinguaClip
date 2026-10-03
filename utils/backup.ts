@@ -13,7 +13,7 @@ export const LICENSE_KEY = 'linguaclip_pro_license';
 // Not only the keys: address, model, prompt, transcription choice. Only a hand-made backup carries them.
 export const SECRET_KEYS = ['linguaclip_ai_config', 'linguaclip_transcribe_config'];
 // This computer's own state: never in a backup, never overwritten or removed by a restore.
-const LOCAL_ONLY = [LICENSE_KEY, 'linguaclip_anki_tpl', 'linguaclip_today', PENDING_KEY];
+const LOCAL_ONLY = [LICENSE_KEY, 'linguaclip_anki_tpl', 'linguaclip_today', 'linguaclip_days', PENDING_KEY];
 const EXTRA = ['import_lang', 'import_trash_original'];
 
 export const inBackup = (key: string) => (key.startsWith('linguaclip_') || EXTRA.includes(key)) && !LOCAL_ONLY.includes(key);

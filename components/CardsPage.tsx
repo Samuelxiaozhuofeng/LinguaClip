@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { Search, Trash2, Play, Bookmark } from 'lucide-react';
-import { ReviewCard, Deck, deleteCards, hasAudio, isDue, wordIndexIn } from '../utils/review';
+import { Search, Trash2, Play, Bookmark, MoreHorizontal } from 'lucide-react';
+import { ReviewCard, Deck, deleteCards, hasAudio, isDue, wordIndexIn, setMastered } from '../utils/review';
 import { hasKana } from '../utils/japanese';
-import { Btn, Seg, inputCls } from './ui';
+import { Btn, Seg, Menu, Stamp, inputCls } from './ui';
 import { dialog } from './Dialog';
 import { clipOf, useClip } from './ReviewSession';
 import { findSource } from '../utils/clips';
@@ -34,6 +34,7 @@ const CardsPage: React.FC<{ deck: Deck; cards: ReviewCard[] | null }> = ({ deck,
 
   const when = (c: ReviewCard) => {
     if (!hasAudio(c)) return t('review.noAudio');
+    if (c.mastered) return <Stamp tone="shade">{t('cards.mastered')}</Stamp>;
     if (c.fsrs.due <= now) return t('review.dueToday');
     const days = Math.round((startOfDay(c.fsrs.due) - startOfDay(now)) / DAY);
     return `${fmt(c.fsrs.due, { month: 'short', day: 'numeric' })} · ${days <= 1 ? t('review.dueTomorrow') : t('review.dueInDays', { n: days })}`;
@@ -74,7 +75,7 @@ const CardsPage: React.FC<{ deck: Deck; cards: ReviewCard[] | null }> = ({ deck,
   };
 
   const sub = (c: ReviewCard) => c.fsrs.reps > 0 ? `${t('review.reps', { n: c.fsrs.reps })}${c.fsrs.lapses > 0 ? ` · ${t('review.lapses', { n: c.fsrs.lapses })}` : ''}` : undefined;
-  const due = (c: ReviewCard) => hasAudio(c) && c.fsrs.due <= now;
+  const due = (c: ReviewCard) => isDue(c, now);
 
   return (
     <div>
@@ -134,6 +135,11 @@ const CardsPage: React.FC<{ deck: Deck; cards: ReviewCard[] | null }> = ({ deck,
                 </>
               )}
               <span className={`w-24 shrink-0 text-right text-[13px] ${due(c) ? 'text-ink font-medium' : 'text-mute'}`} title={sub(c)}>{when(c)}</span>
+              {!picked && c.mastered && (
+                <Menu items={[{ label: t('cards.unmaster'), onClick: () => { setMastered(c.id, false).catch(console.error); } }]} trigger={(open, toggle) => (
+                  <Btn square size="sm" flat onClick={toggle} title={t('home.more')} aria-label={t('home.more')} className={open ? '!bg-shade !text-ink' : ''}><MoreHorizontal size={15} /></Btn>
+                )} />
+              )}
               {!picked && (
                 <Btn square size="sm" flat onClick={() => { remove(c).catch(console.error); }} title={t('review.remove')} aria-label={t('review.remove')}
                   className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"><Trash2 size={15} /></Btn>

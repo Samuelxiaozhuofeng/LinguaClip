@@ -12,6 +12,7 @@ import Transport from './Transport';
 import ShortcutLegend, { usePinnedLegend } from './ShortcutLegend';
 import Timeline from './Timeline';
 import SavedDrawer from './SavedDrawer';
+import SoundNotes from './SoundNotes';
 import DefinitionPanel from './DefinitionPanel';
 import { useLookup, aroundOf } from '../hooks/useLookup';
 import { tokenizeText, getWordTokens } from '../utils/textTokenizer';
@@ -25,7 +26,7 @@ import { jaCheckOn, prepareSegments, settleSplits } from '../utils/jaSegments';
 import { IS_WINDOWS } from '../utils/platform';
 import { matches, formatCombo, useShortcuts } from '../utils/shortcuts';
 import { usePracticeClock } from '../utils/today';
-import { addLine, addWord, getAllCards, hasAudio, lineCardId, Reason, ReviewCard } from '../utils/review';
+import { addLine, addWord, clearMastered, getAllCards, hasAudio, lineCardId, Reason, ReviewCard } from '../utils/review';
 import ReviewSession from './ReviewSession';
 import { useTimedWords } from '../utils/wordTimes';
 
@@ -136,6 +137,7 @@ const Studio: React.FC = () => {
   const [offer, setOffer] = useState<{ reason: Reason; start: number } | null>(null);
   const record = (reason: Reason, force = false) => {
     if (!currentSub || !videoId) return;
+    if (!force) clearMastered(videoId, currentSub.startTime).catch(console.error); // stuck again: back into review (docs/review.md)
     if (!autoAdd && !force) { setOffer({ reason, start: currentSub.startTime }); return; }
     setOffer(null);
     const p = addLine({ videoId, videoName, text: currentSub.text, start: currentSub.startTime, end: currentSub.endTime }, reason).catch(console.error);
@@ -359,6 +361,7 @@ const Studio: React.FC = () => {
                   {bdActive.reviewing && (bdLast ? bdActive.steps.slice(0, -1) : [bdStep]).map(s => (
                     <p key={s.text} className="max-w-2xl px-4 py-3 rounded-xl bg-shade text-left text-[15px] leading-relaxed fade-in">{s.note}</p>
                   ))}
+                  {bdActive.reviewing && bdLast && <SoundNotes lineText={bdStep.text} sounds={bdActive.sounds} />}
                 </div>
               ) : mode === PracticeMode.LISTENING ? (
                 <ListeningGhost text={currentSub.text} blanks={blanks} splitVersion={splitVersion} />

@@ -4,11 +4,15 @@ import type { WatchSubs } from '../utils/storage';
 import { canCloze } from '../utils/aiDrills';
 import { getLang } from '../utils/i18n';
 import { getTransJob, prepareTrans, subscribeTrans } from './transPrep';
+import { usePracticeClock } from '../utils/today';
 
 // The listening page's transcript: kept on the line being said until the reader scrolls away
 // ("back to the current line", or 5 s without scrolling while it plays, brings it back), and
 // each line's translation, opened one by one.
 export function useListenText(record: VideoRecord, lines: Subtitle[], audio: RefObject<HTMLAudioElement | null>, curId: number | null, effMode: WatchSubs, sec: number, playing: boolean) {
+  // The page's practice clock lives here: ListenPage is at its 500-line cap, and this hook
+  // is held exactly as long as the page is open (utils/today.ts, docs/stats.md).
+  usePracticeClock();
   const scroller = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
   useEffect(() => {

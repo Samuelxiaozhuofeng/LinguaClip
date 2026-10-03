@@ -1,6 +1,6 @@
 import { fetch } from '@tauri-apps/plugin-http';
 import { ClozeLevel } from '../types';
-import { readJsonBody } from './aiConfig';
+import { getAIConfig, readJsonBody } from './aiConfig';
 import { withAiSlot } from './aiLimit';
 import { getRouter } from './resegment';
 import { tokenizeText, getWordTokens } from './textTokenizer';
@@ -243,7 +243,12 @@ const MAX_POINT_WORDS = 6;
 export const BREAKDOWN_MIN_WORDS = 5;
 
 export type BreakdownPoint = { from: number; to: number; note: string }; // words[from..to], inclusive
-export type Breakdown = { lang: string; points: BreakdownPoint[] };
+// sounds: what makes the line hard to hear (docs/breakdown.md). undefined = never
+// asked (older caches), [] = asked and there is nothing, or the answer was unusable.
+export type Breakdown = { lang: string; points: BreakdownPoint[]; sounds?: BreakdownPoint[] };
+const MAX_SOUNDS = 3;
+
+export const soundsOn = () => getAIConfig().breakdownSounds !== false;
 
 // Lines are split on spaces, not tokenizeText: punctuation stays on its word
 // ("Mary."), so a point's text is exactly what the user sees in the line.
@@ -251,23 +256,35 @@ export function spaceWords(text: string): string[] {
   return text.trim().split(/\s+/).filter(Boolean);
 }
 
-export function validateBreakdown(value: unknown, wordCount: number): Breakdown | null {
-  const v = value as { lang?: unknown; points?: unknown } | null;
-  if (!v || typeof v.lang !== 'string' || !/^[a-z]{2}$/.test(v.lang) || !Array.isArray(v.points)) return null;
-  if (v.points.length < 1 || v.points.length > 3) return null;
-  const points: BreakdownPoint[] = [];
+// In order, no overlap, inside the line, at most MAX_POINT_WORDS, a note each.
+function validRanges(list: unknown[], wordCount: number, wholeLineOk: boolean): BreakdownPoint[] | null {
+  const out: BreakdownPoint[] = [];
   let prevTo = -1;
-  for (const p of v.points as unknown[]) {
+  for (const p of list) {
     const { from, to, note } = (p ?? {}) as { from?: unknown; to?: unknown; note?: unknown };
     if (!Number.isInteger(from) || !Number.isInteger(to)) return null;
     const f = from as number, t = to as number;
     if (f <= prevTo || t < f || t >= wordCount || t - f + 1 > MAX_POINT_WORDS) return null;
-    if (t - f + 1 >= wordCount) return null; // the whole line is the last step anyway
+    if (!wholeLineOk && t - f + 1 >= wordCount) return null; // the whole line is the last step anyway
     if (typeof note !== 'string' || !note.trim()) return null;
-    points.push({ from: f, to: t, note: note.trim() });
+    out.push({ from: f, to: t, note: note.trim() });
     prevTo = t;
   }
-  return { lang: v.lang, points };
+  return out;
+}
+
+export function validateSounds(value: unknown, wordCount: number): BreakdownPoint[] {
+  return Array.isArray(value) && value.length <= MAX_SOUNDS ? validRanges(value, wordCount, true) ?? [] : [];
+}
+
+export function validateBreakdown(value: unknown, wordCount: number): Breakdown | null {
+  const v = value as { lang?: unknown; points?: unknown; sounds?: unknown } | null;
+  if (!v || typeof v.lang !== 'string' || !/^[a-z]{2}$/.test(v.lang) || !Array.isArray(v.points)) return null;
+  if (v.points.length < 1 || v.points.length > 3) return null;
+  const points = validRanges(v.points, wordCount, false);
+  if (!points) return null;
+  // A bad sounds list only costs the sounds; [] so it is not asked again.
+  return v.sounds === undefined ? { lang: v.lang, points } : { lang: v.lang, points, sounds: validateSounds(v.sounds, wordCount) };
 }
 
 export function parseBreakdownResponse(content: string, wordCount: number): Breakdown | null {
@@ -300,7 +317,14 @@ export function breakdownRules(lang: 'zh' | 'en'): string {
 - from / to：这个点在句中连续的第一个和最后一个词的序号（含两端），最多 ${MAX_POINT_WORDS} 个词，不能是整句。按句中顺序排列，互不重叠。
 - 如果一个结构在句中是断开的（如 was …ing … when …），只选其中最核心的连续几个词，在 note 里把整个结构讲清楚。
 - note：用一两句简短的${noteLang}讲这个点的意思和用法，讲到语法结构这一层，例如 ${example}。
-- JSON 以外不要输出任何文字。`;
+${soundsOn() ? soundsRules(lang) : ''}- JSON 以外不要输出任何文字。`;
+}
+
+function soundsRules(lang: 'zh' | 'en'): string {
+  const noteLang = lang === 'zh' ? '简体中文' : 'English';
+  const example = lang === 'zh' ? '"want to → wanna：to 弱读，和 want 连成一个音"' : '"want to → wanna: to is weakened and runs into want"';
+  return `- sounds：这句里 0 到 ${MAX_SOUNDS} 处让人听不出来的地方（连读、弱读、吞音、失去爆破等），没有就给 []。每处 {"from":…,"to":…,"note":"…"}：from / to 是连续的第一个和最后一个词的序号（含两端），最多 ${MAX_POINT_WORDS} 个词，按句中顺序、互不重叠（和 points 各算各的）；note 用${noteLang}写成「原词 → 实际听到的样子：原因」，例如 ${example}。
+`;
 }
 
 function breakdownPrompt(words: string[], lang: 'zh' | 'en'): string {
@@ -308,27 +332,49 @@ function breakdownPrompt(words: string[], lang: 'zh' | 'en'): string {
   return `下面是一句口语转录，按「序号<TAB>词」列出，共 ${words.length} 个词。
 
 挑出这句里最值得学的 1 到 3 个点：固定搭配、短语动词、从句、时态或其他语法结构。
-只输出 JSON，格式：{"lang":"en","points":[{"from":1,"to":3,"note":"…"},{"from":6,"to":9,"note":"…"}]}
+只输出 JSON，格式：{"lang":"en","points":[{"from":1,"to":3,"note":"…"},{"from":6,"to":9,"note":"…"}]${soundsOn() ? ',"sounds":[{"from":2,"to":3,"note":"…"}]' : ''}}
 ${breakdownRules(lang)}
 
 ${listing}`;
 }
 
-export async function askBreakdown(words: string[], lang: 'zh' | 'en'): Promise<Breakdown | null> {
+// One short prompt to the router; the answer text, or null. A network hiccup
+// gets one retry; an answer that fails the checks does not.
+async function askShort(prompt: string): Promise<string | null> {
   const router = clozeRouter();
-  if (!router || words.length === 0) return null;
-  const once = async (): Promise<Breakdown | null> => {
+  if (!router) return null;
+  const once = async (): Promise<string | null> => {
     const res = await fetch(`${router.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${router.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: breakdownPrompt(words, lang) }] }),
+      body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: prompt }] }),
       signal: AbortSignal.timeout(BREAKDOWN_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`router ${res.status}`);
     const body = await readJsonBody<{ choices?: { message?: { content?: string } }[] }>(res);
     const content = body?.choices?.[0]?.message?.content;
-    return typeof content === 'string' ? parseBreakdownResponse(content, words.length) : null;
+    return typeof content === 'string' ? content : null;
   };
-  // A network hiccup gets one retry; an answer that fails the checks does not.
   try { return await once(); } catch { try { return await once(); } catch { return null; } }
+}
+
+export async function askBreakdown(words: string[], lang: 'zh' | 'en'): Promise<Breakdown | null> {
+  if (words.length === 0) return null;
+  const content = await askShort(breakdownPrompt(words, lang));
+  return content === null ? null : parseBreakdownResponse(content, words.length);
+}
+
+// Sounds only, for a line prepared before they were asked. null = no answer.
+export async function askSounds(words: string[], lang: 'zh' | 'en'): Promise<BreakdownPoint[] | null> {
+  if (words.length === 0) return null;
+  const listing = words.map((w, i) => `${i}\t${w}`).join('\n');
+  const content = await askShort(`下面是一句口语转录，按「序号<TAB>词」列出，共 ${words.length} 个词。
+
+只输出 JSON，格式：{"sounds":[{"from":2,"to":3,"note":"…"}]}
+${soundsRules(lang)}- JSON 以外不要输出任何文字。
+
+${listing}`);
+  const match = content?.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try { return validateSounds(JSON.parse(match[0])?.sounds, words.length); } catch { return null; }
 }

@@ -19,6 +19,7 @@ import { formatTimeCode, getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos
 import { formatCombo, matches, useShortcuts } from '../utils/shortcuts';
 import { IS_WINDOWS } from '../utils/platform';
 import { DictKey, useT } from '../utils/i18n';
+import { usePracticeClock } from '../utils/today';
 
 // Watch mode: the whole window is the video, the subtitle sits on the picture.
 // Look words up, save lines (S), send them to Anki, and at the end dictate a few
@@ -33,6 +34,7 @@ const BOTTOM_ZONE = 44; // px from the bottom edge that bring the controls up: b
 
 const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ record, onExit }) => {
   const t = useT();
+  usePracticeClock();
   const combos = useShortcuts();
   const lines = useMemo(() => [...parseSRT(record.subtitleText)].sort((a, b) => a.startTime - b.startTime), [record.subtitleText]);
   const videoRef = useRef<HTMLVideoElement>(null);

@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PracticeMode } from '../types';
 import { Rating, type Grade } from 'ts-fsrs';
-import { ReviewCard, recordOutcome, repointVideo, getAllCards, dueQueue, addWord, gradeOf, previewDue, schedule } from '../utils/review';
+import { ReviewCard, recordOutcome, repointVideo, getAllCards, dueQueue, addWord, gradeOf, previewDue, schedule, setMastered } from '../utils/review';
 import { patchVideoRecord } from '../utils/videoStorage';
-import { getAudioPaddingConfig, getWordFront } from '../utils/storage';
+import { getAudioPaddingConfig, getWordFront, getMasteredBtn } from '../utils/storage';
 import { videoSrcFromPath, pickVideoPath } from '../utils/desktop';
 import { findSource, type Source } from '../utils/clips';
-import { Play, Repeat, RotateCcw, X } from 'lucide-react';
+import { Check, Play, Repeat, RotateCcw, X } from 'lucide-react';
 import { Btn } from './ui';
 import { IS_WINDOWS } from '../utils/platform';
 import DictationLine from './DictationLine';
@@ -99,6 +99,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
   const [suggest, setSuggest] = useState<Grade | undefined>(); // sentence card: what the dictation says
   const [at, setAt] = useState(0); // when the buttons came up: shown days and kept days share it
   const front = useMemo(getWordFront, []);
+  const masteredBtn = useMemo(getMasteredBtn, []);
+  const [undo, setUndo] = useState<{ id: string; n: number } | null>(null); // the "got it" note, with its undo
   const repeats = useRef(new Set<string>()); // cards already graded "Again" this round
   const relinked = useRef(new Map<string, string>());
   const writes = useRef<Promise<unknown>[]>([]);
@@ -253,6 +255,26 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
     next();
   };
 
+  // "Got it" (docs/review.md): out of review from now on; counts like a grade. Undo = the same switch off.
+  const master = () => {
+    if (!card) return;
+    writes.current.push(setMastered(card.id, true).catch(console.error));
+    if (!repeats.current.has(card.id)) countLine();
+    setUndo(u => ({ id: card.id, n: (u?.n ?? 0) + 1 }));
+    next();
+  };
+  const unmaster = () => {
+    if (!undo) return;
+    writes.current.push(setMastered(undo.id, false).catch(console.error));
+    setUndo(null);
+  };
+  useEffect(() => {
+    if (!undo) return;
+    const id = window.setTimeout(() => setUndo(null), 6000);
+    return () => window.clearTimeout(id);
+  }, [undo]);
+  const canMaster = masteredBtn && !isWord;
+
   const relink = async () => {
     if (!card) return;
     const p = await pickVideoPath();
@@ -280,8 +302,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
   // Enter takes the suggested grade; nothing reaches the page underneath.
   const defOpen = def.word !== null;
   const front0 = isWord && !turned && !!path && splitsReady && !done;
-  const keys = useRef({ onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop });
-  keys.current = { onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop };
+  const keys = useRef({ onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster });
+  keys.current = { onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return; // Esc / Enter inside a Japanese input method
@@ -295,6 +317,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
         const hit = (run: () => void) => { e.preventDefault(); e.stopPropagation(); run(); };
         if (k.front0 && plain && e.code === 'Space') return hit(k.turn);
         if (k.grading && plain && /^[1-4]$/.test(e.key)) return hit(() => k.grade(+e.key as Grade));
+        if (k.grading && plain && e.key === '5' && k.canMaster) return hit(k.master);
         if (k.grading && plain && e.key === 'Enter' && k.suggest) return hit(() => k.grade(k.suggest!));
         if (k.grading && matches(e, 'replay')) return hit(() => k.playCard());
       }
@@ -387,6 +410,13 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
           <footer className="shrink-0 h-[96px] flex items-center justify-center gap-3 text-ink">
             {!isWord && <Btn square flat onClick={() => playCard()} title={t('transport.replayLine')} aria-label={t('transport.replayLine')} className="!text-ink"><RotateCcw size={18} /></Btn>}
             <GradeBar due={due} now={at} suggest={isWord ? undefined : suggest} onGrade={grade} />
+            {canMaster && (
+              <button type="button" onClick={e => { e.currentTarget.blur(); master(); }} title={t('review.masteredTitle')}
+                className="press w-[132px] h-[58px] rounded-2xl border border-line bg-page flex flex-col items-center justify-center gap-0.5">
+                <span className="flex items-center gap-1.5"><span className="text-[11px] text-mute">5</span><span className="text-[15px] font-semibold">{t('review.mastered')}</span></span>
+                <Check size={14} className="text-mute" />
+              </button>
+            )}
           </footer>
         ) : !hidden && path && (
           <footer className="shrink-0 h-[76px] flex items-center justify-center gap-2 text-ink">
@@ -398,6 +428,12 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
           </footer>
         )}
       </section>
+      {undo && (
+        <div key={undo.n} className="fixed left-1/2 -translate-x-1/2 bottom-6 z-[60] h-10 pl-4 pr-1.5 rounded-full bg-ink text-white text-sm flex items-center gap-2 shadow-card fade-in">
+          {t('review.masteredToast')}
+          <button type="button" onClick={e => { e.currentTarget.blur(); unmaster(); }} className="press h-7 px-3 rounded-full bg-white/15 font-medium">{t('review.undo')}</button>
+        </div>
+      )}
       {defOpen && <DefinitionPanel key={def.word} def={def} onClose={closeDef} onExplain={explain} onKeepWord={keepWord} />}
     </div>
   );

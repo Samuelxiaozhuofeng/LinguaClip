@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Subtitle } from '../types';
-import { BREAKDOWN_MIN_WORDS, BreakdownStep, askBreakdown, buildSteps, spaceWords } from '../utils/aiDrills';
+import { BREAKDOWN_MIN_WORDS, BreakdownPoint, BreakdownStep, askBreakdown, askSounds, buildSteps, soundsOn, spaceWords } from '../utils/aiDrills';
 import { cachedBreakdown } from '../utils/breakdownPrep';
 import { Clip, loadClip, playClip, releaseClip, stopClip } from '../utils/speech';
 import { getLang } from '../utils/i18n';
@@ -15,7 +15,7 @@ export type BreakdownState =
   | { status: 'idle' }
   | { status: 'loading'; lineId: number }
   | { status: 'failed'; lineId: number }
-  | { status: 'active'; lineId: number; steps: BreakdownStep[]; clips: Clip[]; step: number; reviewing: boolean };
+  | { status: 'active'; lineId: number; steps: BreakdownStep[]; clips: Clip[]; step: number; reviewing: boolean; sounds?: BreakdownPoint[] };
 
 export function useBreakdown(currentSub: Subtitle | undefined, recordId: string | null) {
   const [state, setState] = useState<BreakdownState>({ status: 'idle' });
@@ -49,7 +49,13 @@ export function useBreakdown(currentSub: Subtitle | undefined, recordId: string 
     const loaded = await Promise.all(steps.slice(0, -1).map(s => loadClip(s.text, result.lang)));
     if (mine !== seq.current) { loaded.forEach(releaseClip); return; }
     clips.current = loaded;
-    setState({ status: 'active', lineId: id, steps, clips: loaded, step: 0, reviewing: false });
+    const sounds = soundsOn() ? result.sounds : undefined;
+    setState({ status: 'active', lineId: id, steps, clips: loaded, step: 0, reviewing: false, sounds });
+    // Prepared before sounds were asked: ask for them alone, in the background.
+    if (soundsOn() && result.sounds === undefined) {
+      const extra = await askSounds(spaceWords(currentSub.text), getLang());
+      if (extra && mine === seq.current) setState(s => (s.status === 'active' ? { ...s, sounds: extra } : s));
+    }
   };
 
   // Plays the current step's clip; false on the last step (the whole line),
@@ -67,7 +73,7 @@ export function useBreakdown(currentSub: Subtitle | undefined, recordId: string 
   const next = (): boolean => {
     if (state.status !== 'active' || state.step >= state.steps.length - 1) return false;
     stopClip();
-    setState({ ...state, step: state.step + 1, reviewing: false });
+    setState(s => (s.status === 'active' ? { ...s, step: s.step + 1, reviewing: false } : s)); // keeps sounds that came in meanwhile
     return true;
   };
 

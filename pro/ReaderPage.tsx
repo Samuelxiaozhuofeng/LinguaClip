@@ -24,6 +24,7 @@ import { getTransJob, prepareTrans, subscribeTrans } from './transPrep';
 import { formatTimeCode, getAudioPaddingConfig, getWatchPrefs, ReadBy, ReaderSize, saveWatchPrefs } from '../utils/storage';
 import { IS_WINDOWS } from '../utils/platform';
 import { getLang, useT } from '../utils/i18n';
+import { usePracticeClock } from '../utils/today';
 
 // Reading a video's subtitles before practising it: the lines as a page to read,
 // words to look up (kept, so the watch page marks them later), furigana, a folded
@@ -57,6 +58,7 @@ type Clip = { kind: 'line' | 'from' | 'section'; view: boolean; from: number; to
 
 const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: number) => void }> = ({ record, by, onExit }) => {
   const t = useT();
+  usePracticeClock();
   const lines = useMemo(() => [...parseSRT(record.subtitleText)].sort((a, b) => a.startTime - b.startTime), [record.subtitleText]);
   const sections = useMemo(() => buildSections(lines, sectionLengthOf(record)), [lines]);
   const indexOf = useMemo(() => new Map(lines.map((l, i) => [l.id, i])), [lines]);

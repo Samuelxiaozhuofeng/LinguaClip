@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ReviewCard, Deck, getAllCards, subscribeCards, deckCounts, dueQueue, hasAudio } from '../utils/review';
+import { ReviewCard, Deck, getAllCards, subscribeCards, deckCounts, dueQueue, inReview } from '../utils/review';
 import { DeckLang, DECK_LANGS, LangSource, cardLangs, langName } from '../utils/deckLang';
 import { getAllVideosFromDB } from '../utils/fileSystemAccess';
 import { Play } from 'lucide-react';
@@ -72,7 +72,7 @@ const ReviewPage: React.FC<{ deck: Deck }> = ({ deck }) => {
   // This deck's cards (with audio) coming up on each of the next 7 days; today includes overdue.
   const week = Array.from({ length: 7 }, (_, i) => {
     const day = dayStart(now, i), end = dayStart(now, i + 1);
-    const count = all.filter(c => c.deck === deck && hasAudio(c) && (i === 0 ? c.fsrs.due < end : c.fsrs.due >= day && c.fsrs.due < end)).length;
+    const count = all.filter(c => c.deck === deck && inReview(c) && (i === 0 ? c.fsrs.due < end : c.fsrs.due >= day && c.fsrs.due < end)).length;
     return { label: i === 0 ? t('review.today') : fmt(day, { weekday: 'short' }), n: count };
   });
   const peak = Math.max(1, ...week.map(d => d.n));

@@ -37,6 +37,7 @@ export interface ReviewCard {
   reasons: Reason[];
   saved: boolean;        // bookmarked by hand
   clip?: Clip;           // its own copy of the line (utils/clips.ts), so it plays after the video is deleted
+  mastered?: number;     // marked "got it" in review (when): out of review until the line trips the learner up again (docs/review.md)
   fsrs: Stored<Card>;
   createdAt: number;
 }
@@ -70,9 +71,14 @@ export const newCard = (base: Omit<ReviewCard, 'fsrs' | 'createdAt' | 'reasons' 
   createdAt: now,
 });
 
+// Without the "got it" mark (the key removed, not set to undefined).
+const unmastered = ({ mastered: _, ...card }: ReviewCard): ReviewCard => card;
+const STUCK: Reason[] = ['wrong', 'peek', 'breakdown', 'blur', 'missed'];
+
 // Meeting a card again while practising only notes why; it never resets the schedule.
+// Getting stuck on it again takes off "got it"; bookmarking doesn't.
 export const withReason = (card: ReviewCard, reason: Reason): ReviewCard => ({
-  ...card,
+  ...(STUCK.includes(reason) ? unmastered(card) : card),
   reasons: card.reasons.includes(reason) ? card.reasons : [...card.reasons, reason],
   saved: card.saved || reason === 'saved',
 });
@@ -89,16 +95,18 @@ export const previewDue = (card: ReviewCard, now: number): Record<Grade, number>
   return { [Rating.Again]: +r[Rating.Again].card.due, [Rating.Hard]: +r[Rating.Hard].card.due, [Rating.Good]: +r[Rating.Good].card.due, [Rating.Easy]: +r[Rating.Easy].card.due } as Record<Grade, number>;
 };
 
-export const isDue = (c: ReviewCard, now = Date.now()) => hasAudio(c) && c.fsrs.due <= now;
+// In the review rotation at all: has audio and not marked "got it" (docs/review.md).
+export const inReview = (c: ReviewCard) => hasAudio(c) && !c.mastered;
+export const isDue = (c: ReviewCard, now = Date.now()) => inReview(c) && c.fsrs.due <= now;
 
 export const dueQueue = (cards: ReviewCard[], deck: Deck, now = Date.now(), limit = SESSION_SIZE) =>
   cards.filter(c => c.deck === deck && isDue(c, now)).sort((a, b) => a.fsrs.due - b.fsrs.due).slice(0, limit);
 
 export const isNew = (c: ReviewCard) => c.fsrs.state === State.New;
 
-// "Remembered" on the home screen: a line likely still recalled a week from now.
+// "Remembered" on the home screen: a line likely still recalled a week from now, or marked "got it".
 export const REMEMBERED_DAYS = 7;
-export const isRemembered = (c: ReviewCard) => c.deck === 'line' && hasAudio(c) && c.fsrs.stability >= REMEMBERED_DAYS;
+export const isRemembered = (c: ReviewCard) => c.deck === 'line' && hasAudio(c) && (!!c.mastered || c.fsrs.stability >= REMEMBERED_DAYS);
 
 // Which boxes to blank in a word card: the first token equal to the word,
 // ignoring case and punctuation. A Japanese word kept under another split
@@ -260,8 +268,20 @@ export const lineCardsFor = async (videoId: string, lines: { startTime: number }
   return (await getAllCards()).filter(c => c.deck === 'line' && c.videoId === videoId && starts.has(c.start.toFixed(2)) && hasAudio(c));
 };
 
-export const recordOutcome = (card: ReviewCard, o: Outcome | Grade, now = Date.now()) =>
-  update(card.id, old => old ? { ...old, videoPath: card.videoPath ?? old.videoPath, fsrs: schedule(old, o, now).fsrs } : undefined);
+// Again / Hard: the line is a struggle again, so "got it" comes off.
+export const recordOutcome = (card: ReviewCard, o: Outcome | Grade, now = Date.now()) => update(card.id, old => {
+  if (!old) return undefined;
+  const g = typeof o === 'number' ? o : gradeOf(o);
+  return { ...(g === Rating.Again || g === Rating.Hard ? unmastered(old) : old), videoPath: card.videoPath ?? old.videoPath, fsrs: schedule(old, g, now).fsrs };
+});
+
+// "Got it" on / off (off = undo, or "back to review" in the library); the schedule is untouched.
+export const setMastered = (id: string, on: boolean) =>
+  update(id, old => old ? (on ? { ...old, mastered: Date.now() } : unmastered(old)) : undefined);
+
+// The practice page got stuck on this line: back to review, whether or not it adds cards.
+export const clearMastered = (videoId: string, start: number) =>
+  update(lineCardId(videoId, start), old => old?.mastered ? unmastered(old) : undefined);
 
 export const countForVideo = async (videoId: string) => (await getAllCards()).filter(c => c.videoId === videoId).length;
 

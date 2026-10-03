@@ -65,6 +65,8 @@ export interface PracticeConfig {
   clipKind?: 'video' | 'audio'; // what a new clip is: a small video, or sound + a still; default video
   videoShare?: number; // % of the practice page's width given to the video; default 60
   wordFront?: WordFront; // what a word card shows before it is turned (review and Anki); default 'word'
+  masteredBtn?: boolean; // review shows "Got it" on sentence cards (docs/review.md); default on
+  weekStats?: boolean; // home shows the 7-day chart (docs/stats.md); default on
   custom?: import('./utils/customPick').CustomConfig; // the start-of-practice panel's last choice
 }
 
@@ -99,6 +101,7 @@ export interface AIConfig {
   baseUrl?: string;     // OpenAI-compatible base URL; required
   segmentModel?: string; // model used to re-cut transcript lines on import
   autoBreakdown?: boolean; // prepare breakdowns as soon as an import finishes
+  breakdownSounds?: boolean; // breakdowns also point out what makes the line hard to hear (docs/breakdown.md); default on
   autoCloze?: boolean;     // prepare cloze blanks as soon as an import finishes
   jaSegmentAi?: boolean;   // have the AI check Japanese phrase splits (utils/jaSegments.ts)
   limits?: { segment?: number; breakdown?: number; cloze?: number }; // AI calls in flight per job kind (utils/aiLimit.ts)

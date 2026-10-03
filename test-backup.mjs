@@ -22,7 +22,7 @@ const B = await import(out);
 const keys = [
   'linguaclip_practice_config', 'linguaclip_ai_config', 'linguaclip_transcribe_config', 'linguaclip_some_future_key',
   'import_lang', 'import_trash_original',
-  'linguaclip_pro_license', 'linguaclip_anki_tpl', 'linguaclip_today', 'linguaclip_restore_pending',
+  'linguaclip_pro_license', 'linguaclip_anki_tpl', 'linguaclip_today', 'linguaclip_days', 'linguaclip_restore_pending',
   'other_app_key', 'lang',
 ];
 assert.deepEqual(B.backupKeys(keys), [
@@ -132,7 +132,7 @@ assert.equal(B.compareVersions('0.1.9', '0.2.0'), -1);
 
 // --- restoring settings: AI / transcription settings already here are never touched ---
 {
-  const current = { linguaclip_ai_config: 'mine', linguaclip_lang: 'en', linguaclip_old: 'x', linguaclip_pro_license: 'L', linguaclip_today: 'T', other: 'o' };
+  const current = { linguaclip_ai_config: 'mine', linguaclip_lang: 'en', linguaclip_old: 'x', linguaclip_pro_license: 'L', linguaclip_today: 'T', linguaclip_days: 'D', other: 'o' };
   const backup = { linguaclip_ai_config: 'theirs', linguaclip_transcribe_config: 'theirs-t', linguaclip_lang: 'zh', linguaclip_pro_license: 'evil' };
   const plan = B.planLocalStorage(current, backup);
   assert.deepEqual(Object.fromEntries(plan.set), { linguaclip_transcribe_config: 'theirs-t', linguaclip_lang: 'zh' },
