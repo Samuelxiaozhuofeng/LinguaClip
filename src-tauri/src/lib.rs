@@ -4,6 +4,7 @@ mod bailian;
 mod cache;
 mod clips;
 mod cloud_asr;
+mod cloud_pieces;
 mod convert;
 #[cfg(test)]
 mod cloud_live_tests;
@@ -17,8 +18,10 @@ mod import_queue;
 mod ja_dict;
 mod paths;
 mod podcast;
+mod repeat_fix;
 mod tts;
 mod whisper_setup;
+mod word_order;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

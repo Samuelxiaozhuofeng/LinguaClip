@@ -149,7 +149,7 @@ export async function listenDragDrop(handler: DragDropHandler): Promise<Unlisten
   });
 }
 
-export type CacheKind = 'words' | 'cloze' | 'breakdown' | 'segments' | 'levels' | 'trans';
+export type CacheKind = 'words' | 'cloze' | 'breakdown' | 'segments' | 'levels' | 'trans' | 'keywords';
 
 // ~/Movies/LinguaClip on macOS, ~/Videos/LinguaClip on Windows; must match
 // own_dir() in src-tauri/src/paths.rs.
@@ -177,7 +177,7 @@ export async function writeCacheText(id: string, kind: CacheKind, text: string):
 
 // Files that belong to a record besides the video: its .srt (generated ones sit
 // in ~/Movies/LinguaClip, hand-picked ones usually beside the video) and our
-// word/cloze/breakdown/segments/levels/trans caches. Only paths that exist.
+// word/cloze/breakdown/segments/levels/trans/keywords caches. Only paths that exist.
 export async function relatedFilePaths(id: string, videoPath: string, subtitleFileName: string): Promise<string[]> {
   const ours = await ownDir();
   const videoDir = videoPath.slice(0, Math.max(videoPath.lastIndexOf('/'), videoPath.lastIndexOf('\\')));
@@ -187,12 +187,12 @@ export async function relatedFilePaths(id: string, videoPath: string, subtitleFi
   ]);
 }
 
-// Just our word/cloze/breakdown/segments/levels/trans caches for a record, the ones that exist.
+// Just our word/cloze/breakdown/segments/levels/trans/keywords caches for a record, the ones that exist.
 export async function cacheFilePaths(id: string): Promise<string[]> {
   return existing(await cachePaths(id));
 }
 
-const cachePaths = (id: string) => Promise.all((['words', 'cloze', 'breakdown', 'segments', 'levels', 'trans'] as const).map(k => cacheFilePath(id, k)));
+const cachePaths = (id: string) => Promise.all((['words', 'cloze', 'breakdown', 'segments', 'levels', 'trans', 'keywords'] as const).map(k => cacheFilePath(id, k)));
 
 async function existing(paths: string[]): Promise<string[]> {
   const unique = [...new Set(paths)];

@@ -7,6 +7,18 @@ export const en = {
   'dialog.confirm': 'Confirm',
   'dialog.cancel': 'Cancel',
 
+  // --- This episode's keywords (components/KeywordCard.tsx) ---
+  'keywords.title': "This episode's keywords",
+  'keywords.preparing': "Preparing this episode's keywords…",
+  'keywords.add': 'Add to word cards',
+  'keywords.added': 'In your word cards',
+  'keywords.cardsUnreadable': "Couldn't read your word cards; try again later",
+  'keywords.addFail': "Couldn't add it; try again",
+  'keywords.playWord': 'Hear the word',
+  'keywords.playLine': 'Hear the line',
+  'keywords.start': 'Start listening',
+  'keywords.startHint': 'Enter to start',
+
   // --- Start-of-practice panel (components/CustomPanel.tsx) ---
   'custom.title': 'How to practise this time',
   'custom.way': 'Practice',
@@ -154,6 +166,7 @@ export const en = {
   'import.extractNoAudio': 'No readable audio in this video: it may be silent, or use a format such as Dolby AC-3',
   'import.failedTranscribe': 'Transcription failed: {detail}',
   'import.stageCloud': 'Transcribing in the cloud {pct}%',
+  'import.stageRetranscribe': 'Re-transcribing a looped passage {pct}%',
   'import.stageConvertSetup': 'Downloading the converter {pct}%',
   'import.stageConvert': 'Converting to mp4 {pct}%',
   'import.failedConvert': 'Conversion failed: {detail}',
@@ -266,7 +279,8 @@ export const en = {
   'settingsAI.breakdownSounds': 'Explain what makes lines hard to hear',
   'settingsAI.breakdownSoundsHint': 'On the last step of Break it down, also point out linking, weak forms and dropped sounds (want to → wanna).',
   'settingsAI.autoCloze': 'Prepare blanks automatically',
-  'settingsAI.afterImportHint': 'As soon as an imported video is transcribed, the AI prepares breakdowns / blanks in the background; progress shows on the home page.',
+  'settingsAI.autoKeywords': "This episode's keywords (a short summary + key words, shown before you practise)",
+  'settingsAI.afterImportHint': 'As soon as an imported video is transcribed, the AI prepares breakdowns / blanks in the background; progress shows on the home page. Keywords show on the practice panel and before a podcast episode.',
   'settingsAI.afterImportNeedAi': 'Fill in the API address, API key and model on the AI tab first.',
   'settingsAI.limits': 'Max requests at once',
   'settingsAI.limit_segment': 'Shaping lines',

@@ -10,7 +10,7 @@ pub(crate) fn valid_id(id: &str) -> bool {
 }
 
 pub(crate) fn valid_kind(kind: &str) -> bool {
-  kind == "words" || kind == "cloze" || kind == "breakdown" || kind == "segments" || kind == "levels" || kind == "trans"
+  kind == "words" || kind == "cloze" || kind == "breakdown" || kind == "segments" || kind == "levels" || kind == "trans" || kind == "keywords"
 }
 
 fn cache_path(id: &str, kind: &str) -> Result<PathBuf, String> {
@@ -64,6 +64,7 @@ mod tests {
     assert!(valid_kind("segments"));
     assert!(valid_kind("levels"));
     assert!(valid_kind("trans"));
+    assert!(valid_kind("keywords"));
     assert!(!valid_kind("json"));
     assert!(!valid_kind("cloze.json"));
     assert!(!valid_kind("../cloze"));

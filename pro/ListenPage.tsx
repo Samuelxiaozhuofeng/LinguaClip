@@ -21,8 +21,9 @@ import { IS_WINDOWS } from '../utils/platform';
 import { useT, type DictKey } from '../utils/i18n';
 import { useListenText } from './useListenText';
 import { useListenWords, type Word } from './useListenWords';
-import { DrillBar, IntroCard, ListenBlind, PassCard, StepBar, rateText, useHeardAsk } from './ListenCoach';
+import { DrillBar, ListenBlind, PassCard, StepBar, rateText, useHeardAsk } from './ListenCoach';
 import ListenBar from './ListenBar';
+import { useListenCards } from './useListenCards';
 import { recordRate } from './listenLevel';
 import PodcastPicker from './PodcastPicker';
 import type { Pick } from './podcastShows';
@@ -65,9 +66,8 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const [throughPref, setThrough] = useState(() => getWatchPrefs().listenThrough);
   const through = free && throughPref; // "play on" is free listening's; the steps stop at every section end
   const toggleThrough = () => { setThrough(!throughPref); saveWatchPrefs({ listenThrough: !throughPref }); };
-  const [intro, setIntro] = useState(() => !getWatchPrefs().listenIntro);
-  const introRef = useRef(intro);
-  introRef.current = intro;
+  // Closing the opening cards plays — unless a step's card or the summary is still waiting under them.
+  const cards = useListenCards(record, () => { if (passCard === null && !summaryRef.current) playOn(); });
   const [pass, setPass] = useState(1);
   const [passMode, setPassMode] = useState<WatchSubs | null>(null); // C pressed during this pass
   const [passCard, setPassCard] = useState<number | null>(null); // the pass just heard
@@ -88,9 +88,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const summaryRef = useRef(summary);
   summaryRef.current = summary;
 
-  // Closing it plays — unless a step's card or the summary is still waiting under it.
-  const closeIntro = () => { setIntro(false); saveWatchPrefs({ listenIntro: true }); if (passCard === null && !summaryRef.current) playOn(); };
-  const help = () => { audio.current?.pause(); stopGap(); setIntro(true); }; // a looped line's next play waits too
+  const help = () => { audio.current?.pause(); stopGap(); cards.help(); }; // a looped line's next play waits too
 
   const at = lineAt(lines, time);
   const cur = at >= 0 ? lines[at] : null;
@@ -123,8 +121,8 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     a.currentTime = s;
     prevT.current = s;
     setTime(s);
-    if (play) a.play().catch(() => {});
-  }, []);
+    if (play && !cards.blocking.current) a.play().catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Run by every frame and by the audio's own timeupdate: with the window hidden or covered the
   // frames stop but the audio plays on, and a section end crossed then must still stop it.
   // Any forward move not made by seek() is playback (seek moves prevT along), however long.
@@ -184,7 +182,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
 
   const togglePlay = () => {
     const a = audio.current;
-    if (!a) return;
+    if (!a || cards.blocking.current) return;
     resumeAfter.current = false; // played / paused by hand: closing the definition leaves it be
     stopGap();
     if (a.paused && armed.current) startPass(armed.current);
@@ -193,7 +191,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   // Stopped at step 2's hard line (or between its plays): play is that line again, not what follows (nor a play counted twice).
   const playOn = () => {
     const a = audio.current;
-    if (!a) return;
+    if (!a || cards.blocking.current) return;
     const end = drillLine ? Math.min(drillLine.endTime, sectionEnd(sectionOf.get(drillLine.id) ?? 0)) : NaN;
     if (drillLine && Math.abs(a.currentTime - end) < 0.1) seek(drillLine.startTime, true); else a.play().catch(() => {});
   };
@@ -209,7 +207,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     a.playbackRate = speed;
     const pos = getWatchPos(record.id); // back at the start of that section, step 1
     if (pos > 0 && pos < a.duration - 3 && sections.length) seek(sectionStart(sections[sectionAt(sections, pos)]));
-    if (!introRef.current) a.play().catch(() => {});
+    if (!cards.blocking.current) a.play().catch(() => {});
   };
   const lastSaved = useRef(0);
   const onTime = () => {
@@ -356,7 +354,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   keys.current = (e: KeyboardEvent) => {
     if (e.isComposing || e.keyCode === 229 || drill || pickerShow) return;
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-    if (intro) { if (e.key === 'Escape') closeIntro(); return; }
+    if (cards.blocking.current) { if (e.key === 'Escape' && cards.intro) cards.closeIntro(); return; }
     if (e.key === 'Escape') { if (def.word !== null) closeLookup(); else if (summary) setSummary(null); else if (passCard) setPassCard(null); return; }
     if (summary) return;
     if (passCard && def.word === null) {
@@ -395,7 +393,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const onward = summary && !summary.ended && !lastSec;
 
   return (
-    <div className="fixed inset-0 bg-paper flex flex-col">
+    <div className="fixed inset-0 bg-paper flex flex-col" inert={cards.open}>
       <audio ref={audio} crossOrigin="anonymous" preload="auto" src={videoSrcFromPath(record.videoPath!)}
         onLoadedMetadata={onLoaded} onTimeUpdate={onTime} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={onEnded} onError={() => setFailed(true)} />
 
@@ -489,7 +487,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
       )}
       {pickerShow && <PodcastPicker initialShow={pickerShow} onClose={() => setPickerShow(null)} onOpen={r => onOpen?.(r)} />}
       {drill && <ReviewSession cards={drill} onClose={() => setDrill(null)} onFinish={passes && onward ? () => { setDrill(null); goSection(sec + 1); } : undefined} />}
-      {intro && <IntroCard onClose={closeIntro} />}
+      {cards.node}
       {def.word !== null && (
         <DefinitionPanel key={def.word} def={def} onClose={closeLookup} onExplain={explain} onKeepWord={lookLine.current ? (w, d, x, ai) => keep(w, lookLine.current!, d, x, ai) : undefined} />
       )}

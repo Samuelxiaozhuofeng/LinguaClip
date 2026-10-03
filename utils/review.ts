@@ -248,6 +248,14 @@ export const addWord = async (ref: LineRef, word: string, definition: string, ex
   await update(id, old => old ? { ...old, definition, example, ...(ai ? { ai } : {}) } : newCard({ id, deck: 'word', ...full, word, definition, example, ...(ai ? { ai } : {}) }, 'lookup'));
 };
 
+// Kept from a list that may be stale (this episode's keywords): a card that is already there,
+// however it got there, is left exactly as it is.
+export const addWordIfNew = async (ref: LineRef, word: string, definition: string) => {
+  if (!ref.videoId || !word) return;
+  const id = wordCardId(ref.videoId, ref.start, word);
+  const full = await withPath(ref);
+  await update(id, old => old ? undefined : newCard({ id, deck: 'word', ...full, word, definition, example: '' }, 'lookup'));
+};
 
 // Un-bookmark: a card that is only a bookmark goes; a line you also got stuck on stays.
 export const unsaveLine = (videoId: string, start: number) => update(lineCardId(videoId, start), old => {

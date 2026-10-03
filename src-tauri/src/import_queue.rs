@@ -166,6 +166,7 @@ mod tests {
     cancel_kills_the_running_tool();
     #[cfg(unix)]
     cancel_stops_run_streaming();
+    crate::cloud_pieces::tests::cancel_drops_pieces_in_flight();
   }
 
   // The real path: an import thread's tool, read line by line, stops within moments.

@@ -8,6 +8,18 @@ export const zh: Record<keyof typeof en, string> = {
   'dialog.confirm': '确认',
   'dialog.cancel': '取消',
 
+  // --- This episode's keywords (components/KeywordCard.tsx) ---
+  'keywords.title': '本集关键词',
+  'keywords.preparing': '正在准备本集关键词…',
+  'keywords.add': '加入单词卡',
+  'keywords.added': '已在单词卡里',
+  'keywords.cardsUnreadable': '单词本读不出来，稍后再试',
+  'keywords.addFail': '没加上，再点一次',
+  'keywords.playWord': '听这个词',
+  'keywords.playLine': '听整句',
+  'keywords.start': '开始盲听',
+  'keywords.startHint': '回车开始',
+
   // --- Start-of-practice panel (components/CustomPanel.tsx) ---
   'custom.title': '这次怎么练',
   'custom.way': '练法',
@@ -155,6 +167,7 @@ export const zh: Record<keyof typeof en, string> = {
   'import.extractNoAudio': '这个视频里没找到能识别的声音：可能本来没声音，或是杜比 AC-3 这类格式',
   'import.failedTranscribe': '转录失败：{detail}',
   'import.stageCloud': '云端转录中 {pct}%',
+  'import.stageRetranscribe': '重转重复的段落 {pct}%',
   'import.stageConvertSetup': '下载转换组件 {pct}%',
   'import.stageConvert': '转换成 mp4 {pct}%',
   'import.failedConvert': '转换失败：{detail}',
@@ -267,7 +280,8 @@ export const zh: Record<keyof typeof en, string> = {
   'settingsAI.breakdownSounds': '拆句时讲听力难点',
   'settingsAI.breakdownSoundsHint': '拆开教我最后一步，多讲这句里的连读、弱读、吞音（如 want to → wanna）。',
   'settingsAI.autoCloze': '自动挖空',
-  'settingsAI.afterImportHint': '导入的视频转录好后，马上让 AI 在后台拆句（讲好每句的学习重点）/ 挖空，首页能看到进度。',
+  'settingsAI.autoKeywords': '本集关键词（两句摘要 + 关键词，练之前先看一眼）',
+  'settingsAI.afterImportHint': '导入的视频转录好后，马上让 AI 在后台拆句（讲好每句的学习重点）/ 挖空，首页能看到进度；本集关键词显示在「这次怎么练」面板和播客开头。',
   'settingsAI.afterImportNeedAi': '先在「AI」页填好 API 地址、API Key 和模型才能勾选。',
   'settingsAI.limits': '同时请求数上限',
   'settingsAI.limit_segment': '整理句子',

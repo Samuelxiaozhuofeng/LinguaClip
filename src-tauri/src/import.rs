@@ -501,7 +501,7 @@ pub(crate) fn transcribe(
   wav: &Path,
   stem: &Path,
 ) -> Result<(), String> {
-  let speech = run_whisper(&mut on_pct, whisper, model, Some(vad), dtw, lang, wav, stem)?;
+  let speech = run_whisper(&mut on_pct, whisper, model, Some(vad), &[], dtw, lang, wav, stem)?;
   // Silero hears speech under a constant music bed (anime, variety shows) as
   // background: a 25-minute episode came back with 40 s of "speech" and
   // subtitles that stopped at minute 10. Too little speech for the length =
@@ -510,18 +510,19 @@ pub(crate) fn transcribe(
     if speech < total * 0.2 {
       log::error!("vad kept {speech:.0}s of {total:.0}s, transcribing without vad");
       on_pct(0);
-      run_whisper(&mut on_pct, whisper, model, None, dtw, lang, wav, stem)?;
+      run_whisper(&mut on_pct, whisper, model, None, &[], dtw, lang, wav, stem)?;
     }
   }
   Ok(())
 }
 
 // Returns (speech seconds VAD kept, audio seconds) when VAD ran and said so.
-fn run_whisper(
+pub(crate) fn run_whisper(
   on_pct: &mut impl FnMut(u32),
   whisper: &Path,
   model: &Path,
   vad: Option<&Path>,
+  extra: &[&str],
   dtw: &str,
   lang: &str,
   wav: &Path,
@@ -543,6 +544,7 @@ fn run_whisper(
       cmd.args(["-mc", "0"]);
     }
   }
+  cmd.args(extra);
   cmd.args([
     "-pp",
     // Token-level timestamps via DTW. It only runs with flash attention off,
@@ -693,14 +695,9 @@ pub(crate) fn read_words(json_path: &Path) -> Result<Vec<Word>, String> {
     }
   }
 
-  // Times have to run forward. If they do not, the lines built from them would
-  // jump around the video, so drop the lot and let whisper's own lines stand.
-  if words.iter().any(|w| w.to < w.from)
-    || words.windows(2).any(|pair| pair[1].from < pair[0].from)
-  {
-    return Err("transcribe:word times out of order".into());
-  }
-  Ok(words)
+  // Times have to run forward (the front end relies on it); a stray backwards
+  // jump loses only the few words around it, not the whole list.
+  Ok(crate::word_order::in_order(words))
 }
 
 // Han, kana and the long-vowel mark: scripts written without spaces between words.
@@ -896,25 +893,36 @@ fn run_import(app: &AppHandle, id: &str, source: &str, name: Option<&str>, lang:
       let on_pct = |pct| emit(app, ImportProgress::stage(id, "transcribe", Some(pct)));
       let run = |whisper: &Path| transcribe(on_pct, whisper, &parts.model, &parts.vad, tier.dtw(), lang, &wav, &work);
       // A graphics card whose driver cannot run it: same job again on the CPU.
+      // Returns the program that worked, for re-transcribing loops with it.
       match (run(&parts.whisper), &parts.fallback) {
         (Err(e), Some(cpu)) if crate::import_queue::check().is_ok() => {
           log::error!("gpu transcribe failed, retrying on cpu: {e}");
           emit(app, ImportProgress::stage(id, "transcribe", Some(0)));
-          run(cpu)
+          run(cpu).map(|()| cpu.as_path())
         }
-        (r, _) => r,
+        (r, _) => r.map(|()| parts.whisper.as_path()),
       }
-      .map(|()| None)
+      .map(|used| (None, Some(used)))
     }
     (None, Engine::Cloud { provider, api_key }) => {
       emit(app, ImportProgress::stage(id, "cloud", Some(0)));
       let on_pct = |pct| emit(app, ImportProgress::stage(id, "cloud", Some(pct)));
       // Writes <work>.srt like whisper-cli; the words come back directly.
-      crate::cloud_asr::transcribe(on_pct, *provider, api_key, lang, &wav, &work).map(Some)
+      crate::cloud_asr::transcribe(on_pct, *provider, api_key, lang, &wav, &work).map(|w| (Some(w), None))
     }
     (None, Engine::Local(..)) => unreachable!("local engine without subtitles always has parts"),
   })
-  .and_then(|words| {
+  .and_then(|(cloud_words, used_whisper)| {
+    // Word timings are a bonus: if they are missing the front end just keeps
+    // whisper's own line breaks, so a failure here must not fail the import.
+    let words = cloud_words.or_else(|| read_words(&json).ok()).filter(|w: &Vec<Word>| !w.is_empty());
+    // A stretch whisper wrote over and over: transcribed again, or kept once.
+    let on_pct = |pct| emit(app, ImportProgress::stage(id, "retranscribe", Some(pct)));
+    let words = crate::repeat_fix::fix(&work.with_extension("srt"), words, on_pct, |from, to| match (&parts, used_whisper, engine) {
+      (Some((parts, tier)), Some(whisper), _) => crate::repeat_fix::redo_local(whisper, &parts.model, tier.dtw(), lang, &wav, &work, from, to),
+      (None, _, Engine::Cloud { provider, api_key }) => crate::cloud_asr::transcribe_range(*provider, api_key, lang, &wav, &work, from, to),
+      _ => Err("no transcriber".into()),
+    })?;
     std::fs::rename(work.with_extension("srt"), &srt).map_err(|e| format!("transcribe:{e}"))?;
     Ok(words)
   });
@@ -925,7 +933,7 @@ fn run_import(app: &AppHandle, id: &str, source: &str, name: Option<&str>, lang:
     let _ = std::fs::remove_file(&json);
     let _ = std::fs::remove_file(work.with_extension("srt"));
   }
-  let cloud_words = result?;
+  let words = result?;
   // Deleted while a cloud upload finished: its subtitles belong to no card.
   if let Err(e) = crate::import_queue::check() {
     let _ = std::fs::remove_file(&json);
@@ -937,11 +945,6 @@ fn run_import(app: &AppHandle, id: &str, source: &str, name: Option<&str>, lang:
     let _ = std::fs::remove_file(&json);
     format!("transcribe:{e}")
   })?;
-  // Word timings are a bonus: if they are missing the front end just keeps
-  // whisper's own line breaks, so a failure here must not fail the import.
-  let words = cloud_words
-    .or_else(|| read_words(&json).ok())
-    .filter(|w: &Vec<Word>| !w.is_empty());
   let _ = std::fs::remove_file(&json);
   // Only whisper can produce these, so keep them for "break it down" before
   // `done` lets the front end open the record. Named by record id, never by
@@ -1186,25 +1189,23 @@ mod tests {
     assert_eq!(words[1].from, 11000);
   }
 
-  // Times that run backwards would build lines that jump around the video, so
-  // the whole set is refused and whisper's own lines stand instead.
+  // Times must come out in order: a 1ms overlap is nudged, a stray word far
+  // ahead is dropped alone; the rest of the list survives (word_order::in_order).
   #[test]
-  fn refuses_word_times_that_run_backwards() {
+  fn word_times_that_run_backwards_are_put_in_order() {
+    let seg = |w: &str, f: i64| serde_json::json!({ "offsets": { "from": f, "to": f + 500 },
+      "tokens": [{ "text": format!(" {w}"), "offsets": { "from": f, "to": f + 500 } }] });
     let json = serde_json::json!({
-      "transcription": [
-        { "offsets": { "from": 5000, "to": 6000 },
-          "tokens": [{ "text": " tarde", "offsets": { "from": 5000, "to": 6000 } }] },
-        { "offsets": { "from": 1000, "to": 2000 },
-          "tokens": [{ "text": " pronto", "offsets": { "from": 1000, "to": 2000 } }] }
-      ]
+      "transcription": [seg("a", 1000), seg("b", 3000), seg("c", 2999), seg("d", 9000), seg("e", 5000)]
     });
     let dir = std::env::temp_dir().join(format!("order-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("t.json");
     std::fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
-    let out = read_words(&path);
+    let out = read_words(&path).unwrap();
     std::fs::remove_dir_all(&dir).ok();
-    assert!(out.is_err(), "backwards times must be refused, not passed on");
+    let got: Vec<(&str, u32)> = out.iter().map(|w| (w.w.as_str(), w.from)).collect();
+    assert_eq!(got, [("a", 1000), ("b", 3000), ("c", 3000), ("e", 5000)]);
   }
 
 

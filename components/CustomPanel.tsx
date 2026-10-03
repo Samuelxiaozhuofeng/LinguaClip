@@ -7,6 +7,7 @@ import { canCloze } from '../utils/aiDrills';
 import { CustomConfig, CustomPick, LEVELS, Level, LineLabel, MINUTE_CHOICES, PaceMode, pickCustom } from '../utils/customPick';
 import { Listen, Reader } from '@pro';
 import { isAudioRecord } from '../utils/desktop';
+import { KeywordBlock } from './KeywordCard';
 import { getLevelJob, prepareLevels, readLevels, subscribeLevels } from '../utils/levelPrep';
 import { formatTimeCode, getCustomConfig, getCustomPos, getLastWay, getWatchPrefs, ReadBy, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
 
@@ -160,18 +161,19 @@ const CustomPanel: React.FC<{
 
   return (
     <div className="fixed inset-0 z-[90] bg-black/40 flex items-center justify-center p-4 fade-in" onClick={onCancel}>
-      <Card className="w-full max-w-lg shadow-lift" role="dialog" aria-modal="true" aria-label={t('custom.title')} onClick={e => e.stopPropagation()}>
-        <div className="px-6 pt-6 pb-1">
+      <Card className="w-full max-w-lg max-h-[calc(100vh-2rem)] flex flex-col shadow-lift" role="dialog" aria-modal="true" aria-label={t('custom.title')} onClick={e => e.stopPropagation()}>
+        <div className="px-6 pt-6 pb-1 shrink-0">
           <h3 className="text-xl font-semibold leading-tight">{t('custom.title')}</h3>
           <p className="mt-1 text-sm text-mute truncate" title={record.displayName}>{record.displayName}</p>
         </div>
-        <div className="px-6 py-4 flex flex-col gap-4">
+        <div className="px-6 py-4 flex flex-col gap-4 overflow-y-auto min-h-0">{/* a short window scrolls this; the buttons stay */}
           {justRead !== undefined && (
             <div className="px-3.5 py-3 rounded-[10px] bg-shade text-sm leading-relaxed">
               {t('custom.justRead', { n: justRead })}
               {justRead > 0 && <span className="block text-mute">{t('custom.justReadHint')}</span>}
             </div>
           )}
+          <KeywordBlock record={record} />
           <Row label={t('custom.way')} hint={read ? t('custom.readHint') : watch ? t(listen ? 'custom.listenHint' : 'custom.watchHint') : cfg.on ? undefined : t('custom.allHint')}>
             <Seg value={read ? 'read' : watch ? 'watch' : cfg.on ? 'custom' : 'all'} onChange={v => {
               setWaiting(false); setRead(v === 'read'); setWatch(v === 'watch');
@@ -212,7 +214,7 @@ const CustomPanel: React.FC<{
           </>}
           {status && <div className="text-sm text-mute" aria-live="polite">{status}</div>}
         </div>
-        <div className="px-6 pt-2 pb-6 flex justify-end gap-3">
+        <div className="px-6 pt-2 pb-6 flex justify-end gap-3 shrink-0">
           <Btn onClick={onCancel}>{t('dialog.cancel')}</Btn>
           <Btn tone="accent" onClick={() => start()} disabled={!!empty || (want && failed) || waiting} autoFocus>
             {waiting ? t('custom.waiting') : read ? t('custom.startRead') : watch ? t(listen ? 'custom.startListen' : 'custom.startWatch') : t('custom.start')}

@@ -103,6 +103,7 @@ export interface AIConfig {
   autoBreakdown?: boolean; // prepare breakdowns as soon as an import finishes
   breakdownSounds?: boolean; // breakdowns also point out what makes the line hard to hear (docs/breakdown.md); default on
   autoCloze?: boolean;     // prepare cloze blanks as soon as an import finishes
+  autoKeywords?: boolean; // this episode's keywords after an import (utils/keywordPrep.ts)
   jaSegmentAi?: boolean;   // have the AI check Japanese phrase splits (utils/jaSegments.ts)
   limits?: { segment?: number; breakdown?: number; cloze?: number }; // AI calls in flight per job kind (utils/aiLimit.ts)
 }
@@ -157,7 +158,7 @@ export interface VideoRecord {
   // Present while a YouTube/local import is generating subtitles (or failed).
   // Cleared once videoPath / subtitleText / totalSubtitles are filled in.
   importJob?: {
-    stage: 'queued' | 'setup' | 'download' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'segment';
+    stage: 'queued' | 'setup' | 'download' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'retranscribe' | 'segment';
     percent?: number;
     error?: string;
     source: string;

@@ -7,6 +7,7 @@ import { getLang, t } from './i18n';
 import { getAIConfig } from './aiConfig';
 import { canCloze } from './aiDrills';
 import { prepareBreakdowns } from './breakdownPrep';
+import { keywordsOn, prepareKeywords } from './keywordPrep';
 import { linesOf, prepareCloze } from './clozePrep';
 import { jaCheckOn, prepareSegments } from './jaSegments';
 import { hasKana } from './japanese';
@@ -18,7 +19,7 @@ import { getAllVideosFromDB } from './fileSystemAccess';
 
 type ImportProgressPayload = {
   id: string;
-  stage: 'queued' | 'setup' | 'download' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'done' | 'error';
+  stage: 'queued' | 'setup' | 'download' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'retranscribe' | 'done' | 'error';
   percent?: number;
   error?: string;
   videoPath?: string;
@@ -319,6 +320,7 @@ async function applyProgress(payload: ImportProgressPayload): Promise<void> {
     // Opted-in AI prep starts in the background; the shelf shows its progress.
     const ai = getAIConfig();
     if (ai.autoBreakdown && canCloze()) prepareBreakdowns(rec.id, subtitleText, getLang()).catch(err => console.error(err));
+    if (keywordsOn() && canCloze()) prepareKeywords(rec.id, subtitleText).catch(err => console.error(err));
     if (ai.autoCloze && canCloze()) prepareCloze(rec.id, linesOf(subtitleText)).catch(err => console.error(err));
     // Japanese: the AI check of phrase splits (auto blanks above wait for it anyway).
     else if (jaCheckOn() && hasKana(subtitleText)) {

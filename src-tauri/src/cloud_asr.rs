@@ -1,7 +1,7 @@
 // Cloud transcription (Settings → Transcription): Groq's hosted Whisper or
 // Alibaba Cloud Bailian's Qwen3-ASR. The 16k mono wav import.rs extracted is
 // cut into pieces that each fit one upload, at a quiet spot near each cut, sent
-// one by one, and stitched back into the same .srt file and word list the local
+// one by one, and stitched back (seams mended in cloud_pieces.rs) into the same .srt file and word list the local
 // engine gives. The providers themselves live in groq.rs and bailian.rs.
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -10,6 +10,7 @@ use std::time::Duration;
 use tauri_plugin_http::reqwest;
 
 use crate::import::Word;
+use crate::word_order::in_order;
 
 pub(crate) const RATE: u64 = 16_000; // samples per second, mono 16-bit (extract_wav)
 
@@ -68,53 +69,35 @@ pub(crate) fn transcribe_in_pieces(
     .build()
     .map_err(|e| format!("cloud:network:{e}"))?;
 
-  let mut srt = String::new();
-  let mut cues = 0usize;
-  let mut words: Vec<Word> = Vec::new();
+  let mut resps: Vec<Resp> = Vec::new();
+  let mut offsets: Vec<u64> = Vec::new();
   let pieces: Vec<(u64, u64)> = cuts.windows(2).map(|w| (w[0], w[1])).collect();
   for (i, &(from, to)) in pieces.iter().enumerate() {
     // The card was deleted: send no more pieces (each one costs the user's quota).
     crate::import_queue::check()?;
     let audio = piece_audio(&mut file, data_at, from, to, stem, i)?;
-    let resp = tauri::async_runtime::block_on(async {
+    resps.push(crate::cloud_pieces::until_cancelled(async {
       match provider {
         Provider::Groq => crate::groq::send(&client, api_key, lang, audio).await,
         Provider::Bailian => crate::bailian::send(&client, api_key, lang, audio).await,
       }
-    })?;
-    let offset_ms = from * 1000 / RATE;
-    for seg in &resp.segments {
-      let text = seg.text.trim();
-      if text.is_empty() {
-        continue;
-      }
-      cues += 1;
-      let start = offset_ms + secs_to_ms(seg.start);
-      let end = offset_ms + secs_to_ms(seg.end).max(secs_to_ms(seg.start));
-      srt.push_str(&format!("{cues}\n{} --> {}\n{text}\n\n", srt_time(start), srt_time(end)));
-    }
-    words.extend(punctuate(&resp, offset_ms));
+    })?);
+    offsets.push(from * 1000 / RATE);
     on_pct(((i + 1) * 100 / pieces.len()) as u32);
   }
-  if cues == 0 {
+  // Lines a cut split in two (Chinese / Japanese) come back as one.
+  let lines = crate::cloud_pieces::lines(&resps, &offsets);
+  if lines.is_empty() {
     return Err("cloud:empty".into());
   }
+  let srt: String = lines
+    .iter()
+    .enumerate()
+    .map(|(n, l)| format!("{}\n{} --> {}\n{}\n\n", n + 1, srt_time(l.start), srt_time(l.end), l.text))
+    .collect();
+  let mut words: Vec<Word> = resps.iter().zip(&offsets).flat_map(|(r, &off)| punctuate(r, off)).collect();
   std::fs::write(stem.with_extension("srt"), srt).map_err(|e| format!("transcribe:{e}"))?;
-  // Groq's word times overlap a little (a word often starts 0.1–0.3s before
-  // the previous one does); nudge those into order. A bigger jump backwards
-  // means the list is off, and as with the local engine, no word timings beat
-  // wrong ones: the lines would jump around the video.
-  let mut prev = 0u32;
-  for w in words.iter_mut() {
-    if w.from + 1000 < prev {
-      log::error!("cloud words run backwards at {}ms, dropping word timings", w.from);
-      return Ok(Vec::new());
-    }
-    w.from = w.from.max(prev);
-    w.to = w.to.max(w.from);
-    prev = w.from;
-  }
-  Ok(words)
+  Ok(in_order(words))
 }
 
 // ---- audio ----------------------------------------------------------------
@@ -349,6 +332,47 @@ fn punctuate(resp: &Resp, offset_ms: u64) -> Vec<Word> {
     end = b;
   }
   out
+}
+
+// A looping stretch sent once more on its own (repeat_fix.rs): its lines and
+// words in video time.
+pub(crate) fn transcribe_range(
+  provider: Provider,
+  api_key: &str,
+  lang: &str,
+  wav: &Path,
+  stem: &Path,
+  from_ms: u64,
+  to_ms: u64,
+) -> Result<(Vec<crate::repeat_fix::Cue>, Vec<Word>), String> {
+  crate::import_queue::check()?;
+  let (data_at, samples) = wav_data(wav).map_err(|e| format!("extract:{e}"))?;
+  let mut file = std::fs::File::open(wav).map_err(|e| format!("extract:{e}"))?;
+  let (from, to) = ((from_ms * RATE / 1000).min(samples), (to_ms * RATE / 1000).min(samples));
+  let client = reqwest::Client::builder()
+    .connect_timeout(Duration::from_secs(15))
+    .timeout(Duration::from_secs(10 * 60))
+    .build()
+    .map_err(|e| format!("cloud:network:{e}"))?;
+  let audio = piece_audio(&mut file, data_at, from, to, stem, 0)?;
+  let resp = tauri::async_runtime::block_on(async {
+    match provider {
+      Provider::Groq => crate::groq::send(&client, api_key, lang, audio).await,
+      Provider::Bailian => crate::bailian::send(&client, api_key, lang, audio).await,
+    }
+  })?;
+  let offset_ms = from * 1000 / RATE;
+  let cues = resp
+    .segments
+    .iter()
+    .filter(|seg| !seg.text.trim().is_empty())
+    .map(|seg| crate::repeat_fix::Cue {
+      from: offset_ms + secs_to_ms(seg.start),
+      to: offset_ms + secs_to_ms(seg.end).max(secs_to_ms(seg.start)),
+      text: seg.text.trim().to_string(),
+    })
+    .collect();
+  Ok((cues, in_order(punctuate(&resp, offset_ms))))
 }
 
 #[cfg(test)]

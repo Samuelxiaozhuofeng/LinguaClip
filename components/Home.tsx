@@ -17,6 +17,7 @@ import AddVideo from './AddVideo';
 import { canCloze } from '../utils/aiDrills';
 import { cancelPrep, getPrepJob, prepStatus, prepareBreakdowns, subscribePrep } from '../utils/breakdownPrep';
 import { cancelLevels } from '../utils/levelPrep';
+import { forgetKeywords } from '../utils/keywordPrep';
 import { cancelTrans } from '@pro';
 import { forgetLooked } from '../utils/readLooked';
 import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribeCloze } from '../utils/clozePrep';
@@ -230,7 +231,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
     );
     if (trash === null) return; // dismissed the file question: nothing is deleted
     setDeletingId(v.id);
-    await Promise.all([cancelPrep(v.id), cancelCloze(v.id), cancelSegments(v.id), cancelLevels(v.id), cancelTrans(v.id)]);
+    await Promise.all([cancelPrep(v.id), cancelCloze(v.id), cancelSegments(v.id), cancelLevels(v.id), cancelTrans(v.id), forgetKeywords(v.id)]);
     try {
       await VideoStorage.deleteVideoRecord(v.id);
       // Still generating or waiting its turn: stop it, its events are ignored from here on.
@@ -273,6 +274,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
     if (job.stage === 'download') return t('import.stageDownload', { pct });
     if (job.stage === 'transcribe') return t('import.stageTranscribe', { pct });
     if (job.stage === 'cloud') return t('import.stageCloud', { pct });
+    if (job.stage === 'retranscribe') return t('import.stageRetranscribe', { pct });
     if (job.stage === 'segment') return t('import.stageSegment');
     return t('import.stageExtract');
   };
