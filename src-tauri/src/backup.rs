@@ -152,7 +152,7 @@ fn stage_in(own: &Path, path: &str) -> Result<String, String> {
   fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
   let dest = dir.join(STAGED);
   let tmp = tmp_of(&dest);
-  if let Err(e) = fs::copy(path, &tmp).and_then(|_| File::open(&tmp)?.sync_all()) {
+  if let Err(e) = fs::copy(path, &tmp).and_then(|_| fs::OpenOptions::new().write(true).open(&tmp)?.sync_all()) {
     let _ = fs::remove_file(&tmp);
     return Err(e.to_string());
   }
