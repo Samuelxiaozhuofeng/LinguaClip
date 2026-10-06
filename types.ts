@@ -104,6 +104,7 @@ export interface AIConfig {
   breakdownSounds?: boolean; // breakdowns also point out what makes the line hard to hear (docs/breakdown.md); default on
   autoCloze?: boolean;     // prepare cloze blanks as soon as an import finishes
   autoKeywords?: boolean; // this episode's keywords after an import (utils/keywordPrep.ts)
+  autoPhrases?: boolean; // the reader finds this episode's phrases (utils/phrasePrep.ts)
   jaSegmentAi?: boolean;   // have the AI check Japanese phrase splits (utils/jaSegments.ts)
   limits?: { segment?: number; breakdown?: number; cloze?: number }; // AI calls in flight per job kind (utils/aiLimit.ts)
 }

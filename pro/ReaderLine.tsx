@@ -13,6 +13,9 @@ import { usePhraseDrag } from '../hooks/usePhraseDrag';
 // save it (a saved line's star stays lit). The listening page (ListenPage) makes the time
 // a "play from here" and drops the picture button (there is no picture).
 // Text only — never parsed as HTML; the translation is text too.
+// marks (the reader's phrases, docs/phrases.md): stretches of the text underlined, or red when hot.
+
+export type Mark = { from: number; to: number; hot: boolean };
 
 const ReaderLine: React.FC<{
   line: Subtitle;
@@ -32,17 +35,43 @@ const ReaderLine: React.FC<{
   onTrans: (line: Subtitle) => void;
   onSave: (line: Subtitle) => void;
   onPick?: (line: Subtitle) => void;
-}> = ({ line, ja, jaVersion, kana, looked, playing, saved, hasTrans, transOpen, transText, transPending, onWord, onListen, onView, onTrans, onSave, onPick }) => {
+  marks?: Mark[];
+}> = ({ line, ja, jaVersion, kana, looked, playing, saved, hasTrans, transOpen, transText, transPending, onWord, onListen, onView, onTrans, onSave, onPick, marks }) => {
   const trans = hasTrans ? { open: transOpen, text: transText, pending: transPending } : null;
   const t = useT();
-  const groups = useMemo(() => sentenceParts(line.text).map(g => ({ ...g, key: g.word ? lookedKey(g.word, ja) : null })),
-    [line.text, ja, jaVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const groups = useMemo(() => {
+    let at = 0;
+    return sentenceParts(line.text).map(g => {
+      const from = at;
+      at += g.pieces.reduce((n, p) => n + p.s.length, 0);
+      return { ...g, key: g.word ? lookedKey(g.word, ja) : null, from, to: at };
+    });
+  }, [line.text, ja, jaVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A mark's own characters only: a run of Chinese is one group, the phrase may be part of it.
+  const markOf = (from: number, to: number) => {
+    const m = marks?.filter(k => k.from < to && k.to > from);
+    return !m?.length ? '' : m.some(k => k.hot) ? 'text-accent font-semibold' : 'underline decoration-2 underline-offset-[6px] decoration-ink';
+  };
+  const cuts = marks?.flatMap(m => [m.from, m.to]) ?? [];
+  const piecesOf = (g: (typeof groups)[number]) => {
+    let at = g.from;
+    return g.pieces.map((p, k) => {
+      const from = at;
+      at += p.s.length;
+      if (p.rt && kana) return <ruby key={k} className={markOf(from, at)}>{p.s}<rt>{p.rt}</rt></ruby>;
+      const edges = [from, ...cuts.filter(c => c > from && c < at).sort((a, b) => a - b), at];
+      return edges.slice(1).map((b, j) => {
+        const a = edges[j], c = markOf(a, b), text = p.s.slice(a - from, b - from);
+        return c ? <span key={`${k}.${j}`} className={c}>{text}</span> : <React.Fragment key={`${k}.${j}`}>{text}</React.Fragment>;
+      });
+    });
+  };
   const { bind, inSel } = usePhraseDrag((a, b) => onWord(groups.slice(a, b + 1).flatMap(g => g.pieces.map(p => p.s)).join(''), line));
   const icon = 'w-9 h-9 rounded-lg inline-flex items-center justify-center text-mute hover:text-ink hover:bg-line';
   return (
     <div data-line={line.id} data-playing={playing || undefined}
       className={`group grid grid-cols-[52px_minmax(0,1fr)_162px] gap-3 items-start px-3 py-1.5 rounded-xl transition-colors
-        ${playing ? 'bg-accent-soft' : 'hover:bg-shade focus-within:bg-shade'}`}>
+        ${playing || marks?.some(m => m.hot) ? 'bg-accent-soft' : 'hover:bg-shade focus-within:bg-shade'}`}>
       {onPick
         ? <button type="button" onClick={e => { e.currentTarget.blur(); onPick(line); }} title={t('listen.playFrom')}
             className={`pt-5 self-stretch text-left text-xs tabular-nums hover:text-accent ${playing ? 'text-accent font-semibold' : 'text-mute'}`}>{formatTimeCode(line.startTime)}</button>
@@ -50,7 +79,7 @@ const ReaderLine: React.FC<{
       <div className="min-w-0">
         <p className="font-serif text-2xl leading-[2.2] break-words" data-lookup-line>
           {groups.map((g, gi) => {
-            const pieces = g.pieces.map((p, k) => (p.rt && kana ? <ruby key={k}>{p.s}<rt>{p.rt}</rt></ruby> : <React.Fragment key={k}>{p.s}</React.Fragment>));
+            const pieces = piecesOf(g);
             if (!g.word) return <span key={gi}>{pieces}</span>;
             const seen = !!g.key && looked.has(g.key);
             return (

@@ -57,6 +57,7 @@ const Settings: React.FC = () => {
   const [aiBreakdownSounds, setAiBreakdownSounds] = useState(true);
   const [aiAutoCloze, setAiAutoCloze] = useState(false);
   const [aiAutoKeywords, setAiAutoKeywords] = useState(false);
+  const [aiAutoPhrases, setAiAutoPhrases] = useState(false);
   const [aiJaCheck, setAiJaCheck] = useState(false);
   const [aiLimits, setAiLimits] = useState<NonNullable<AIConfig['limits']>>({});
 
@@ -99,6 +100,7 @@ const Settings: React.FC = () => {
     setAiBreakdownSounds(savedAI.breakdownSounds !== false);
     setAiAutoCloze(!!savedAI.autoCloze);
     setAiAutoKeywords(!!savedAI.autoKeywords);
+    setAiAutoPhrases(!!savedAI.autoPhrases);
     setAiJaCheck(!!savedAI.jaSegmentAi);
     setAiLimits(savedAI.limits || {});
 
@@ -145,6 +147,7 @@ const Settings: React.FC = () => {
       breakdownSounds: next.breakdownSounds ?? aiBreakdownSounds,
       autoCloze: next.autoCloze ?? aiAutoCloze,
       autoKeywords: next.autoKeywords ?? aiAutoKeywords,
+      autoPhrases: next.autoPhrases ?? aiAutoPhrases,
       jaSegmentAi: next.jaSegmentAi ?? aiJaCheck,
       limits: next.limits ?? aiLimits,
     });
@@ -226,6 +229,11 @@ const Settings: React.FC = () => {
             setAutoKeywords={(v) => {
               setAiAutoKeywords(v);
               saveAI({ autoKeywords: v });
+            }}
+            autoPhrases={aiAutoPhrases}
+            setAutoPhrases={(v) => {
+              setAiAutoPhrases(v);
+              saveAI({ autoPhrases: v });
             }}
             jaCheck={aiJaCheck}
             setJaCheck={(v) => {

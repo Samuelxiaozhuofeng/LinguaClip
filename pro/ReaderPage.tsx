@@ -3,6 +3,7 @@ import { ArrowLeft, Pause, Play, RotateCcw, X } from 'lucide-react';
 import type { Subtitle, VideoRecord } from '../types';
 import { Btn, Seg } from '../components/ui';
 import ReaderLine from './ReaderLine';
+import { PhraseCard, usePhrases } from './ReaderPhrases';
 import DefinitionPanel, { keepFields } from '../components/DefinitionPanel';
 import WatchSummary, { type Looked } from '../components/WatchSummary';
 import ReviewSession from '../components/ReviewSession';
@@ -297,6 +298,15 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   const setSizePref = (s: ReaderSize) => { setSize(s); saveWatchPrefs({ readerSize: s }); };
   // Video showing: the side column grows to the chosen share, always leaving the lines 600px.
   const asideW = !clip?.view || size === 's' ? '380px' : `max(380px, min(${size === 'l' ? 55 : 45}%, calc(100% - 600px)))`;
+  // A phrase picked on the side: its line on the page (turning to its section first).
+  const phrases = usePhrases(record, lines);
+  const showLine = (line: Subtitle) => {
+    const i = sections.findIndex(s => s.subtitles.includes(line));
+    if (by === 'section' && i >= 0 && i !== sec) setSec(i);
+    ours.current = Date.now();
+    // Two frames: a section just turned to is on the page by then.
+    requestAnimationFrame(() => requestAnimationFrame(() => scroller.current?.querySelector(`[data-line="${line.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })));
+  };
   const goSection = (i: number) => {
     if (by === 'section') { setSec(i); jumpTo(i === 0 ? 0 : sections[i].subtitles[0]?.startTime ?? 0); return; }
     scroller.current?.querySelector(`[data-section="${i}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -349,7 +359,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
                   <ReaderLine key={line.id} line={line} ja={ja} jaVersion={jaVersion} kana={kana} looked={looked}
                     playing={playingId === line.id} saved={savedIds.has(line.id)} hasTrans={hasAi} transOpen={allT !== openT.has(line.id)}
                     transText={trans?.[indexOf.get(line.id)!] ?? null} transPending={transBusy}
-                    onWord={onWord} onListen={onListen} onView={onView} onTrans={toggleTrans} onSave={onSave} />
+                    onWord={onWord} onListen={onListen} onView={onView} onTrans={toggleTrans} onSave={onSave} marks={phrases.marks.get(line.id)} />
                 ))}
                 {by === 'section' && (
                   <div className="mx-3 mt-6 p-6 card !shadow-none flex flex-col items-center gap-1.5 text-center">
@@ -386,7 +396,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
             </div>
           </div>
 
-          <div className="card !shadow-none p-4 min-h-0 flex flex-col">
+          <div className="card !shadow-none p-4 shrink-0 max-h-[40%] flex flex-col">
             <div className="flex items-baseline justify-between">
               <span className="text-sm font-semibold">{t('reader.lookedHead')}</span>
               <span className="text-xs text-mute">{lookedList.length}</span>
@@ -403,6 +413,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
                 </ul>
               )}
           </div>
+          <PhraseCard record={record} phrases={phrases} onJump={showLine} />
         </aside>
       </div>
 

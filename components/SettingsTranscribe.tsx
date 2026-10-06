@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ExternalLink, FolderOpen } from 'lucide-react';
 import { isBadKey } from '../utils/aiConfig';
-import { openExternal, revealInFolder, transcribeLocation } from '../utils/desktop';
+import { listGpus, openExternal, revealInFolder, transcribeLocation } from '../utils/desktop';
 import {
   CLOUD,
   LocalModel,
@@ -22,6 +22,7 @@ const SettingsTranscribe: React.FC<{ onSaved: () => void; children: React.ReactN
   const t = useT();
   const [config, setConfig] = useState<TranscribeConfig>(getTranscribeConfig);
   const [location, setLocation] = useState<{ dir: string; model: string | null } | null>(null);
+  const [gpus, setGpus] = useState<{ name: string; discrete: boolean }[]>([]);
   const cloud = config.mode === 'local' ? null : CLOUD[config.mode];
   const key = cloud ? config[cloud.keyField] : '';
   const badKey = !!key && isBadKey(key.trim());
@@ -41,6 +42,16 @@ const SettingsTranscribe: React.FC<{ onSaved: () => void; children: React.ReactN
       .catch(err => console.error(err));
     return () => { cancelled = true; };
   }, [config.mode, config.localModel]);
+
+  const showGpus = IS_WINDOWS && config.mode === 'local' && config.gpu;
+  useEffect(() => {
+    if (!showGpus) return;
+    let cancelled = false;
+    listGpus()
+      .then(list => { if (!cancelled) setGpus(list); })
+      .catch(err => console.error(err));
+    return () => { cancelled = true; };
+  }, [showGpus]);
 
   return (
     <div className="space-y-10">
@@ -76,6 +87,24 @@ const SettingsTranscribe: React.FC<{ onSaved: () => void; children: React.ReactN
                   <input type="checkbox" checked={config.gpu} onChange={e => update({ gpu: e.target.checked })} className="w-4 h-4 accent-accent" />
                   {t('transcribe.gpuLabel')}
                 </label>
+              </Field>
+            )}
+
+            {showGpus && (
+              <Field label={t('transcribe.gpuWhich')}>
+                {/* A saved card that is not there now runs as automatic (gpus.rs), so it shows as that. */}
+                <select
+                  value={gpus.some(g => g.name === config.gpuName) ? config.gpuName : ''}
+                  onChange={e => update({ gpuName: e.target.value })}
+                  className={inputCls}
+                >
+                  <option value="">{t('transcribe.gpuAuto')}</option>
+                  {gpus.map((g, i) => (
+                    <option key={i} value={g.name}>
+                      {g.name}{t(g.discrete ? 'transcribe.gpuDiscrete' : 'transcribe.gpuIntegrated')}
+                    </option>
+                  ))}
+                </select>
               </Field>
             )}
 

@@ -43,6 +43,10 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 flate2 = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 
+# Lists the graphics cards through the system vulkan-1.dll (gpus.rs); already in the lock via tauri
+[target.'cfg(windows)'.dependencies]
+libloading = "0.7"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 

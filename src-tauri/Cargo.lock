@@ -2312,6 +2312,7 @@ dependencies = [
  "chrono",
  "flate2",
  "futures-util",
+ "libloading",
  "log",
  "reqwest 0.12.28",
  "reqwest-websocket",

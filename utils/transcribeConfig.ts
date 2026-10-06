@@ -8,8 +8,9 @@ import { IS_WINDOWS } from './platform';
 
 export type TranscribeMode = 'local' | 'cloud' | 'bailian';
 export type LocalModel = 'standard' | 'light';
-// gpu: Windows only — run whisper on the graphics card (Vulkan) instead of the CPU.
-export type TranscribeConfig = { mode: TranscribeMode; localModel: LocalModel; gpu: boolean; groqKey: string; bailianKey: string };
+// gpu: Windows only — run whisper on the graphics card (Vulkan) instead of the CPU;
+// gpuName: which card ('' = automatic, a discrete one first; src-tauri/src/gpus.rs).
+export type TranscribeConfig = { mode: TranscribeMode; localModel: LocalModel; gpu: boolean; gpuName: string; groqKey: string; bailianKey: string };
 export type CloudMode = Exclude<TranscribeMode, 'local'>;
 
 export const CLOUD = {
@@ -18,7 +19,7 @@ export const CLOUD = {
 } as const;
 
 const STORAGE_KEY = 'linguaclip_transcribe_config';
-const DEFAULTS: TranscribeConfig = { mode: 'local', localModel: 'standard', gpu: false, groqKey: '', bailianKey: '' };
+const DEFAULTS: TranscribeConfig = { mode: 'local', localModel: 'standard', gpu: false, gpuName: '', groqKey: '', bailianKey: '' };
 
 export function getTranscribeConfig(): TranscribeConfig {
   try {
@@ -28,6 +29,7 @@ export function getTranscribeConfig(): TranscribeConfig {
       mode: stored.mode === 'cloud' || stored.mode === 'bailian' ? stored.mode : 'local',
       localModel: stored.localModel === 'light' ? 'light' : 'standard',
       gpu: stored.gpu === true,
+      gpuName: str(stored.gpuName),
       groqKey: str(stored.groqKey),
       bailianKey: str(stored.bailianKey),
     };
@@ -53,6 +55,6 @@ export function cloudKeyMissing(config = getTranscribeConfig()): boolean {
 // What start_import needs to know about the engine (src-tauri/src/import.rs).
 export function engineArgs(config = getTranscribeConfig()) {
   return config.mode === 'local'
-    ? { engine: 'local', model: config.localModel, gpu: IS_WINDOWS && config.gpu, apiKey: null }
-    : { engine: CLOUD[config.mode].engine, model: null, gpu: false, apiKey: cloudKey(config) };
+    ? { engine: 'local', model: config.localModel, gpu: IS_WINDOWS && config.gpu, gpuName: config.gpuName || null, apiKey: null }
+    : { engine: CLOUD[config.mode].engine, model: null, gpu: false, gpuName: null, apiKey: cloudKey(config) };
 }

@@ -55,9 +55,11 @@ export const AiAfterImport: React.FC<{
   setAutoCloze: (v: boolean) => void;
   autoKeywords: boolean;
   setAutoKeywords: (v: boolean) => void;
+  autoPhrases: boolean;
+  setAutoPhrases: (v: boolean) => void;
   jaCheck: boolean;
   setJaCheck: (v: boolean) => void;
-}> = ({ aiReady, goAI, segmentModel, setSegmentModel, autoBreakdown, setAutoBreakdown, breakdownSounds, setBreakdownSounds, autoCloze, setAutoCloze, autoKeywords, setAutoKeywords, jaCheck, setJaCheck }) => {
+}> = ({ aiReady, goAI, segmentModel, setSegmentModel, autoBreakdown, setAutoBreakdown, breakdownSounds, setBreakdownSounds, autoCloze, setAutoCloze, autoKeywords, setAutoKeywords, autoPhrases, setAutoPhrases, jaCheck, setJaCheck }) => {
   const t = useT();
   return (
     <Group title={t('settings.group.aiTidy')}>
@@ -73,6 +75,11 @@ export const AiAfterImport: React.FC<{
           <Check checked={autoKeywords} onChange={setAutoKeywords} disabled={!aiReady} label={t('settingsAI.autoKeywords')} />
         </div>
         {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.afterImportHint')}</span> : <NeedAi goAI={goAI} />}
+      </div>
+
+      <div>
+        <Check checked={autoPhrases} onChange={setAutoPhrases} disabled={!aiReady} label={t('settingsAI.autoPhrases')} />
+        {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.autoPhrasesHint')}</span> : <NeedAi goAI={goAI} />}
       </div>
 
       <div>

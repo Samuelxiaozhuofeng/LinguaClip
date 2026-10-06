@@ -5,6 +5,8 @@
  * - Local files are served by vite's /@fs route (allow-list in vite.config.ts).
  * - File dialogs return `window.__MOCK__.pick` if set, else a fixture clip.
  * - `window.__MOCK__.tools` sets what import_tools reports (both false by default).
+ * - `window.__MOCK__.gpus` = the graphics cards list_gpus reports (empty by default;
+ *   the GPU settings only show with a Windows user agent).
  * - `window.__MOCK__.convertTool`: is the video converter "downloaded" (false by
  *   default); `window.__MOCK__.probe` = what probe_video reports for any file.
  * - `window.__MOCK__.jaDict`: is the Japanese dictionary "downloaded" (false by
@@ -63,6 +65,8 @@ const mock = {
   tools: { whisper: false, youtube: false },
   jaDict: false,
   convertTool: false,
+  // list_gpus: the cards a Windows PC would report
+  gpus: [] as { name: string; discrete: boolean }[],
   // device_info: set another id to act as a second computer (license seats)
   device: { id: 'browser-dev-device-0001', name: 'Browser (dev)' },
   clipFail: null as string | null, // set to make cut_clip fail with this message
@@ -285,6 +289,8 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
       const file = args.model === 'light' ? 'ggml-small-q5_1.bin' : 'ggml-large-v3-turbo-q5_0.bin';
       return { dir, model: mock.tools.whisper ? `${dir}/${file}` : null };
     }
+    case 'list_gpus':
+      return mock.gpus;
     case 'device_info':
       return mock.device;
     case 'trash_file':

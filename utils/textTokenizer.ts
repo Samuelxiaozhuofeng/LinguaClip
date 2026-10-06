@@ -237,12 +237,13 @@ export const targetWords = (words: string[], word: string): number[] => {
 
 // A line laid out for a word card: its words (clickable to look up) in pieces, each
 // piece with its furigana (Japanese, dictionary loaded) and whether it is the kept word.
-// Found as written, exactly those letters are marked; else the whole word targetWords picks.
+// Found as written, exactly those letters are marked (Japanese lines, and Chinese words: a run
+// of Chinese is one token, the word may be part of it); else the whole word targetWords picks.
 export type Piece = Ruby & { target: boolean };
 export type Group = { word?: string; pieces: Piece[] };
 export const sentenceParts = (text: string, word = ''): Group[] => {
   const tokens = tokenizeText(text);
-  const at = word && hasKana(text) ? text.indexOf(word) : -1;
+  const at = word && (hasKana(text) || /\p{Script=Han}/u.test(word)) ? text.indexOf(word) : -1;
   const [a, b] = at >= 0 ? [at, at + word.length] : [-1, -1];
   const picked = at >= 0 ? new Set<number>() : new Set(targetWords(getWordTokens(tokens).map(w => w.value), word));
   let offset = 0, ord = 0;

@@ -29,10 +29,11 @@ const clip = (s: unknown, n: number) => (typeof s === 'string' ? s.replace(/\s+/
 
 // Where the word sits in the line (first time), or -1. Latin letters: any case, whole word
 // only; with Chinese / Japanese / Korean in it, a plain substring (no spaces to go by).
-export function findWord(text: string, word: string): number {
+// from: look only from there on (the next time it is in the line).
+export function findWord(text: string, word: string, from = 0): number {
   const hay = text.toLowerCase(), needle = word.toLowerCase();
   if (!needle) return -1;
-  for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + 1)) {
+  for (let at = hay.indexOf(needle, from); at >= 0; at = hay.indexOf(needle, at + 1)) {
     if (cjk.test(word)) return at;
     if (!letter.test(hay[at - 1] ?? '') && !letter.test(hay[at + needle.length] ?? '')) return at;
   }

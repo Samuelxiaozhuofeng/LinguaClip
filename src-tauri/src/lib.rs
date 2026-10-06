@@ -20,6 +20,7 @@ mod paths;
 mod podcast;
 mod repeat_fix;
 mod tts;
+mod gpus;
 mod whisper_setup;
 mod word_order;
 
@@ -53,6 +54,7 @@ pub fn run() {
       cache::write_cache,
       tts::tts,
       whisper_setup::import_tools,
+      gpus::list_gpus,
       whisper_setup::transcribe_location,
       ja_dict::ja_dict_status,
       ja_dict::install_ja_dict,

@@ -534,6 +534,12 @@ pub(crate) fn run_whisper(
   // whisper-cli defaults to at most 4 threads; use every core.
   let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).to_string();
   cmd.args(["-t", &threads, "-m", &path(model)?, "-l", lang]);
+  // The Vulkan build sees only the card picked for it (gpus.rs).
+  if whisper.parent().and_then(Path::file_name).is_some_and(|d| d == "vulkan") {
+    if let Some(i) = crate::gpus::visible_device() {
+      cmd.env("GGML_VK_VISIBLE_DEVICES", i);
+    }
+  }
   match vad {
     Some(v) => {
       cmd.args(["--vad", "--vad-model", &path(v)?]);
@@ -972,6 +978,7 @@ pub fn start_import(
   engine: Option<String>,
   model: Option<String>,
   gpu: Option<bool>,
+  gpu_name: Option<String>,
   api_key: Option<String>,
   convert: Option<bool>,
   subs: Option<String>,
@@ -984,6 +991,7 @@ pub fn start_import(
   if id.len() > 80 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
     return Err("bad id".into());
   }
+  crate::gpus::set_choice(gpu_name);
   let lang = lang.trim().to_string();
   if !matches!(lang.as_str(), "en" | "es" | "ja" | "zh" | "fr" | "de" | "ko" | "auto") {
     return Err("bad-lang".into());

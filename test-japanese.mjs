@@ -158,6 +158,8 @@ const show = (line, w) => ja.sentenceParts(line, w).map(g => g.pieces.map(p => (
 assert.equal(show('もう諦めるしかないのかな。', '諦める'), 'もう|<諦(あきら)><める>しか|ないのかな|。');
 assert.equal(show('もう諦めたよ', '諦める'), 'もう|<諦(あきら)><めたよ>');
 assert.equal(show('今日は晴れ', '散歩'), '今日(きょう)は|晴(は)れ', 'not in the line: nothing marked');
+assert.equal(show('他终于把这件事搞定了。', '搞定'), '他终于把这件事<搞定>了|。', 'Chinese: the word inside its run of characters');
+assert.equal(show('他终于把这件事搞定了。', '解决'), '他终于把这件事搞定了|。', 'Chinese, not in the line: nothing marked');
 assert.equal(show('I gave up.', 'gave'), 'I| |<gave>| |up|.');
 assert.equal(show('I gave up.', 'gave up'), 'I| |<gave>| |<up>|.', 'a phrase: each of its words marked');
 assert.equal(ja.sentenceParts('天気ですね', '天気').map(g => g.word ?? '').join(','), '天気ですね', 'groups keep the word to look up');
