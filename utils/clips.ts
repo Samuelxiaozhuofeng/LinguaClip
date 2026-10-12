@@ -7,7 +7,8 @@
  * and the ones from before the setting was turned on), one at a time, in the
  * background. The line and word cards of one line share a clip. Afterwards it
  * removes clip files no card uses any more (Rust keeps anything under an hour
- * old), so every way of deleting cards is covered without touching the files there.
+ * old, by when it was cut), so every way of deleting cards is covered without touching the files there.
+ * A card deleted with undo still on offer holds its files (`holdClips`) until the offer ends.
  */
 import { getAllCards, hasAudio, setClip, subscribeCards, type ReviewCard } from './review';
 import { getVideoRecord } from './videoStorage';
@@ -103,12 +104,21 @@ const fillOnce = async () => {
   // Read again: the files the cards use right now are the ones to keep, and so are the ones
   // any backup in <own dir>/backups needs (docs/backup.md). No cards at all (the database may
   // have just been lost), or the backups unreadable: sweep nothing this time.
+  // Backups first: nothing awaited between reading the cards (and the held files) and the sweep.
+  const kept = await backupKeptClips().catch(e => { console.error(e); return null; });
   const now = await getAllCards();
   set(counts(now));
-  if (now.length === 0) return;
-  const kept = await backupKeptClips().catch(e => { console.error(e); return null; });
-  if (!kept) return;
-  await sweepClips([...clipFiles(now), ...kept]);
+  if (now.length === 0 || !kept) return;
+  await sweepClips([...clipFiles(now), ...kept, ...held.keys()]);
+};
+
+// Undo of a delete pending (docs/review.md「复习里删卡」): keep this card's files; call the result to let go.
+const held = new Map<string, number>();
+export const holdClips = (card: Pick<ReviewCard, 'clip'>) => {
+  const files = clipFiles([card]);
+  files.forEach(f => held.set(f, (held.get(f) ?? 0) + 1));
+  let done = false;
+  return () => { if (done) return; done = true; files.forEach(f => { const n = (held.get(f) ?? 1) - 1; if (n > 0) held.set(f, n); else held.delete(f); }); };
 };
 
 // Runs until nothing new came in meanwhile; a call while it runs asks for one more pass and

@@ -222,6 +222,8 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
       if (cache.has(args.path)) return true;
       return (await fetch(fsUrl(args.path), { method: 'HEAD' })).ok;
     case 'plugin:fs|read_file': {
+      // anki_* = a batch's cuts for Anki (utils/ankiExport.ts); cut_clip makes no file here, so hand back a few bytes.
+      if (/\/clips\/anki_[^/]+$/.test(args.path)) return new Uint8Array([1, 2, 3, 4]).buffer;
       const ja = /^\/__ja-dict\/([\w.]+)$/.exec(args.path);
       const res = await fetch(ja ? `/node_modules/kuromoji/dict/${ja[1]}` : fsUrl(args.path));
       if (!res.ok) throw new Error(`mock fs: ${res.status} ${args.path}`);

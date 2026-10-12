@@ -191,6 +191,18 @@ fn packing_leaves_out_files_over_the_limit() {
 }
 
 #[test]
+fn pack_skips_anki_cuts() {
+  let own = temp("anki");
+  fs::create_dir_all(own.join("clips")).unwrap();
+  fs::write(own.join("clips/v_1.50.m4a"), b"1").unwrap();
+  fs::write(own.join("clips/anki_1700000000000_v_1.50.m4a"), b"1").unwrap();
+  fs::write(own.join("clips/anki_1700000000000_v_1.50.jpg"), b"1").unwrap();
+  let names: Vec<String> = pack_list(&own, 100).unwrap().into_iter().map(|(n, _)| n).collect();
+  assert_eq!(names, vec!["files/clips/v_1.50.m4a".to_string()]);
+  fs::remove_dir_all(&own).unwrap();
+}
+
+#[test]
 fn remove_only_our_names() {
   let own = temp("remove");
   let auto = write_in(&own, None, "auto", &manifest(&[], 1), "{}", false).unwrap();

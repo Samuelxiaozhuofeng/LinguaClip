@@ -144,6 +144,10 @@ export const addNote = async (
 // Subtitle lines, words and AI replies are text: in an Anki field they must not become tags.
 export const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// The AI's note as its own block after the dictionary's meaning on an Anki card (plain text in, escaped).
+export const withAiBlock = (definition: string, ai: string) =>
+  ai ? `${definition}<div class="ai">AI：${escHtml(ai).replace(/\n/g, '<br>')}</div>` : definition;
+
 // Wrap the looked-up word in <b> where it sits in the sentence, as escaped HTML. Whole-word
 // match first (so "a" doesn't light up inside "want"); scripts without spaces (Japanese)
 // fall back to the first plain occurrence. Matched on the raw text, each piece escaped after.

@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PracticeMode } from '../types';
 import { Rating, type Grade } from 'ts-fsrs';
-import { ReviewCard, recordOutcome, repointVideo, getAllCards, dueQueue, addWord, gradeOf, previewDue, schedule, setMastered } from '../utils/review';
+import { ReviewCard, recordOutcome, repointVideo, getAllCards, dueQueue, addWord, gradeOf, previewDue, schedule, setMastered, removeCard, restoreCard, type Removed } from '../utils/review';
 import { patchVideoRecord } from '../utils/videoStorage';
 import { getAudioPaddingConfig, getWordFront, getMasteredBtn } from '../utils/storage';
 import { videoSrcFromPath, pickVideoPath } from '../utils/desktop';
-import { findSource, type Source } from '../utils/clips';
-import { Check, Play, Repeat, RotateCcw, X } from 'lucide-react';
+import { findSource, holdClips, fillClips, type Source } from '../utils/clips';
+import { Check, Play, Repeat, RotateCcw, Trash2, X } from 'lucide-react';
 import { Btn } from './ui';
 import { IS_WINDOWS } from '../utils/platform';
 import DictationLine from './DictationLine';
@@ -20,6 +20,8 @@ import { parseSRT } from '../utils/srtParser';
 import { detectLang } from '../utils/dictionary';
 import type { DeckLang } from '../utils/deckLang';
 import { useT } from '../utils/i18n';
+
+type Held = Removed & { release: () => void };
 import { countLine, usePracticeClock } from '../utils/today';
 import { hasKana, jaReady, useJaVersion } from '../utils/japanese';
 import { settleSplits } from '../utils/jaSegments';
@@ -100,8 +102,12 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
   const [at, setAt] = useState(0); // when the buttons came up: shown days and kept days share it
   const front = useMemo(getWordFront, []);
   const masteredBtn = useMemo(getMasteredBtn, []);
-  const [undo, setUndo] = useState<{ id: string; n: number } | null>(null); // the "got it" note, with its undo
+  // The note under the card, with its undo: "got it", or a delete (`gone` = the card as it was).
+  const [undo, setUndo] = useState<{ id: string; n: number; gone?: Promise<Held | null> } | null>(null);
   const repeats = useRef(new Set<string>()); // cards already graded "Again" this round
+  const removed = useRef(new Set<string>()); // deleted this round: not counted as done
+  const undone = useRef(new Set<Promise<Held | null>>()); // deletes taken back: their own chain lets the files go
+  const [restored, setRestored] = useState(0); // an undone delete: work out "one more round" again
   const relinked = useRef(new Map<string, string>());
   const writes = useRef<Promise<unknown>[]>([]);
   const clip = useClip();
@@ -228,7 +234,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
       .then(all => { if (!cancelled) setMore(dueQueue(lang === 'all' || !langOf ? all : all.filter(c => langOf(c) === lang), queue[0].deck)); })
       .catch(e => { console.error(e); if (!cancelled) setMore([]); });
     return () => { cancelled = true; };
-  }, [done, queue]);
+  }, [done, queue, restored]);
 
   const grading = !!card && !!path && splitsReady && !done && (isWord ? turned : mode === PracticeMode.FEEDBACK);
   useEffect(() => { if (grading) setAt(Date.now()); }, [grading, card]);
@@ -263,15 +269,34 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
     setUndo(u => ({ id: card.id, n: (u?.n ?? 0) + 1 }));
     next();
   };
+  // Delete (docs/review.md「复习里删卡」): gone at once, with this round's repeats; undo puts it back whole.
+  const remove = () => {
+    if (!card) return;
+    // Its clip files are held from the moment it is gone, so no sweep slips in between.
+    const gone = removeCard(card.id).then(c => c && { ...c, release: holdClips(c.card) }).catch(e => { console.error(e); return null; });
+    writes.current.push(gone);
+    setQueue(q => q.filter((c, i) => i <= idx || c.id !== card.id));
+    removed.current.add(card.id);
+    setUndo(u => ({ id: card.id, n: (u?.n ?? 0) + 1, gone }));
+    next();
+  };
   const unmaster = () => {
     if (!undo) return;
-    writes.current.push(setMastered(undo.id, false).catch(console.error));
+    writes.current.push(undo.gone
+      // Files held until the card is back and a whole sweep has seen it (one may have read the cards
+      // before); "one more round" waits only for the card.
+      ? undo.gone.then(c => c && restoreCard(c).then(() => { fillClips().catch(console.error).finally(c.release); }, e => { c.release(); throw e; })).catch(console.error)
+      : setMastered(undo.id, false).catch(console.error));
+    setRestored(n => n + 1); // drops a "one more round" worked out before, and waits for this write
+    if (undo.gone) { undone.current.add(undo.gone); removed.current.delete(undo.id); }
     setUndo(null);
   };
   useEffect(() => {
     if (!undo) return;
     const id = window.setTimeout(() => setUndo(null), 6000);
-    return () => window.clearTimeout(id);
+    // Offer over without undo (timed out, pushed aside, round closed): the deleted card's files may go.
+    const gone = undo.gone;
+    return () => { window.clearTimeout(id); if (gone && !undone.current.has(gone)) gone.then(c => c?.release()); };
   }, [undo]);
   const canMaster = masteredBtn && !isWord;
 
@@ -296,14 +321,16 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
     setSuggest(undefined);
     setAt(0);
     repeats.current.clear();
+    removed.current.clear();
   };
 
   // Own keys only: Esc closes the definition, else quits; Space turns a word card; 1–4 grade,
   // Enter takes the suggested grade; nothing reaches the page underneath.
   const defOpen = def.word !== null;
   const front0 = isWord && !turned && !!path && splitsReady && !done;
-  const keys = useRef({ onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster });
-  keys.current = { onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster };
+  const canRemove = !!card && !done;
+  const keys = useRef({ onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove });
+  keys.current = { onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return; // Esc / Enter inside a Japanese input method
@@ -316,6 +343,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
       if (!typing && !k.done && !k.defOpen) {
         const hit = (run: () => void) => { e.preventDefault(); e.stopPropagation(); run(); };
         if (k.front0 && plain && e.code === 'Space') return hit(k.turn);
+        // ⌘⌫ (Ctrl+Backspace on Windows) deletes the card; inside a blank it stays an editing key.
+        if (k.canRemove && e.key === 'Backspace' && (IS_WINDOWS ? e.ctrlKey : e.metaKey) && !e.altKey && !e.shiftKey) return hit(k.remove);
         if (k.grading && plain && /^[1-4]$/.test(e.key)) return hit(() => k.grade(+e.key as Grade));
         if (k.grading && plain && e.key === '5' && k.canMaster) return hit(k.master);
         if (k.grading && plain && e.key === 'Enter' && k.suggest) return hit(() => k.grade(k.suggest!));
@@ -339,7 +368,15 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
         {front0 && <p className="absolute text-[13px] text-mute">{t('review.hidden')}</p>}
         <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 lg:pr-6 flex items-center justify-between gap-3 text-[13px]`} data-tauri-drag-region="deep">
           <button type="button" onClick={onClose} className="press h-[42px] pl-3.5 pr-4 rounded-full bg-page border border-line text-ink flex items-center gap-1.5"><X size={15} /> {t('session.quit')}</button>
-          {!done && <span className="h-[42px] px-4 rounded-full bg-page border border-line text-ink flex items-center tabular-nums">{t('session.progress', { current: idx + 1, total: queue.length })}</span>}
+          {!done && (
+            <div className="flex items-center gap-2">
+              {canRemove && (
+                <button type="button" onClick={e => { e.currentTarget.blur(); remove(); }} title={t('review.deleteTitle', { key: IS_WINDOWS ? 'Ctrl+Backspace' : '⌘⌫' })} aria-label={t('review.delete')}
+                  className="press h-[42px] px-3.5 rounded-full bg-page border border-line text-ink flex items-center gap-1.5"><Trash2 size={15} /> {t('review.delete')}</button>
+              )}
+              <span className="h-[42px] px-4 rounded-full bg-page border border-line text-ink flex items-center tabular-nums">{t('session.progress', { current: idx + 1, total: queue.length })}</span>
+            </div>
+          )}
         </header>
       </div>
 
@@ -362,7 +399,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
             {done ? (
               <div className="flex flex-col items-center gap-3 fade-in">
                 <h2 className="text-[34px] font-semibold tracking-[-0.02em] leading-tight">{t('session.doneTitle')}</h2>
-                <p className="text-sm text-mute leading-relaxed max-w-md">{t('session.doneBody', { n: new Set(queue.map(c => c.id)).size })}</p>
+                <p className="text-sm text-mute leading-relaxed max-w-md">{t('session.doneBody', { n: new Set(queue.map(c => c.id).filter(id => !removed.current.has(id))).size })}</p>
                 <div className="pt-4 flex gap-2.5">
                   {!!more?.length && <Btn onClick={again}>{t('session.doneMore', { n: more.length })}</Btn>}
                   <Btn tone="accent" onClick={onFinish ?? onClose} autoFocus>{t('session.back')}</Btn>
@@ -429,8 +466,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
         )}
       </section>
       {undo && (
-        <div key={undo.n} className="fixed left-1/2 -translate-x-1/2 bottom-6 z-[60] h-10 pl-4 pr-1.5 rounded-full bg-ink text-white text-sm flex items-center gap-2 shadow-card fade-in">
-          {t('review.masteredToast')}
+        <div key={undo.n} className="fixed left-1/2 -translate-x-1/2 top-3 z-[60] h-10 pl-4 pr-1.5 rounded-full bg-ink text-white text-sm flex items-center gap-2 shadow-card fade-in">
+          {t(undo.gone ? 'review.deletedToast' : 'review.masteredToast')}
           <button type="button" onClick={e => { e.currentTarget.blur(); unmaster(); }} className="press h-7 px-3 rounded-full bg-white/15 font-medium">{t('review.undo')}</button>
         </div>
       )}

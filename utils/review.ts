@@ -38,6 +38,7 @@ export interface ReviewCard {
   saved: boolean;        // bookmarked by hand
   clip?: Clip;           // its own copy of the line (utils/clips.ts), so it plays after the video is deleted
   mastered?: number;     // marked "got it" in review (when): out of review until the line trips the learner up again (docs/review.md)
+  ankiAt?: number;       // sent to Anki from the card library (when; docs/anki-export.md)
   fsrs: Stored<Card>;
   createdAt: number;
 }
@@ -217,6 +218,7 @@ export const subscribeCards = (fn: () => void) => { listeners.add(fn); return ()
 const changed = () => listeners.forEach(fn => fn());
 
 export const getAllCards = async (): Promise<ReviewCard[]> => (await tx<ReviewCard[]>('readonly', s => s.getAll())) ?? [];
+export const getCard = async (id: string): Promise<ReviewCard | null> => (await tx<ReviewCard>('readonly', s => s.get(id))) ?? null;
 export const deleteCards = async (ids: string[]) => {
   await migrateSavedLines().catch(console.error);
   const t = (await db()).transaction([STORE, META], 'readwrite');
@@ -287,9 +289,50 @@ export const recordOutcome = (card: ReviewCard, o: Outcome | Grade, now = Date.n
 export const setMastered = (id: string, on: boolean) =>
   update(id, old => old ? (on ? { ...old, mastered: Date.now() } : unmastered(old)) : undefined);
 
+// Sent to Anki from the library: only this card, everything else kept; a card deleted meanwhile stays deleted.
+export const markAnkiSent = (id: string, at: number) =>
+  update(id, old => old ? { ...old, ankiAt: at } : undefined);
+
 // The practice page got stuck on this line: back to review, whether or not it adds cards.
 export const clearMastered = (videoId: string, start: number) =>
   update(lineCardId(videoId, start), old => old?.mastered ? unmastered(old) : undefined);
+
+// Delete from inside a review round (docs/review.md「复习里删卡」): hands back the card as it was,
+// so undo can put it back whole (clip included), plus whether the old-bookmark move had already
+// been told to skip it. Undo never overwrites a card written since, and takes back only its own skip.
+export interface Removed { card: ReviewCard; listed: boolean; pending: boolean } // pending: the move hadn't landed
+export const removeCard = async (id: string): Promise<Removed | null> => {
+  await migrateSavedLines().catch(console.error);
+  const t = (await db()).transaction([STORE, META], 'readwrite');
+  const s = t.objectStore(STORE);
+  let out: Removed | null = null;
+  const g = t.objectStore(META).get('deleted'); // queued before forget() adds this id
+  const mv = t.objectStore(META).get('migrated');
+  const r = s.get(id);
+  r.onsuccess = () => { if (r.result) { out = { card: r.result, listed: !!g.result?.ids?.includes(id), pending: !mv.result }; s.delete(id); } };
+  forget(t, [id]);
+  await finished(t);
+  changed();
+  return out;
+};
+// Doesn't wait on the old-bookmark move: run first, it would skip this card while it is still on the list.
+export const restoreCard = async ({ card, listed, pending }: Removed) => {
+  const t = (await db()).transaction([STORE, META], 'readwrite');
+  const s = t.objectStore(STORE), m = t.objectStore(META);
+  // Not listed before this delete: take back our own skip, and if the move already ran and skipped
+  // it because of this delete, give it the bookmark the move would have.
+  const g = listed ? null : m.get('deleted');
+  const k = listed || !pending ? null : m.get('skippedSaved');
+  const r = s.get(card.id);
+  r.onsuccess = () => {
+    const missed = !!k?.result?.ids?.includes(card.id);
+    if (!r.result) s.put(missed ? withReason(card, 'saved') : card);
+    if (g?.result) m.put({ ...g.result, ids: g.result.ids.filter((x: string) => x !== card.id) });
+    if (missed) m.put({ ...k!.result, ids: k!.result.ids.filter((x: string) => x !== card.id) });
+  };
+  await finished(t);
+  changed();
+};
 
 export const countForVideo = async (videoId: string) => (await getAllCards()).filter(c => c.videoId === videoId).length;
 
@@ -426,6 +469,9 @@ export const migrateSavedLines = () => migrating ??= (async () => {
   const gone = m.get('deleted');
   gone.onsuccess = () => {
     const skip = new Set<string>(gone.result?.ids ?? []); // deleted / un-bookmarked while this kept failing: leave them be
+    // Skipped ones are noted, so undoing a delete from a review round can still add the bookmark (restoreCard).
+    const skipped = cards.filter(c => skip.has(c.id)).map(c => c.id);
+    if (skipped.length) m.put({ id: 'skippedSaved', ids: skipped });
     // Never clobber a card that already exists (made by practising before this finished).
     for (const c of cards) {
       if (skip.has(c.id)) continue;

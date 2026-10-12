@@ -11,6 +11,8 @@ pub async fn anki_request(url: String, body: String) -> Result<String, String> {
   }
   let client = reqwest::Client::builder()
     .no_proxy()
+    // never let a 3xx carry the request body somewhere else
+    .redirect(reqwest::redirect::Policy::none())
     // storeMediaFile carries a whole audio clip as base64
     .timeout(Duration::from_secs(60))
     .build()

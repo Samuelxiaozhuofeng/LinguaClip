@@ -62,6 +62,10 @@ fn pack_list(own: &Path, max: u64) -> Result<Vec<(String, PathBuf)>, String> {
         continue;
       }
       let Some(name) = e.file_name().to_str().map(String::from) else { continue };
+      // anki_*: temporary cuts for sending to Anki (utils/ankiExport.ts), no card uses them.
+      if prefix == "files/clips/" && name.starts_with("anki_") {
+        continue;
+      }
       let entry = format!("{prefix}{name}");
       if target(&entry).is_some() {
         out.push((entry, e.path()));

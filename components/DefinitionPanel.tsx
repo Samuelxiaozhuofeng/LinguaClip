@@ -4,7 +4,7 @@ import * as AI from '../utils/ai';
 import { DictEntry, Seg, Sense, senseToAnki } from '../utils/dictionary';
 import { Btn, Card, Stamp } from './ui';
 import { useT } from '../utils/i18n';
-import { escHtml } from '../utils/anki';
+import { escHtml, withAiBlock } from '../utils/anki';
 
 // Single word-definition surface for both learning modes: a small card beside the
 // clicked word (below it, or above when there's more room there), closed by Esc, the X or a click outside. A dictionary entry is
@@ -51,8 +51,6 @@ const aiHtml = (d: AI.WordDefinition) => `<b>${escHtml(d.word)}</b> <i>(${escHtm
 // dictionary's: its own field on a word card, its own block after the meaning on an Anki card.
 export const aiNoteOf = (def: DefinitionState): string =>
   (def.dict ? [def.pick?.note, def.pick?.culture] : [def.data?.culture]).filter(Boolean).join('\n');
-const withAiBlock = (definition: string, ai: string) =>
-  ai ? `${definition}<div class="ai">AI：${escHtml(ai).replace(/\n/g, '<br>')}</div>` : definition;
 
 // What a word card gets when kept without opening the card (the reader's summary): the
 // first sense of the entry spelled `prefer` (else the first entry), else the AI's answer.

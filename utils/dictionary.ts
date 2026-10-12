@@ -385,7 +385,7 @@ const wiktionary = async (word: string, lang: DictLang) => {
 // shows those (at most two: fue → ir, ser) with the grammar line as their note.
 // Sentence-initial capitals (Llegué) are retried in lower case, but only when
 // the page has nothing in this language: German Haus stays Haus.
-const lookupWiktionary = async (word: string, lang: DictLang): Promise<DictEntry[] | null> => {
+export const lookupWiktionary = async (word: string, lang: DictLang): Promise<DictEntry[] | null> => {
   let found = await wiktionary(word, lang);
   if (!found && word !== word.toLowerCase()) found = await wiktionary(word.toLowerCase(), lang);
   if (!found) return null;

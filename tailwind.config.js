@@ -1,7 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 // "Cinema": light ground, white sheets, near-black type, one vermilion accent. Nothing else.
 export default {
-  content: ['./index.html', './*.tsx', './components/**/*.tsx', './hooks/**/*.{ts,tsx}', './utils/**/*.ts', './pro/**/*.{ts,tsx}'],
+  content: ['./index.html', './*.tsx', './components/**/*.tsx', './hooks/**/*.{ts,tsx}', './utils/**/*.ts', './pro/**/*.{ts,tsx}', './mobile/**/*.{html,ts,tsx}'],
   theme: {
     extend: {
       colors: {

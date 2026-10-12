@@ -6,6 +6,7 @@ import { dialog } from '../components/Dialog';
 import { t } from '../utils/i18n';
 import { getVideoFromDB } from '../utils/fileSystemAccess';
 import { videoLang } from '../utils/deckLang';
+import { lineCardId, markAnkiSent, wordCardId } from '../utils/review';
 
 export type AnkiStatus = 'idle' | 'recording' | 'adding' | 'success' | 'error';
 
@@ -17,7 +18,7 @@ export interface UseAnkiIntegrationParams {
 
 // The card goes to its video's language deck when Settings → Anki names one; otherwise
 // (or if the record can't be read) to the target deck.
-const withLangDeck = async (template: AnkiCardTemplateConfig, videoId?: string | null): Promise<AnkiCardTemplateConfig> => {
+export const withLangDeck = async (template: AnkiCardTemplateConfig, videoId?: string | null): Promise<AnkiCardTemplateConfig> => {
   if (!template.deckByLang || !videoId) return template;
   const record = await getVideoFromDB(videoId).catch(() => null);
   const lang = record ? videoLang(record) : 'other';
@@ -270,6 +271,7 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
             audioBase64,
             audioExt,
         });
+        if (videoId) markAnkiSent(lineCardId(videoId, subtitle.startTime), Date.now()).catch(console.error);
         setAnkiStatus('success');
         setTimeout(() => setAnkiStatus('idle'), 2000);
     } catch (e: any) {
@@ -315,6 +317,7 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
               definition,
               example
           });
+          if (videoId) markAnkiSent(wordCardId(videoId, subtitle.startTime, word), Date.now()).catch(console.error);
       } catch (e: any) {
           dialog.alert(t('anki.refusedTitle'), e?.message ?? String(e));
           throw e;

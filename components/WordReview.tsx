@@ -7,26 +7,10 @@ import { sentenceParts } from '../utils/textTokenizer';
 import { furigana, hasKanji, readingOf, useJaVersion } from '../utils/japanese';
 import { useT } from '../utils/i18n';
 import { usePhraseDrag } from '../hooks/usePhraseDrag';
+import { clean } from '../utils/cleanHtml';
 
 // A word card's two faces (think first, then turn it) and the four FSRS buttons
 // every review card ends on.
-
-// A kept meaning is HTML (dictionary text we escaped, but also raw AI text and
-// glyph images from dictionary pages), so only <b> <i> <br> <ruby> <rt> <rp> and
-// http(s) <img> get through; everything else is flattened to its text.
-const clean = (html: string): string => {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const walk = (n: Node): string => [...n.childNodes].map(c => {
-    if (c.nodeType === Node.TEXT_NODE) return (c.textContent ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    if (!(c instanceof Element)) return '';
-    const tag = c.tagName.toLowerCase();
-    if (tag === 'br') return '<br/>';
-    if (tag === 'script' || tag === 'style') return '';
-    if (tag === 'img') { const src = c.getAttribute('src') ?? ''; return /^https?:\/\//.test(src) ? `<img src="${src.replace(/"/g, '&quot;')}">` : ''; }
-    return ['b', 'i', 'ruby', 'rt', 'rp'].includes(tag) ? `<${tag}>${walk(c)}</${tag}>` : walk(c);
-  }).join('');
-  return walk(doc.body);
-};
 
 const Html: React.FC<{ html?: string; className?: string }> = ({ html, className }) =>
   html ? <div className={className} dangerouslySetInnerHTML={{ __html: clean(html) }} /> : null;
