@@ -9,7 +9,7 @@ import { localDictsFor, localDictsReady, lookupLocal } from './localDict';
 // and parsed here. None of these is an official API — a site redesign breaks
 // its parser, and the caller falls back to AI when it can.
 
-export type DictLang = 'en' | 'es' | 'fr' | 'de' | 'ja';
+export type DictLang = 'en' | 'es' | 'fr' | 'de' | 'ja' | 'no';
 // cambridge = English-Chinese, cambridgeEn = English-English, cambridgeBi =
 // Spanish / French / German-English. The English ones: docs/dictionary.md.
 // local = the user's own imported dictionaries (docs/yomitan.md).
@@ -37,6 +37,7 @@ const OPTIONS: Record<Lang, Record<DictLang, DictSource[]>> = {
     fr: ['eudic', 'youdao', 'wiktionary', 'cambridgeBi'],
     de: ['eudic', 'youdao', 'wiktionary', 'cambridgeBi'],
     ja: ['youdao', 'wiktionary', 'jisho'],
+    no: ['wiktionary'],
   },
   en: {
     en: ['cambridgeEn', 'wiktionary'],
@@ -44,6 +45,7 @@ const OPTIONS: Record<Lang, Record<DictLang, DictSource[]>> = {
     fr: ['wiktionary', 'cambridgeBi'],
     de: ['wiktionary', 'cambridgeBi'],
     ja: ['wiktionary', 'jisho'],
+    no: ['wiktionary'],
   },
 };
 
@@ -105,35 +107,7 @@ export const saveDictChoice = (lang: DictLang, source: DictSource, ui: Lang = ge
   localStorage.setItem(storageKey(ui), JSON.stringify({ ...storedChoice(ui), [lang]: source }));
 };
 
-// One word says little about its language (parler is also an English
-// headword), so the whole subtitle file votes with its function words.
-const STOPWORDS: Record<Exclude<DictLang, 'ja'>, string[]> = {
-  en: ['the', 'and', 'is', 'you', 'to', 'of', 'it', 'that', 'what', 'this', 'have', 'with', 'are', 'was', 'i', 'my', "it's", "don't"],
-  es: ['el', 'la', 'que', 'y', 'los', 'las', 'es', 'por', 'se', 'una', 'con', 'para', 'lo', 'qué', 'está', 'pero', 'yo', 'muy'],
-  fr: ['le', 'la', 'les', 'et', 'est', 'que', 'je', 'vous', 'pas', 'une', 'des', 'du', 'il', 'ce', 'qui', "c'est", 'ne', 'mais'],
-  de: ['der', 'die', 'das', 'und', 'ist', 'ich', 'nicht', 'zu', 'ein', 'eine', 'sie', 'es', 'mit', 'den', 'dem', 'auf', 'wir', 'du'],
-};
-
-// null = a language with no dictionary here (Chinese, …). Japanese is told by
-// its kana, which Chinese never has.
-export const detectLang = (texts: string[]): DictLang | null => {
-  const letters = texts.join('').match(/\p{L}/gu)?.length ?? 0;
-  const kana = texts.join('').match(/[\p{Script=Hiragana}\p{Script=Katakana}]/gu)?.length ?? 0;
-  if (kana >= 5 && kana / letters >= 0.2) return 'ja';
-  const words = texts.join(' ').toLowerCase().replace(/[’`]/g, "'").match(/[\p{L}']+/gu) ?? [];
-  if (words.length === 0) return null;
-  const latin = words.filter(w => /^[\p{Script=Latin}']+$/u.test(w)).length;
-  if (latin / words.length < 0.8) return null;
-  let best: DictLang | null = null;
-  let bestScore = 0;
-  for (const lang of Object.keys(STOPWORDS) as (keyof typeof STOPWORDS)[]) {
-    const set = new Set(STOPWORDS[lang]);
-    const score = words.filter(w => set.has(w)).length;
-    if (score > bestScore) { best = lang; bestScore = score; }
-  }
-  // ponytail: a few subtitle lines can tie or barely score; fine for whole files.
-  return bestScore >= 3 ? best : null;
-};
+export { detectLang } from './langDetect';
 
 const clean = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, ' ').trim();
 
@@ -241,7 +215,7 @@ export const parseCambridge = (html: string, word: string, source: DictSource = 
   return { word: clean(first?.querySelector('.headword, .dhw')?.textContent) || word, phonetic: ipa ? `/${ipa}/` : '', senses, source };
 };
 
-const EUDIC_HOST: Record<Exclude<DictLang, 'en' | 'ja'>, string> = {
+const EUDIC_HOST: Record<Exclude<DictLang, 'en' | 'ja' | 'no'>, string> = {
   es: 'https://www.esdict.cn',
   fr: 'https://www.frdic.com',
   de: 'https://www.godic.net',
@@ -410,7 +384,7 @@ const fromSource = async (source: DictSource, word: string, lang: DictLang): Pro
   }
   if (source === 'wiktionary') return lookupWiktionary(word, lang);
   if (source === 'jisho' && lang === 'ja') return parseJisho(await (await get(`https://jisho.org/api/v1/search/words?keyword=${q}`)).json(), word);
-  if (source === 'eudic' && lang !== 'en' && lang !== 'ja') {
+  if (source === 'eudic' && (lang === 'es' || lang === 'fr' || lang === 'de')) {
     const host = EUDIC_HOST[lang];
     const terms = pickEudicTerms(await (await get(`${host}/dicts/prefix/${q}`)).json(), word);
     const pages = await Promise.all(terms.map(async t =>

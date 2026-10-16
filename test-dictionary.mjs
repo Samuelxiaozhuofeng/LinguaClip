@@ -27,6 +27,15 @@ assert.equal(detectLang(['明日あなたと話したいです', 'それはい�
 assert.equal(detectLang(['我们明天见', '今天天气很好']), null);
 assert.equal(detectLang(['Hello']), null, 'too little to tell');
 assert.equal(detectLang([]), null);
+// Norwegian (Bokmål) against its close neighbours: Danish and Swedish have no dictionary here.
+// German 'er' (he) is not a Norwegian vote (review of fcbc206): short and whole German stay German / unknown.
+assert.equal(detectLang(['Er hat mir geholfen.', 'Er kennt den Weg.', 'Er kommt mit.', 'Er will nach Hause.', 'Er sagt, wir sollen warten.', 'Er bleibt hier.']), 'de');
+assert.notEqual(detectLang(['Er weiß es.', 'Hat er recht?', 'Wo ist er?']), 'no');
+assert.notEqual(detectLang(['Ik kan zwemmen.', 'Jij kan koken.', 'Hij kan komen.', 'Zij kan blijven.', 'Iedereen kan helpen.']), 'no', 'Dutch kan is no vote');
+assert.equal(detectLang(['Jeg vet ikke hva du snakker om.', 'Det er mye som skjer nå, og vi har ikke tid.', 'Hun sa noe til meg på bussen.']), 'no');
+assert.equal(detectLang(['Jeg ved ikke hvad du taler om.', 'Det er meget som sker nu, og vi har ikke tid.', 'Hun sagde noget til mig på bussen.']), null, 'Danish is not Norwegian');
+assert.equal(detectLang(['Jag vet inte vad du pratar om.', 'Det är mycket som händer nu, och vi har inte tid.', 'Hon sa något till mig på bussen.']), null, 'nor is Swedish');
+assert.equal(detectLang(['Jeg er her.', 'Det er ikke']), 'no', 'a tie with Danish goes to Norwegian');
 
 // --- Youdao: English `ec` ---
 const running = parseYoudao({ ec: { word: {
@@ -131,22 +140,22 @@ assert.equal(list[2].line, '3. casar | tr. | 娶 e.g. Se casó. 结婚了.');
 // --- Dictionary choice (Chinese interface): Eudic by default for es/fr/de; only the touched language is stored ---
 const store = new Map();
 globalThis.localStorage = { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
-assert.deepEqual(getDictChoice('zh'), { en: 'youdao', es: 'eudic', fr: 'eudic', de: 'eudic', ja: 'youdao' });
+assert.deepEqual(getDictChoice('zh'), { en: 'youdao', es: 'eudic', fr: 'eudic', de: 'eudic', ja: 'youdao', no: 'wiktionary' });
 saveDictChoice('en', 'cambridge', 'zh');
 assert.deepEqual(JSON.parse(store.get('linguaclip_dict_choice')), { en: 'cambridge' });
 saveDictChoice('fr', 'youdao', 'zh');
-assert.deepEqual(getDictChoice('zh'), { en: 'cambridge', es: 'eudic', fr: 'youdao', de: 'eudic', ja: 'youdao' });
+assert.deepEqual(getDictChoice('zh'), { en: 'cambridge', es: 'eudic', fr: 'youdao', de: 'eudic', ja: 'youdao', no: 'wiktionary' });
 store.set('linguaclip_dict_choice', '{"es":"cambridge"}');
 assert.equal(getDictChoice('zh').es, 'eudic', 'a source the language does not offer falls back');
 
 // --- English interface: only English dictionaries, its own choice, the Chinese one kept ---
 store.set('linguaclip_dict_choice', '{"en":"cambridge","es":"youdao"}');
-assert.deepEqual(getDictChoice('en'), { en: 'cambridgeEn', es: 'wiktionary', fr: 'wiktionary', de: 'wiktionary', ja: 'wiktionary' });
+assert.deepEqual(getDictChoice('en'), { en: 'cambridgeEn', es: 'wiktionary', fr: 'wiktionary', de: 'wiktionary', ja: 'wiktionary', no: 'wiktionary' });
 assert.ok(Object.values(dictOptions('en')).flat().every(s => !['youdao', 'eudic', 'cambridge'].includes(s)), 'no Chinese dictionary in English');
 saveDictChoice('ja', 'jisho', 'en');
 assert.deepEqual(JSON.parse(store.get('linguaclip_dict_choice_en')), { ja: 'jisho' });
 assert.equal(getDictChoice('en').ja, 'jisho');
-assert.deepEqual(getDictChoice('zh'), { en: 'cambridge', es: 'youdao', fr: 'eudic', de: 'eudic', ja: 'youdao' }, 'switching back restores the Chinese choice');
+assert.deepEqual(getDictChoice('zh'), { en: 'cambridge', es: 'youdao', fr: 'eudic', de: 'eudic', ja: 'youdao', no: 'wiktionary' }, 'switching back restores the Chinese choice');
 saveDictChoice('es', 'wiktionary', 'zh');
 assert.equal(getDictChoice('zh').es, 'wiktionary', 'the Chinese list offers the English ones too');
 store.set('linguaclip_dict_choice_en', 'not json');
@@ -182,6 +191,50 @@ const ki = parseWiktionary({ ja: [
 ] }, '気', 'ja');
 assert.deepEqual(ki.entry.senses.map(s => [s.pos, s.text[0]]), [['Noun', 'spirit, mood'], ['Adverb', '(colloquial) somehow']], 'stubs and <style> dropped');
 assert.deepEqual(ki.entry.senses[0].examples, [['遊ぶ気満々\nasobu ki manman']], 'furigana dropped from the example');
+// Norwegian Bokmål (trimmed real answers, 2026-10-16): no group of its own, it sits in `other` by name; the
+// `da` group on the same page is Danish and must not stand in. None of ikke / gikk / hus / bok / bil / dag /
+// mann / kvinne / år / barn / tid labels an entry plain "Norwegian".
+const nbForm = (what, lemma, gloss = '') => `<span class="form-of-definition use-with-mention" about="#mwt2" typeof="mw:Transclusion">${what} of <span class="form-of-definition-link"><i class="Latn mention" lang="nb"><a rel="mw:WikiLink" href="/wiki/${lemma}#Norwegian_Bokmål" title="${lemma}">${lemma}</a></i>${gloss}</span></span>`;
+const ikke = parseWiktionary({
+  da: [{ partOfSpeech: 'Adverb', language: 'Danish', definitions: [{ definition: '<a rel="mw:WikiLink" href="/wiki/not" title="not">not</a>' }] }],
+  other: [
+    { partOfSpeech: 'Adverb', language: 'Norwegian Bokmål', definitions: [
+      { definition: '<a rel="mw:WikiLink" href="/wiki/not" title="not">not</a>, <a rel="mw:WikiLink" href="/wiki/no" title="no">no</a>', parsedExamples: [{ example: 'Jeg kan <b>ikke</b><span typeof="mw:Entity">!</span>', translation: 'I can<b>not</b>!' }] },
+      { definition: '<a rel="mw:WikiLink" href="/wiki/non-" title="non-">non-</a> or <a rel="mw:WikiLink" href="/wiki/un-" title="un-">un-</a>', parsedExamples: [{ example: '<b>ikke</b>-anerkjent', translation: '<b>un</b>-recognized' }] },
+    ] },
+    { partOfSpeech: 'Adverb', language: 'Old Swedish', definitions: [{ definition: 'not' }] },
+  ],
+}, 'ikke', 'no');
+assert.deepEqual(ikke.entry.senses, [
+  { pos: 'Adverb', text: ['not, no'], examples: [['Jeg kan ikke!\nI cannot!']] },
+  { pos: 'Adverb', text: ['non- or un-'], examples: [['ikke-anerkjent\nun-recognized']] },
+], 'Bokmål only: not the Danish group, not Old Swedish');
+const gikk = parseWiktionary({ other: [
+  { partOfSpeech: 'Verb', language: 'Norwegian Bokmål', definitions: [{ definition: nbForm('simple <a rel="mw:WikiLink" href="/wiki/Appendix:Glossary#past_tense" title="Appendix:Glossary">past</a>', 'gå') }] },
+  { partOfSpeech: 'Verb', language: 'Norwegian Nynorsk', definitions: [{ definition: 'simple past of <a href="/wiki/gå#Norwegian_Nynorsk">gå</a>' }] },
+] }, 'gikk', 'no');
+assert.equal(gikk.entry, null);
+assert.deepEqual(gikk.forms, [{ lemma: 'gå', note: 'simple past of gå' }], 'the Bokmål anchor is written with an underscore; å stays as is');
+const hus = parseWiktionary({
+  other: [
+    { partOfSpeech: 'Noun', language: 'Middle English', definitions: [{ definition: 'house' }] },
+    { partOfSpeech: 'Noun', language: 'Norwegian Bokmål', definitions: [{ definition: 'a <a rel="mw:WikiLink" href="/wiki/house" title="house">house</a>' }] },
+    { partOfSpeech: 'Verb', language: 'Norwegian Bokmål', definitions: [{ definition: nbForm('<a rel="mw:WikiLink" href="/wiki/Appendix:Glossary#imperative_mood" title="Appendix:Glossary">imperative</a>', 'huse') }] },
+    { partOfSpeech: 'Noun', language: 'Norwegian Nynorsk', definitions: [{ definition: 'a <a href="/wiki/house">house</a>' }, { definition: 'a small container for an item' }] },
+  ],
+  da: [{ partOfSpeech: 'Noun', language: 'Danish', definitions: [{ definition: 'house' }, { definition: 'building' }] }],
+  sv: [{ partOfSpeech: 'Noun', language: 'Swedish', definitions: [{ definition: 'a house' }] }],
+}, 'hus', 'no');
+assert.deepEqual(hus.entry.senses.map(s => s.text[0]), ['a house'], 'Nynorsk, Danish, Swedish left out');
+assert.deepEqual(hus.forms, [{ lemma: 'huse', note: 'imperative of huse' }]);
+const bok = parseWiktionary({ other: [
+  { partOfSpeech: 'Noun', language: 'Norwegian Bokmål', definitions: [{ definition: '<a rel="mw:WikiLink" href="/wiki/book" title="book">book</a>' }] },
+  { partOfSpeech: 'Noun', language: 'Norwegian Bokmål', definitions: [{ definition: nbForm('alternative form', 'bøk', ' <span class="mention-gloss-paren annotation-paren">(</span><span class="mention-gloss-double-quote">“</span><span class="mention-gloss">beech</span><span class="mention-gloss-double-quote">”</span><span class="mention-gloss-paren annotation-paren">)</span>') }] },
+] }, 'bok', 'no');
+assert.deepEqual(bok.entry.senses.map(s => [s.pos, s.text[0]]), [['Noun', 'book']]);
+assert.deepEqual(bok.forms, [{ lemma: 'bøk', note: 'alternative form of bøk (“beech”)' }]);
+assert.equal(parseWiktionary({ da: [{ partOfSpeech: 'Noun', language: 'Danish', definitions: [{ definition: 'house' }] }], other: [{ partOfSpeech: 'Noun', language: 'Norwegian Nynorsk', definitions: [{ definition: 'house' }] }] }, 'Hus', 'no'), null, 'no Bokmål entry: not found (no Danish or Nynorsk stand-in)');
+assert.equal(parseWiktionary({ other: 'x' }, 'hus', 'no'), null);
 assert.equal(htmlText('&lt;b&gt; &#233;t&#xE9; &nbsp;x &bogus;'), '<b> été x &bogus;', 'entities decoded to text, never markup');
 assert.equal(htmlText('a &#99999999; b'), 'a &#99999999; b', 'an impossible code point stays as written instead of throwing');
 

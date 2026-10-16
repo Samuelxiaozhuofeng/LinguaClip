@@ -500,8 +500,8 @@ pub(crate) fn transcribe(
   lang: &str,
   wav: &Path,
   stem: &Path,
-) -> Result<(), String> {
-  let speech = run_whisper(&mut on_pct, whisper, model, Some(vad), &[], dtw, lang, wav, stem)?;
+) -> Result<crate::dtw::Clock, String> {
+  let (speech, clock) = run_whisper(&mut on_pct, whisper, model, Some(vad), &[], dtw, lang, wav, stem)?;
   // Silero hears speech under a constant music bed (anime, variety shows) as
   // background: a 25-minute episode came back with 40 s of "speech" and
   // subtitles that stopped at minute 10. Too little speech for the length =
@@ -510,13 +510,14 @@ pub(crate) fn transcribe(
     if speech < total * 0.2 {
       log::error!("vad kept {speech:.0}s of {total:.0}s, transcribing without vad");
       on_pct(0);
-      run_whisper(&mut on_pct, whisper, model, None, &[], dtw, lang, wav, stem)?;
+      return Ok(run_whisper(&mut on_pct, whisper, model, None, &[], dtw, lang, wav, stem)?.1);
     }
   }
-  Ok(())
+  Ok(clock)
 }
 
-// Returns (speech seconds VAD kept, audio seconds) when VAD ran and said so.
+// Returns (speech seconds VAD kept, audio seconds) when VAD ran and said so,
+// and what the log said about the clock the json's token times are on.
 pub(crate) fn run_whisper(
   on_pct: &mut impl FnMut(u32),
   whisper: &Path,
@@ -527,7 +528,7 @@ pub(crate) fn run_whisper(
   lang: &str,
   wav: &Path,
   stem: &Path,
-) -> Result<Option<(f64, f64)>, String> {
+) -> Result<(Option<(f64, f64)>, crate::dtw::Clock), String> {
   let path = |p: &Path| p.to_str().map(str::to_string).ok_or_else(|| "transcribe:bad path".to_string());
   let mut cmd = command(whisper);
   cmd.env("PATH", augmented_path());
@@ -541,8 +542,10 @@ pub(crate) fn run_whisper(
     }
   }
   match vad {
+    // Silero's defaults (0.5, 30 ms) take speech over a music bed for background
+    // and drop whole lines; docs/import.md「VAD 参数」 has the measurements.
     Some(v) => {
-      cmd.args(["--vad", "--vad-model", &path(v)?]);
+      cmd.args(["--vad", "--vad-model", &path(v)?, "--vad-threshold", "0.35", "--vad-speech-pad-ms", "300"]);
     }
     // Over music and long silences whisper without VAD can loop on one line
     // (seen: the same sentence 74 times); no carried-over context stops that.
@@ -568,6 +571,7 @@ pub(crate) fn run_whisper(
   ]);
   let mut last_pct: Option<u32> = None;
   let (mut speech, mut total) = (0.0, None);
+  let mut clock = crate::dtw::Clock { vad: vad.map(|_| Vec::new()), audio_ms: None };
   let (code, err_tail) = run_streaming(cmd, |line| {
     if let Some(pct) = parse_whisper_pct(line) {
       if last_pct != Some(pct) {
@@ -580,12 +584,13 @@ pub(crate) fn run_whisper(
       Some(VadLine::Segment(d)) => speech += d,
       None => {}
     }
+    crate::dtw::read_log_line(&mut clock, line);
   })
   .map_err(|e| format!("transcribe:{e}"))?;
   if code != 0 {
     return Err(format!("transcribe:{err_tail}"));
   }
-  Ok(total.map(|t| (speech, t)))
+  Ok((total.map(|t| (speech, t)), clock))
 }
 
 enum VadLine {
@@ -611,7 +616,10 @@ fn parse_vad_line(line: &str) -> Option<VadLine> {
 
 // whisper emits sub-word tokens (" mer" + "cado"); a token that does not start
 // with a space continues the word before it. Punctuation rides along with its word.
-pub(crate) fn read_words(json_path: &Path) -> Result<Vec<Word>, String> {
+// `clock` is what the run's log said (None = unknown): when the DTW times hold
+// (dtw.rs), words take them and the lines come back too, rebuilt on them; else
+// the old estimate below and no lines (whisper's .srt stays).
+pub(crate) fn read_words(json_path: &Path, clock: Option<&crate::dtw::Clock>) -> Result<(Vec<Word>, Option<Vec<crate::repeat_fix::Cue>>), String> {
   let raw = std::fs::read(json_path).map_err(|e| format!("transcribe:{e}"))?;
   let doc: serde_json::Value =
     serde_json::from_str(&stray_bytes_as_chars(&raw)).map_err(|e| format!("transcribe:{e}"))?;
@@ -620,8 +628,17 @@ pub(crate) fn read_words(json_path: &Path) -> Result<Vec<Word>, String> {
     .and_then(|v| v.as_array())
     .ok_or_else(|| "transcribe:no transcription in json".to_string())?;
 
+  let starts = clock.and_then(|c| crate::dtw::token_starts(segments, c));
+  let audio_end = clock.and_then(|c| c.audio_ms).map_or(u32::MAX, |e| e as u32);
+  let mut lines: Vec<crate::dtw::Line> = Vec::new();
   let mut words: Vec<Word> = Vec::new();
-  for seg in segments {
+  for (si, seg) in segments.iter().enumerate() {
+    let dtw = starts.as_ref().map(|s| (&s[si], s[si + 1..].iter().find_map(|t| t.first().copied()).unwrap_or(audio_end)));
+    let mut k = 0;
+    let mut line_open = false;
+    // Chinese / Japanese: the token before ended a sentence (。？！?!, or was
+    // the space whisper puts between two), so this one starts a line.
+    let mut sentence_ended = false;
     // Bytes of a character whisper split across tokens, waiting for the rest,
     // and the start time of the token they came in.
     let mut pending: (Vec<u8>, u32) = (Vec::new(), 0);
@@ -630,7 +647,7 @@ pub(crate) fn read_words(json_path: &Path) -> Result<Vec<Word>, String> {
     let Some(tokens) = seg.get("tokens").and_then(|v| v.as_array()) else {
       return Err("transcribe:segment without tokens".into());
     };
-    // With VAD on, whisper maps the SEGMENT times back onto the original audio
+    // Without usable DTW times: with VAD on, whisper maps the SEGMENT times back onto the original audio
     // but leaves the token times on the silence-stripped clock, so they drift
     // further behind the longer the video runs. The segment's own start and end
     // are the two points we know on both clocks: stretch the tokens onto them.
@@ -668,23 +685,53 @@ pub(crate) fn read_words(json_path: &Path) -> Result<Vec<Word>, String> {
       if text.starts_with("[_") {
         continue; // whisper's own markers, not speech
       }
-      // A word placed at a guessed time is worse than no word timings at all:
-      // the front end would re-cut the lines around it and the audio would no
-      // longer match what is written. Refuse instead, and keep whisper's lines.
-      let (Some(raw_from), Some(raw_to)) = (
-        tok.pointer("/offsets/from").and_then(|v| v.as_i64()),
-        tok.pointer("/offsets/to").and_then(|v| v.as_i64()),
-      ) else {
-        return Err("transcribe:token without offsets".into());
+      let (mut from, to) = if let Some((times, next_seg)) = dtw {
+        let f = times[k];
+        // Punctuation shares the start of the token before it; the word ends at
+        // the next real one (dtw::cues holds it inside its line afterwards).
+        let next = times[k + 1..].iter().copied().find(|&n| n > f);
+        k += 1;
+        // A gap this long starts a new line: no word stretches across it.
+        let after_gap = lines.last().is_none_or(|l| f - l.last > crate::dtw::GAP_MS);
+        let rest = text.trim_start();
+        let in_cjk = line_open && lines.last().is_some_and(|l| l.text.chars().any(is_cjk));
+        let new_sentence = in_cjk && !rest.is_empty() && (sentence_ended || (text.starts_with(' ') && rest.starts_with(is_cjk)));
+        if !line_open || after_gap || new_sentence {
+          lines.push(crate::dtw::Line { from: f, last: f, text: String::new(), after_gap, words: words.len() });
+          line_open = true;
+        }
+        if !rest.is_empty() {
+          sentence_ended = rest.trim_end().ends_with(['。', '？', '！', '?', '!']);
+        } else if text.contains(' ') {
+          sentence_ended = true;
+        }
+        lines.last_mut().expect("just pushed").last = f;
+        let to = match next {
+          Some(n) if n - f <= crate::dtw::GAP_MS => n,
+          n => (f + crate::dtw::TAIL_MS).min(n.unwrap_or(next_seg)).min(audio_end),
+        };
+        (f, to.max(f))
+      } else {
+        // A word placed at a guessed time is worse than no word timings at all:
+        // the front end would re-cut the lines around it and the audio would no
+        // longer match what is written. Refuse instead, and keep whisper's lines.
+        let (Some(raw_from), Some(raw_to)) = (
+          tok.pointer("/offsets/from").and_then(|v| v.as_i64()),
+          tok.pointer("/offsets/to").and_then(|v| v.as_i64()),
+        ) else {
+          return Err("transcribe:token without offsets".into());
+        };
+        (to_audio(raw_from).max(0) as u32, to_audio(raw_to).max(0) as u32)
       };
-      let mut from = to_audio(raw_from).max(0) as u32;
-      let to = to_audio(raw_to).max(0) as u32;
       if pending.0.is_empty() {
         pending.1 = from;
       } else {
         from = pending.1;
       }
       let text = take_complete_chars(&mut pending.0, text);
+      if dtw.is_some() {
+        lines.last_mut().expect("opened above").text.push_str(&text);
+      }
       let trimmed = text.trim();
       if trimmed.is_empty() {
         continue;
@@ -701,9 +748,22 @@ pub(crate) fn read_words(json_path: &Path) -> Result<Vec<Word>, String> {
     }
   }
 
+  let cues = starts.map(|_| crate::dtw::cues(lines, audio_end, &mut words));
   // Times have to run forward (the front end relies on it); a stray backwards
   // jump loses only the few words around it, not the whole list.
-  Ok(crate::word_order::in_order(words))
+  Ok((crate::word_order::in_order(words), cues))
+}
+
+// Words of a local run; when they are on DTW times, whisper's .srt is
+// rewritten on the same times. None = no words (the .srt stays as it was).
+pub(crate) fn local_words(json: &Path, clock: Option<&crate::dtw::Clock>, srt: &Path) -> Option<Vec<Word>> {
+  let (words, lines) = read_words(json, clock).ok()?;
+  if let Some(lines) = lines.filter(|l| !l.is_empty()) {
+    if let Err(e) = std::fs::write(srt, crate::repeat_fix::write_srt(&lines)) {
+      log::error!("rewrite srt on dtw times: {e}");
+    }
+  }
+  Some(words)
 }
 
 // Han, kana and the long-vowel mark: scripts written without spaces between words.
@@ -904,24 +964,25 @@ fn run_import(app: &AppHandle, id: &str, source: &str, name: Option<&str>, lang:
         (Err(e), Some(cpu)) if crate::import_queue::check().is_ok() => {
           log::error!("gpu transcribe failed, retrying on cpu: {e}");
           emit(app, ImportProgress::stage(id, "transcribe", Some(0)));
-          run(cpu).map(|()| cpu.as_path())
+          run(cpu).map(|clock| (cpu.as_path(), clock))
         }
-        (r, _) => r.map(|()| parts.whisper.as_path()),
+        (r, _) => r.map(|clock| (parts.whisper.as_path(), clock)),
       }
-      .map(|used| (None, Some(used)))
+      .map(|(used, clock)| (None, Some(used), Some(clock)))
     }
     (None, Engine::Cloud { provider, api_key }) => {
       emit(app, ImportProgress::stage(id, "cloud", Some(0)));
       let on_pct = |pct| emit(app, ImportProgress::stage(id, "cloud", Some(pct)));
       // Writes <work>.srt like whisper-cli; the words come back directly.
-      crate::cloud_asr::transcribe(on_pct, *provider, api_key, lang, &wav, &work).map(|w| (Some(w), None))
+      crate::cloud_asr::transcribe(on_pct, *provider, api_key, lang, &wav, &work).map(|w| (Some(w), None, None))
     }
     (None, Engine::Local(..)) => unreachable!("local engine without subtitles always has parts"),
   })
-  .and_then(|(cloud_words, used_whisper)| {
+  .and_then(|(cloud_words, used_whisper, clock)| {
     // Word timings are a bonus: if they are missing the front end just keeps
     // whisper's own line breaks, so a failure here must not fail the import.
-    let words = cloud_words.or_else(|| read_words(&json).ok()).filter(|w: &Vec<Word>| !w.is_empty());
+    // Before the loop check, so it finds and replaces lines on the DTW times.
+    let words = cloud_words.or_else(|| local_words(&json, clock.as_ref(), &work.with_extension("srt"))).filter(|w: &Vec<Word>| !w.is_empty());
     // A stretch whisper wrote over and over: transcribed again, or kept once.
     let on_pct = |pct| emit(app, ImportProgress::stage(id, "retranscribe", Some(pct)));
     let words = crate::repeat_fix::fix(&work.with_extension("srt"), words, on_pct, |from, to| match (&parts, used_whisper, engine) {
@@ -993,7 +1054,7 @@ pub fn start_import(
   }
   crate::gpus::set_choice(gpu_name);
   let lang = lang.trim().to_string();
-  if !matches!(lang.as_str(), "en" | "es" | "ja" | "zh" | "fr" | "de" | "ko" | "auto") {
+  if !matches!(lang.as_str(), "en" | "es" | "ja" | "zh" | "fr" | "de" | "ko" | "no" | "auto") {
     return Err("bad-lang".into());
   }
   if !matches!(quality, 1080 | 720 | 480) {
@@ -1125,7 +1186,7 @@ mod tests {
     let wav = PathBuf::from(std::env::var("LC_WAV").expect("LC_WAV"));
     let models = home_dir().unwrap().join(".cache/whisper.cpp");
     let stem = wav.with_extension("");
-    transcribe(
+    let clock = transcribe(
       |p| eprintln!("{p}%"),
       Path::new("/opt/homebrew/bin/whisper-cli"),
       &models.join("ggml-large-v3-turbo.bin"),
@@ -1136,15 +1197,18 @@ mod tests {
       &stem,
     )
     .unwrap();
+    let words = local_words(&stem.with_extension("json"), Some(&clock), &stem.with_extension("srt")).unwrap_or_default();
     let srt = std::fs::read_to_string(stem.with_extension("srt")).unwrap();
-    eprintln!("cues: {}", srt.matches("-->").count());
+    eprintln!("cues: {} words: {} vad table: {:?}", srt.matches("-->").count(), words.len(), clock.vad.map(|m| m.len()));
+    eprintln!("{}", srt.split("\n\n").take(10).collect::<Vec<_>>().join("\n\n"));
+    eprintln!("WORDS {}", serde_json::to_string(&words).unwrap());
   }
 
   // LC_JSON=/path/whisper.json cargo test … -- --ignored reads_sample_words --nocapture
   #[test]
   #[ignore]
   fn reads_sample_words() {
-    let words = read_words(Path::new(&std::env::var("LC_JSON").expect("LC_JSON"))).unwrap();
+    let words = read_words(Path::new(&std::env::var("LC_JSON").expect("LC_JSON")), None).unwrap().0;
     eprintln!("words: {}", words.len());
     eprintln!("{}", serde_json::to_string(&words).unwrap());
   }
@@ -1187,7 +1251,7 @@ mod tests {
     let path = dir.join("t.json");
     std::fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
 
-    let words = read_words(&path).unwrap();
+    let words = read_words(&path, None).unwrap().0;
     std::fs::remove_dir_all(&dir).ok();
 
     // Tokens span 7000..11000 and the segment really runs 10000..14000, so the
@@ -1210,7 +1274,7 @@ mod tests {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("t.json");
     std::fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
-    let out = read_words(&path).unwrap();
+    let out = read_words(&path, None).unwrap().0;
     std::fs::remove_dir_all(&dir).ok();
     let got: Vec<(&str, u32)> = out.iter().map(|w| (w.w.as_str(), w.from)).collect();
     assert_eq!(got, [("a", 1000), ("b", 3000), ("c", 3000), ("e", 5000)]);
@@ -1237,7 +1301,7 @@ mod tests {
     let path = dir.join("t.json");
     std::fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
 
-    let words = read_words(&path).unwrap();
+    let words = read_words(&path, None).unwrap().0;
     std::fs::remove_dir_all(&dir).ok();
 
     assert_eq!(words.len(), 2);
@@ -1275,7 +1339,7 @@ mod tests {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("t.json");
     std::fs::write(&path, &raw).unwrap();
-    let words = read_words(&path).unwrap();
+    let words = read_words(&path, None).unwrap().0;
     std::fs::remove_dir_all(&dir).ok();
     let got: Vec<(&str, u32, u32)> = words.iter().map(|w| (w.w.as_str(), w.from, w.to)).collect();
     // The stray 0xff belongs to no character and is dropped.

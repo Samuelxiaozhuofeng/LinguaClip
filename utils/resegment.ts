@@ -15,6 +15,9 @@ const MAX_WORDS = 16;      // hard ceiling we enforce ourselves
 const BATCH_WORDS = 250;   // one model call; keeps it counting reliably
 const TAIL_MS = 400;       // whisper's end times run a touch early
 const REQUEST_TIMEOUT_MS = 90_000;
+// Two words whose starts are further apart always go on separate lines
+// (src-tauri/src/dtw.rs GAP_MS, the same number; docs/import.md「字幕行时间」).
+export const GAP_MS = 3000;
 
 // Only the user's own AI settings: the segment model if set, else the main one.
 type Router = { baseUrl: string; apiKey: string; model: string };
@@ -92,6 +95,13 @@ export function ruleStarts(words: Word[]): number[] {
   const starts = [0];
   for (let i = 1; i < words.length; i++) if (ENDS_SENTENCE.test(words[i - 1].w)) starts.push(i);
   return starts;
+}
+
+// A silence of GAP_MS+ is a cut whatever the model or the rules said.
+export function withGaps(starts: number[], words: Word[]): number[] {
+  const cuts = new Set(starts);
+  for (let i = 1; i < words.length; i++) if (words[i].from - words[i - 1].from > GAP_MS) cuts.add(i);
+  return [...cuts].sort((a, b) => a - b);
 }
 
 const MIN_PIECE = 3;
@@ -196,7 +206,7 @@ export async function resegment(words: Word[]): Promise<string | null> {
   if (words.length === 0 || mostlyCjk(words)) return null;
   // No AI configured: same sentence-end cut + ceiling the failed batches get.
   if (!canResegment()) {
-    const srt = buildSrt(words, enforceCeiling(ruleStarts(words), words));
+    const srt = buildSrt(words, enforceCeiling(withGaps(ruleStarts(words), words), words));
     return srt.trim() ? srt : null;
   }
   try {
@@ -225,7 +235,7 @@ export async function resegment(words: Word[]): Promise<string | null> {
     })));
     const starts: number[] = [];
     results.forEach((local, i) => { for (const n of local) starts.push(offsets[i] + n); });
-    const srt = buildSrt(words, enforceCeiling(starts, words));
+    const srt = buildSrt(words, enforceCeiling(withGaps(starts, words), words));
     return srt.trim() ? srt : null;
   } catch (err) {
     console.error('resegment failed, keeping whisper line breaks:', err);

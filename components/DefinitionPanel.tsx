@@ -1,10 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, X, Check, Plus, Sparkles, BookmarkPlus, BookmarkCheck } from 'lucide-react';
+import { Loader2, X, Check, Plus, Sparkles, BookmarkPlus, BookmarkCheck, Volume2 } from 'lucide-react';
 import * as AI from '../utils/ai';
 import { DictEntry, Seg, Sense, senseToAnki } from '../utils/dictionary';
 import { Btn, Card, Stamp } from './ui';
 import { useT } from '../utils/i18n';
 import { escHtml, withAiBlock } from '../utils/anki';
+import { useClip } from './ReviewSession';
+import type { Source } from '../utils/clips';
+import { getVideoRecord } from '../utils/videoStorage';
+import { loadWords } from '../utils/wordTimes';
+import { locateWord, type WordSpot } from '../utils/wordAudio';
 
 // Single word-definition surface for both learning modes: a small card beside the
 // clicked word (below it, or above when there's more room there), closed by Esc, the X or a click outside. A dictionary entry is
@@ -12,6 +17,10 @@ import { escHtml, withAiBlock } from '../utils/anki';
 // (and its first two examples) to Anki as an audio card. The AI can point at the
 // meaning this sentence uses (pick); an AI-only answer (data) gets one "+".
 // Next to each "+", a bookmark keeps the same meaning in the word review deck.
+
+// The line the word was looked up in, for its little speaker (docs/word-audio.md). `source`
+// unset = the record's video; `busy` = the page is recording an Anki clip, so no sound now.
+export type SayLine = { videoId: string; text: string; start: number; end: number; source?: Source | null; busy?: boolean };
 
 export type WordToAnki = (word: string, definition: string, example?: string) => void | Promise<void>;
 
@@ -127,10 +136,32 @@ const DefinitionPanel: React.FC<{
   onWordToAnki?: WordToAnki;
   onExplain?: () => void;
   onKeepWord?: (word: string, definition: string, example: string, ai: string) => void;
-}> = ({ def, onClose, onWordToAnki, onExplain, onKeepWord }) => {
+  say?: SayLine | null;
+}> = ({ def, onClose, onWordToAnki, onExplain, onKeepWord, say }) => {
   const t = useT();
   const [add, setAdd] = useState<AddState>({ sent: new Set(), busy: null, failed: null });
   const [kept, setKept] = useState<Set<string>>(new Set());
+
+  // Its own little player: the page's video keeps its place and its pause. Gone with the popup.
+  const clip = useClip();
+  const [spot, setSpot] = useState<{ src: Source | null; at: WordSpot | null } | null>(null); // null = still finding it
+  useEffect(() => {
+    if (!say || !def.word) return;
+    let live = true;
+    const src = say.source !== undefined ? Promise.resolve(say.source)
+      : getVideoRecord(say.videoId).then(r => (r?.videoPath ? { path: r.videoPath, offset: 0 } : null), () => null);
+    Promise.all([src, loadWords(say.videoId)]).then(([s, words]) => {
+      if (live) setSpot({ src: s, at: locateWord({ text: say.text, startTime: say.start, endTime: say.end }, def.word!, words) });
+    });
+    return () => { live = false; };
+  }, [say?.videoId, say?.text, say?.start, say?.end, say?.source]); // eslint-disable-line react-hooks/exhaustive-deps
+  const canSay = !!spot?.src && !!spot.at && !say?.busy && add.busy === null;
+  const sayBtn = say && (
+    <Btn square size="sm" flat disabled={!canSay} onClick={() => { if (canSay) clip.play(spot!.src!, spot!.at!.from, spot!.at!.to); }}
+      title={spot && !spot.at ? t('definition.sayNone') : t('definition.say')} aria-label={t('definition.say')} className="shrink-0 self-center">
+      <Volume2 size={15} />
+    </Btn>
+  );
 
   // id = "entry:sense" or "ai"; the popup is remounted per word, so ids never clash.
   const fieldsOf = (id: string): { definition: string; example?: string } | null => {
@@ -181,6 +212,7 @@ const DefinitionPanel: React.FC<{
 
   return (
   <div className="fixed inset-0 z-40 fade-in" onMouseDown={onClose}>
+  {say && clip.video('hidden')}
   <Card className="absolute !rounded-2xl shadow-lift flex flex-col" style={placeBeside(def.anchor)} role="dialog" aria-label={t('definition.ariaLabel')} onMouseDown={e => e.stopPropagation()}>
     <Btn square size="sm" flat onClick={onClose} title={t('common.close')} className="!absolute right-2 top-2 z-10"><X size={15} /></Btn>
 
@@ -207,6 +239,7 @@ const DefinitionPanel: React.FC<{
             <div key={ei} className="space-y-3">
               <div className="flex items-baseline gap-3 flex-wrap">
                 <h4 className="font-serif text-2xl leading-none break-words">{e.word}</h4>
+                {ei === 0 && sayBtn}
                 {e.phonetic && <span className="text-sm text-mute font-mono">{e.phonetic}</span>}
                 {/* Local dictionaries each name themselves (their licences ask for credit). */}
                 {(ei === 0 || e.dictName !== def.dict![ei - 1].dictName) && <Stamp tone="shade">{e.dictName ?? t(`dict.${e.source}`)}</Stamp>}
@@ -224,7 +257,7 @@ const DefinitionPanel: React.FC<{
       ) : def.data ? (
         <div className="flex gap-3 items-start">
           <div className="flex-1 min-w-0">
-            <h4 className="font-serif text-2xl leading-none break-words">{def.data.word}</h4>
+            <div className="flex items-center gap-2"><h4 className="font-serif text-2xl leading-none break-words">{def.data.word}</h4>{sayBtn}</div>
             <Stamp tone="shade" className="mt-2">{def.data.partOfSpeech}</Stamp>
             <p className="text-sm leading-relaxed mt-2">{def.data.definition}</p>
             {def.data.culture && <div className="mt-3"><CultureNote text={def.data.culture} /></div>}

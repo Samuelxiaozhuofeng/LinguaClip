@@ -65,8 +65,9 @@ const letters = (s: string) => Array.from(s.normalize('NFKC').toLowerCase().repl
 // letter by letter: whisper's "well-being" covers the boxes "well" and "being",
 // each getting its share of the word by letters. The line is the run of timed
 // words spelling exactly its letters, the one starting nearest the line's start;
-// null if there is none (hand-edited line, other subtitles).
-export function wordSpans(tokens: string[], around: Word[] | undefined): [number, number][] | null {
+// null if there is none (hand-edited line, other subtitles). `onEdge`, when given,
+// gets per token whether both its ends are timed-word ends (not shared out by letters).
+export function wordSpans(tokens: string[], around: Word[] | undefined, onEdge?: boolean[]): [number, number][] | null {
   if (!around) return null;
   const tokenLetters = tokens.map(letters);
   const target = tokenLetters.flat().join('');
@@ -81,7 +82,9 @@ export function wordSpans(tokens: string[], around: Word[] | undefined): [number
   };
   let pos = 0;
   return tokenLetters.map(l => {
-    const span: [number, number] = [time(owner[pos], 0), time(owner[pos + l.length - 1], 1)];
+    const first = owner[pos], last = owner[pos + l.length - 1];
+    const span: [number, number] = [time(first, 0), time(last, 1)];
+    onEdge?.push(first.at === 0 && last.at + 1 === last.of);
     pos += l.length;
     return span;
   });

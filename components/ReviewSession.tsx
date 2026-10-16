@@ -25,7 +25,8 @@ type Held = Removed & { release: () => void };
 import { countLine, usePracticeClock } from '../utils/today';
 import { hasKana, jaReady, useJaVersion } from '../utils/japanese';
 import { settleSplits } from '../utils/jaSegments';
-import { playSpan, useTimedWords } from '../utils/wordTimes';
+import { loadWords, playSpan, useTimedWords } from '../utils/wordTimes';
+import { locateWord, type WordSpot } from '../utils/wordAudio';
 
 // A review round: one card at a time over the whole window (clip on top, a white
 // sheet below, like the practice page). A sentence card is dictated, a word card is
@@ -210,6 +211,16 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
   );
 
   const timedWords = useTimedWords(card?.videoId, card?.start ?? 0, card?.end ?? 0);
+  // A word card's word alone (docs/word-audio.md): where it is, worked out per card.
+  const [spot, setSpot] = useState<{ id: string; at: WordSpot | null } | null>(null);
+  useEffect(() => {
+    if (!card?.word || !isWord) return;
+    let live = true;
+    loadWords(card.videoId).then(w => { if (live) setSpot({ id: card.id, at: locateWord({ text: card.text, startTime: card.start, endTime: card.end }, card.word!, w) }); });
+    return () => { live = false; };
+  }, [card, isWord]);
+  const wordAt = spot && card && spot.id === card.id ? spot.at : null;
+  const playWord = () => { if (source && wordAt) { clearLoop(); clip.play(source, wordAt.from, wordAt.to); } };
 
   const next = () => { clip.stop(); setMode(PracticeMode.INPUT); setTurned(false); setSuggest(undefined); setAt(0); setIdx(i => i + 1); };
 
@@ -329,8 +340,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
   const defOpen = def.word !== null;
   const front0 = isWord && !turned && !!path && splitsReady && !done;
   const canRemove = !!card && !done;
-  const keys = useRef({ onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove });
-  keys.current = { onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove };
+  const keys = useRef({ onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord });
+  keys.current = { onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return; // Esc / Enter inside a Japanese input method
@@ -349,6 +360,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
         if (k.grading && plain && e.key === '5' && k.canMaster) return hit(k.master);
         if (k.grading && plain && e.key === 'Enter' && k.suggest) return hit(() => k.grade(k.suggest!));
         if (k.grading && matches(e, 'replay')) return hit(() => k.playCard());
+        if (k.grading && k.isWord && matches(e, 'playWord')) return hit(k.playWord); // a sentence card's ⌘K stays the blank's
       }
       if (!inside) e.stopPropagation();
     };
@@ -416,7 +428,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
               </div>
             ) : path && card && splitsReady ? (
               isWord ? (
-                <WordFace key={`${round}-${idx}`} card={card} front={front} turned={turned} onLookup={lookup} onReplay={() => playCard()} />
+                <WordFace key={`${round}-${idx}`} card={card} front={front} turned={turned} onLookup={lookup} onReplay={() => playCard()} onPlayWord={wordAt ? playWord : undefined} />
               ) : (
                 <DictationLine
                   key={`${round}-${idx}`}
@@ -471,7 +483,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
           <button type="button" onClick={e => { e.currentTarget.blur(); unmaster(); }} className="press h-7 px-3 rounded-full bg-white/15 font-medium">{t('review.undo')}</button>
         </div>
       )}
-      {defOpen && <DefinitionPanel key={def.word} def={def} onClose={closeDef} onExplain={explain} onKeepWord={keepWord} />}
+      {defOpen && <DefinitionPanel key={def.word} def={def} onClose={closeDef} onExplain={explain} onKeepWord={keepWord}
+        say={card && source ? { videoId: card.videoId, text: card.text, start: card.start, end: card.end, source } : null} />}
     </div>
   );
 };

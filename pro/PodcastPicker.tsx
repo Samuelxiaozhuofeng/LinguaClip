@@ -25,7 +25,7 @@ const langLabel = (l: string, ui: string) => {
   try { return new Intl.DisplayNames([ui === 'zh' ? 'zh-CN' : 'en'], { type: 'language' }).of(l) ?? l; } catch { return l; }
 };
 // What a pasted show's transcript can be told (a feed's own <language> is often wrong).
-const ASR_LANGS = ['auto', 'en', 'ja', 'es', 'fr', 'de', 'ko', 'zh'];
+const ASR_LANGS = ['auto', 'en', 'ja', 'es', 'fr', 'de', 'ko', 'no', 'zh'];
 const firstLang = (): ShowLang => {
   const saved = getWatchPrefs().podLang as ShowLang;
   return SHOW_LANGS.includes(saved) ? saved : getLang() === 'en' ? 'ja' : 'en';

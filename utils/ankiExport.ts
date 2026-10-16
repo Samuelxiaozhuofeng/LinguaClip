@@ -4,9 +4,11 @@ import { clean } from './cleanHtml';
 import { cardLangs, type LangSource } from './deckLang';
 import { getAllVideosFromDB } from './fileSystemAccess';
 import { clipKey, findSource } from './clips';
-import { clipPath, cutClip, readBinaryFile } from './desktop';
+import { cutClip } from './desktop';
 import { formatTimeCode, getAudioPaddingConfig } from './storage';
 import { getAllCards, getCard, hasAudio, markAnkiSent, type ReviewCard } from './review';
+import { readClipB64 as readB64, wordClipB64 } from './wordAudio';
+import { loadWords } from './wordTimes';
 
 export interface ExportResult {
   sent: string[];   // ids sent this time, each marked as it went
@@ -26,7 +28,7 @@ export const cutSpan = (c: Pick<ReviewCard, 'start' | 'end'>, offset: number, pa
 // A cut that failed for its own line (ffmpeg: / clip: / missing:) vs the cutting tool itself missing (same as settleLine).
 export const toolMissing = (e: unknown) => !/^(ffmpeg|clip|missing):/.test(String(e));
 
-export interface Media { audio?: string; ext?: string; image?: string; silent: boolean } // base64
+export interface Media { audio?: string; ext?: string; image?: string; word?: string; silent: boolean } // base64; word = the word's own sound (m4a)
 export interface Steps {
   media: (c: ReviewCard) => Promise<Media>; // throws only when the cutting tool is missing
   send: (c: ReviewCard, m: Media) => Promise<void>;
@@ -86,13 +88,6 @@ export const runExport = async (cards: ReviewCard[], steps: Steps, onProgress?: 
 
 // --- Wiring ---
 
-const b64 = (bytes: Uint8Array) => {
-  let s = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(s);
-};
-const readB64 = async (file: string) => b64(await readBinaryFile(await clipPath(file)));
-
 // One batch at a time, across pages: progress lives here so a page opened mid-batch shows it.
 let progress: [number, number] | null = null;
 const listeners = new Set<() => void>();
@@ -109,6 +104,8 @@ export const exportToAnki = async (cards: ReviewCard[], onProgress?: (done: numb
   const wantAudio = keys.includes('audio'), wantShot = keys.includes('screenshot');
   const pad = getAudioPaddingConfig();
   const batch = Date.now(); // a fresh name per batch: Rust reuses a file already there
+  // Two words of one line are two clips: the word goes in the name (ASCII only, safe_name).
+  const nameHash = (w: string) => [...w].reduce((h, ch) => (h * 31 + ch.codePointAt(0)!) >>> 0, 7).toString(36);
   // Same language call as the library pages (ReviewPage), so cards whose video is gone still find their deck.
   const records: LangSource[] = await getAllVideosFromDB().catch(e => { console.error(e); return []; });
   const all = await getAllCards().catch(e => { console.error(e); return cards; }); // every card, as the library judges a video by all of its cards
@@ -134,7 +131,11 @@ export const exportToAnki = async (cards: ReviewCard[], onProgress?: (done: numb
     const audio = wantAudio ? await readB64(cut.file).catch(() => undefined) : undefined;
     const shot = cut.image ?? c.clip?.image;
     const image = wantShot && shot ? await readB64(shot).catch(() => undefined) : undefined;
-    return { audio, ext: 'm4a', image, silent: wantAudio && !audio };
+    // A word card's own word first (docs/word-audio.md): only where its word times are exact.
+    const word = wantAudio && c.deck === 'word' && c.word
+      ? await wordClipB64(src, { text: c.text, startTime: c.start, endTime: c.end }, c.word, await loadWords(c.videoId), `anki_${batch}_${clipKey(c)}_w${nameHash(c.word)}`)
+      : undefined;
+    return { audio, ext: 'm4a', image, word, silent: wantAudio && !audio };
   };
 
   const send = async (c: ReviewCard, m: Media) => {
@@ -146,6 +147,7 @@ export const exportToAnki = async (cards: ReviewCard[], onProgress?: (done: numb
       screenshotBase64: m.image,
       audioBase64: m.audio,
       audioExt: m.ext,
+      wordAudioBase64: m.word,
       word,
       definition: word ? withAiBlock(clean(c.definition ?? ''), c.ai ?? '') : undefined,
       example: word && c.example ? clean(c.example) : undefined,

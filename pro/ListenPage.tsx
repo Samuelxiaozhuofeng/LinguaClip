@@ -489,7 +489,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
       {drill && <ReviewSession cards={drill} onClose={() => setDrill(null)} onFinish={passes && onward ? () => { setDrill(null); goSection(sec + 1); } : undefined} />}
       {cards.node}
       {def.word !== null && (
-        <DefinitionPanel key={def.word} def={def} onClose={closeLookup} onExplain={explain} onKeepWord={lookLine.current ? (w, d, x, ai) => keep(w, lookLine.current!, d, x, ai) : undefined} />
+        <DefinitionPanel key={def.word} def={def} onClose={closeLookup} onExplain={explain} onKeepWord={lookLine.current ? (w, d, x, ai) => keep(w, lookLine.current!, d, x, ai) : undefined} say={lookLine.current ? { videoId: record.id, text: lookLine.current.text, start: lookLine.current.startTime, end: lookLine.current.endTime } : null} />
       )}
     </div>
   );

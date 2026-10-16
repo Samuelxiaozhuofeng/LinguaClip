@@ -222,6 +222,69 @@ fn lines_across_the_edges_keep_exactly_their_words() {
   std::fs::remove_file(&p).unwrap();
 }
 
+// The redo's line starts at 1.5 s, inside the old line before (to 2 s), whose
+// 「here.」 starts at 1.6 s: it stays that line's word, held inside it.
+#[test]
+fn a_seam_keeps_each_word_with_its_line() {
+  let mut c = vec![cue(0, 2000, "Start here.")];
+  c.extend((0..3).map(|i| cue(2000 + i * 1000, 3000 + i * 1000, "Loop line.")));
+  c.push(cue(6000, 8000, "The end."));
+  let mut old = vec![word("Start", 0, 900), word("here.", 1600, 2000)];
+  for i in 0..3 {
+    old.extend([word("Loop", 2000 + i * 1000, 2500 + i * 1000), word("line.", 2500 + i * 1000, 2900 + i * 1000)]);
+  }
+  old.extend([word("The", 6000, 7000), word("end.", 7000, 8000)]);
+  let p = temp_srt(&c);
+  let w = fix(&p, Some(old), |_| {}, |_, _| {
+    Ok((vec![cue(1500, 3500, "One two three")], vec![word("One", 1500, 1900), word("two", 1900, 2600), word("three", 2600, 3500)]))
+  })
+  .unwrap()
+  .unwrap();
+  let out = parse_srt(&std::fs::read_to_string(&p).unwrap());
+  std::fs::remove_file(&p).unwrap();
+  assert_eq!(texts(&out), ["Start here.", "One two three", "The end."]);
+  let word_keys: Vec<String> = w.iter().flat_map(|x| key(&x.w)).collect();
+  assert_eq!(word_keys, out.iter().flat_map(|l| key(&l.text)).collect::<Vec<_>>());
+  let here = w.iter().find(|x| x.w == "here.").unwrap();
+  assert!(out[0].from <= here.from as u64 && here.to as u64 <= out[0].to, "{}..{} {:?}", here.from, here.to, out[0]);
+}
+
+// Three identical lines; the first one's last word and the second one's first
+// both start at 1 s, where the first line ends. The kept line keeps all its words.
+#[test]
+fn the_kept_copy_keeps_a_word_on_its_end() {
+  let c = vec![cue(0, 1000, "Hello there."), cue(1000, 2000, "Hello there."), cue(2000, 3000, "Hello there."), cue(3000, 4000, "Bye.")];
+  let w = vec![word("Hello", 0, 500), word("there.", 1000, 1000), word("Hello", 1000, 1500), word("there.", 1500, 2000), word("Hello", 2000, 2500), word("there.", 2500, 3000), word("Bye.", 3000, 3500)];
+  let p = temp_srt(&c);
+  let w = fix(&p, Some(w), |_| {}, |_, _| Err("cloud:network:x".into())).unwrap().unwrap();
+  let out = parse_srt(&std::fs::read_to_string(&p).unwrap());
+  std::fs::remove_file(&p).unwrap();
+  assert_eq!(texts(&out), ["Hello there.", "Bye."]);
+  assert_eq!(w.iter().map(|w| (w.w.as_str(), w.from)).collect::<Vec<_>>(), [("Hello", 0), ("there.", 1000), ("Bye.", 3000)]);
+}
+
+// EJ mid, redone for real: the new 「大きいです。」 ran to 10.030 s, the old
+// next line starts at 10.020 s. The new line (and its last word) stop there.
+#[test]
+fn a_redone_line_never_runs_into_the_next() {
+  let mut c: Vec<Cue> = (0..3).map(|i| cue(7000 + i * 900, 7900 + i * 900, "身長以外は")).collect();
+  c.push(cue(10_020, 11_000, "今好きな子は"));
+  let p = temp_srt(&c);
+  // Every line's words, as a local DTW run gives them (they spell the lines).
+  let mut old: Vec<Word> = (0..3).flat_map(|i| [word("身長", 7000 + i * 900, 7400 + i * 900), word("以外は", 7400 + i * 900, 7900 + i * 900)]).collect();
+  old.extend([word("今", 10_020, 10_300), word("好きな子は", 10_300, 11_000)]);
+  let w = fix(&p, Some(old), |_| {}, |_, _| {
+    Ok((vec![cue(8500, 10_030, "大きいです。")], vec![word("大", 8500, 9000), word("きいです。", 9000, 10_030)]))
+  })
+  .unwrap()
+  .unwrap();
+  let out = parse_srt(&std::fs::read_to_string(&p).unwrap());
+  assert_eq!(texts(&out), ["大きいです。", "今好きな子は"]);
+  assert_eq!((out[0].to, out[1].from), (10_020, 10_020));
+  assert_eq!(w[1].to, 10_020);
+  std::fs::remove_file(&p).unwrap();
+}
+
 #[test]
 fn apostrophes_stay_inside_words() {
   assert_eq!(key("It's, don’t I'm 'quoted'"), ["it's", "don't", "i'm", "quoted"]);
@@ -250,17 +313,29 @@ fn retranscribes_loop() {
   let models = crate::paths::home_dir().unwrap().join(".cache/whisper.cpp");
   let (whisper, model) = (Path::new("/opt/homebrew/bin/whisper-cli"), models.join("ggml-large-v3-turbo.bin"));
   let stem = wav.with_extension("");
-  crate::import::transcribe(|_| {}, whisper, &model, &models.join("ggml-silero-v5.1.2.bin"), "large.v3.turbo", &lang, &wav, &stem).unwrap();
+  let clock = crate::import::transcribe(|_| {}, whisper, &model, &models.join("ggml-silero-v5.1.2.bin"), "large.v3.turbo", &lang, &wav, &stem).unwrap();
   let srt = stem.with_extension("srt");
+  let words = crate::import::local_words(&stem.with_extension("json"), Some(&clock), &srt).unwrap();
   let mut cues = parse_srt(&std::fs::read_to_string(&srt).unwrap());
-  let words = crate::import::read_words(&stem.with_extension("json")).unwrap();
   assert!(cues.len() >= 3, "need a few lines, got {}", cues.len());
-  // Lines 1..3 become six copies of line 1, squeezed into their time.
+  // Lines 1..3 become six copies of line 1, squeezed into their time, each
+  // with line 1's words squeezed the same way: they still spell the lines, as
+  // a real local run's do, so this runs the new code, not the old one.
+  let mut lines = attach(cues.clone(), words).expect("local words spell the lines");
   let (from, to) = (cues[1].from, cues[2].to);
   let fake = cues[1].text.clone();
   let step = (to - from) / 6;
-  let looped: Vec<Cue> = (0..6).map(|i| cue(from + i * step, from + (i + 1) * step, &fake)).collect();
-  cues.splice(1..3, looped);
+  let (src_from, src_len) = (lines[1].cue.from, (lines[1].cue.to - lines[1].cue.from).max(1));
+  let squeeze = |t: u32, i: u64| (from + i * step + (t as u64).saturating_sub(src_from).min(src_len) * step / src_len) as u32;
+  let looped: Vec<Line> = (0..6)
+    .map(|i| Line {
+      cue: cue(from + i * step, from + (i + 1) * step, &fake),
+      words: lines[1].words.iter().map(|w| Word { w: w.w.clone(), from: squeeze(w.from, i), to: squeeze(w.to, i) }).collect(),
+    })
+    .collect();
+  lines.splice(1..3, looped);
+  cues = lines.iter().map(|l| cue(l.cue.from, l.cue.to, &l.cue.text)).collect();
+  let words: Vec<Word> = lines.into_iter().flat_map(|l| l.words).collect();
   std::fs::write(&srt, write_srt(&cues)).unwrap();
   eprintln!("BEFORE:\n{}", write_srt(&cues));
   let mut asked = Vec::new();
@@ -340,3 +415,83 @@ fn cancels_during_redo() {
   assert!(left.stdout.is_empty(), "whisper still running");
   std::fs::remove_file(srt).unwrap();
 }
+
+// Each line's text (spaces aside) is its own words in a row.
+fn agrees(lines: &[Line]) {
+  let bare = |s: &str| s.split_whitespace().collect::<String>();
+  for l in lines {
+    assert_eq!(bare(&l.cue.text), l.words.iter().map(|w| bare(&w.w)).collect::<String>(), "{:?}", l.cue);
+  }
+  let line_keys: Vec<String> = lines.iter().flat_map(|l| key(&l.cue.text)).collect();
+  assert_eq!(lines.iter().flat_map(|l| &l.words).flat_map(|w| key(&w.w)).collect::<Vec<_>>(), line_keys);
+}
+
+// The cloud dropped the second line's 「there.」; 「Bye.」 sits at 3 s, where the
+// third copy ends and its own line starts. It stays with 「Bye.」 after the copies go.
+#[test]
+fn a_dropped_word_does_not_lose_the_next_line() {
+  let c = vec![cue(0, 1000, "Hello there."), cue(1000, 2000, "Hello there."), cue(2000, 3000, "Hello there."), cue(3000, 4000, "Bye.")];
+  let w = vec![word("Hello", 0, 500), word("there.", 500, 1000), word("Hello", 1000, 1500), word("Hello", 2000, 2500), word("there.", 2500, 3000), word("Bye.", 3000, 3000)];
+  // Words that don't spell the lines: left to the old code.
+  assert!(attach(c.clone(), w.clone()).is_none());
+  let p = temp_srt(&c);
+  let w = fix(&p, Some(w), |_| {}, |_, _| Err("cloud:network:x".into())).unwrap().unwrap();
+  std::fs::remove_file(&p).unwrap();
+  assert_eq!(w.iter().map(|w| w.w.as_str()).collect::<Vec<_>>(), ["Hello", "there.", "Bye."]);
+}
+
+// 「well-known」 is one word but two tokens; the repeated 「a well」 ends inside it.
+#[test]
+fn a_phrase_cut_keeps_a_word_across_its_edge() {
+  let text = "a well a well a well a well-known fact.";
+  let w: Vec<Word> = text.split(' ').enumerate().map(|(i, s)| word(s, i as u32 * 500, i as u32 * 500 + 400)).collect();
+  let lines = collapse_lines(attach(vec![cue(0, 5000, text)], w).unwrap()).unwrap();
+  agrees(&lines);
+  assert!(lines[0].words.iter().any(|w| w.w == "well-known"));
+  assert!(key(&lines[0].cue.text).contains(&"known".to_string()));
+}
+
+// The old line ends in 「well」, the redo starts with 「well-known」: not the same
+// word, so neither text nor words lose 「well」.
+#[test]
+fn a_seam_cut_never_splits_a_word() {
+  let mut c = attach(vec![cue(1000, 4000, "well-known facts.")], vec![word("well-known", 1000, 2000), word("facts.", 2000, 4000)]).unwrap();
+  trim_edges(Some(&cue(0, 1000, "It went well.")), None, &mut c);
+  agrees(&c);
+  assert_eq!(c[0].cue.text, "well-known facts.");
+  // At the end too: the redo ends in 「well-」 + 「known」 as one word, the next line starts 「known」.
+  let mut c = attach(vec![cue(1000, 4000, "It is well-known")], vec![word("It", 1000, 1500), word("is", 1500, 2000), word("well-known", 2000, 4000)]).unwrap();
+  trim_edges(None, Some(&cue(4000, 5000, "Known facts.")), &mut c);
+  agrees(&c);
+  assert_eq!(c[0].cue.text, "It is well-known");
+}
+
+// A word short on the third repeated line: 「Go!」 still makes it through.
+#[test]
+fn a_short_repeat_keeps_the_word_after_it() {
+  let c = vec![cue(0, 1000, "We go."), cue(1000, 2000, "We go."), cue(2000, 3000, "We go."), cue(3000, 4000, "Go!")];
+  let w = vec![word("We", 0, 500), word("go.", 500, 1000), word("We", 1000, 1500), word("go.", 1500, 2000), word("We", 2000, 2500), word("Go!", 3500, 3800)];
+  let p = temp_srt(&c);
+  let w = fix(&p, Some(w), |_| {}, |_, _| Err("cloud:network:x".into())).unwrap().unwrap();
+  std::fs::remove_file(&p).unwrap();
+  assert!(w.iter().any(|w| w.w == "Go!" && w.from >= 3000));
+}
+
+// The last word spelt differently, in the gap before its line: not dropped.
+#[test]
+fn a_misspelt_word_in_a_gap_is_kept() {
+  let c = vec![cue(0, 1000, "Hello there."), cue(1000, 2000, "Hello there."), cue(2000, 3000, "Hello there."), cue(4000, 5000, "Goodbye.")];
+  let mut w = Vec::new();
+  for i in 0..3 {
+    w.push(word("Hello", i * 1000, i * 1000 + 500));
+    w.push(word("there.", i * 1000 + 500, i * 1000 + 1000));
+  }
+  w.push(word("Ciao", 3990, 3990));
+  let p = temp_srt(&c);
+  let w = fix(&p, Some(w), |_| {}, |_, _| Err("cloud:network:x".into())).unwrap().unwrap();
+  std::fs::remove_file(&p).unwrap();
+  assert!(w.iter().any(|w| w.w == "Ciao"));
+}
+
+#[path = "repeat_fix_legacy_tests.rs"]
+mod old_path;

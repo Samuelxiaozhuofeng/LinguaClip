@@ -13,6 +13,8 @@ const VOICES: Record<string, string> = {
   ja: 'ja-JP-NanamiNeural',
   ko: 'ko-KR-SunHiNeural',
   zh: 'zh-CN-XiaoxiaoNeural',
+  no: 'nb-NO-PernilleNeural',
+  nb: 'nb-NO-PernilleNeural',
 };
 
 export type Clip = { text: string; lang: string; url: string | null };

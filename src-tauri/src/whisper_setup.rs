@@ -528,10 +528,10 @@ mod tests {
     for tier in [Tier::Standard, Tier::Light] {
       let model = get(find_model(tier), tier.asset(), tier.asset().name);
       let stem = dir.join(format!("speech-{tier:?}"));
-      crate::import::transcribe(|_| {}, &whisper, &model, &vad, tier.dtw(), "en", &wav, &stem).unwrap();
+      let clock = crate::import::transcribe(|_| {}, &whisper, &model, &vad, tier.dtw(), "en", &wav, &stem).unwrap();
+      let words = crate::import::local_words(&stem.with_extension("json"), Some(&clock), &stem.with_extension("srt")).unwrap();
       let srt = std::fs::read_to_string(stem.with_extension("srt")).unwrap().to_lowercase();
       assert!(srt.contains("quick brown fox"), "{tier:?}: {srt}");
-      let words = crate::import::read_words(&stem.with_extension("json")).unwrap();
       assert!(words.len() >= 10, "{tier:?}: {} words", words.len());
       eprintln!("{tier:?}: {}", words.iter().map(|w| format!("{}@{}", w.w, w.from)).collect::<Vec<_>>().join(" "));
     }

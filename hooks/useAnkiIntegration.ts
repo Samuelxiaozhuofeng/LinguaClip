@@ -7,6 +7,8 @@ import { t } from '../utils/i18n';
 import { getVideoFromDB } from '../utils/fileSystemAccess';
 import { videoLang } from '../utils/deckLang';
 import { lineCardId, markAnkiSent, wordCardId } from '../utils/review';
+import { wordClipB64 } from '../utils/wordAudio';
+import { loadWords } from '../utils/wordTimes';
 
 export type AnkiStatus = 'idle' | 'recording' | 'adding' | 'success' | 'error';
 
@@ -304,6 +306,11 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
           throw e;
       }
       const { screenshotBase64, audioBase64, audioExt } = media;
+      // The word's own sound, cut from the file (docs/word-audio.md); unknown or guessed place = none.
+      const path = audioBase64 && videoId ? (await getVideoFromDB(videoId).catch(() => null))?.videoPath : null;
+      const wordAudioBase64 = path
+        ? await wordClipB64({ path, offset: 0 }, subtitle, word, await loadWords(videoId!), `anki_${Date.now()}_w`)
+        : undefined;
 
       try {
           await Anki.addNote(ankiConfig.url, await withLangDeck(template, videoId), {
@@ -313,6 +320,7 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
               screenshotBase64,
               audioBase64,
               audioExt,
+              wordAudioBase64,
               word,
               definition,
               example

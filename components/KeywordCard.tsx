@@ -7,7 +7,8 @@ import { useT } from '../utils/i18n';
 import { canCloze } from '../utils/aiDrills';
 import { addWordIfNew, getAllCards, wordCardId } from '../utils/review';
 import { keywordLines, keywordsOn, prepareKeywords, readKeywords, type Keyword, type Keywords } from '../utils/keywordPrep';
-import { loadWords, playSpan, wordSpans, wordsInLine } from '../utils/wordTimes';
+import { loadWords } from '../utils/wordTimes';
+import { locateWord } from '../utils/wordAudio';
 
 // This episode's keywords (docs/keywords.md): the summary and the words, each opening the line
 // it is in with its sound, and "+" into the word cards. Everything the AI wrote is plain text.
@@ -15,7 +16,6 @@ import { loadWords, playSpan, wordSpans, wordsInLine } from '../utils/wordTimes'
 // KeywordBlock sits in the practice panel; KeywordModal is the listening page's opening card.
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
-const letters = (s: string) => s.replace(/[^\p{L}\p{M}\p{N}]/gu, '').length;
 
 const KeywordView: React.FC<{ record: VideoRecord; data: Keywords }> = ({ record, data }) => {
   const t = useT();
@@ -42,20 +42,9 @@ const KeywordView: React.FC<{ record: VideoRecord; data: Keywords }> = ({ record
     const l = lines[k.line];
     const me = ++playing.current;
     if (!record.videoPath || !l) return;
-    const pieces = [l.text.slice(0, k.at), k.word, l.text.slice(k.at + k.word.length)];
-    const parts = pieces.map((p, i) => ({ p, i })).filter(x => letters(x.p) > 0);
-    const spans = wordSpans(parts.map(x => x.p), wordsInLine(await loadWords(record.id), l.startTime, l.endTime));
-    const own = parts.findIndex(x => x.i === 1);
-    let from: number, to: number;
-    if (spans && own >= 0) [from, to] = spans[own];
-    else {
-      const all = letters(l.text) || 1;
-      from = letters(pieces[0]) / all;
-      to = (letters(pieces[0]) + letters(k.word)) / all;
-    }
-    const [a, b] = playSpan(l.startTime, l.endTime, from, to);
+    const spot = locateWord(l, k.word, await loadWords(record.id), k.at)!; // a known place is never null
     if (me !== playing.current) return;
-    clip.play({ path: record.videoPath, offset: 0 }, a, b);
+    clip.play({ path: record.videoPath, offset: 0 }, spot.from, spot.to);
   };
   const playLine = (k: Keyword) => {
     const l = lines[k.line];

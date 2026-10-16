@@ -11,7 +11,7 @@ import { parseSRT } from './srtParser';
 import type { ReviewCard } from './review';
 
 export type DeckLang = DictLang | 'other'; // 'other' = couldn't tell ("Unsorted")
-export const DECK_LANGS: DeckLang[] = ['ja', 'es', 'en', 'fr', 'de', 'other'];
+export const DECK_LANGS: DeckLang[] = ['ja', 'es', 'en', 'fr', 'de', 'no', 'other'];
 
 export interface LangSource { id: string; lang?: DictLang; subtitleText?: string }
 

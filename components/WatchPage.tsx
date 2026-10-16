@@ -447,7 +447,8 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
           onDrill={lines => { startDrill(lines).catch(console.error); }} />
       )}
       {def.word !== null && (
-        <DefinitionPanel key={def.word} def={def} onClose={closeLookup} onWordToAnki={ankiReady ? wordToAnki : undefined} onExplain={explain} onKeepWord={keepWord} />
+        <DefinitionPanel key={def.word} def={def} onClose={closeLookup} onWordToAnki={ankiReady ? wordToAnki : undefined} onExplain={explain} onKeepWord={keepWord}
+          say={lookLine.current ? { videoId: record.id, text: lookLine.current.text, start: lookLine.current.startTime, end: lookLine.current.endTime, busy: recording } : null} />
       )}
       {drill && <ReviewSession cards={drill} onClose={() => setDrill(null)} />}
     </div>

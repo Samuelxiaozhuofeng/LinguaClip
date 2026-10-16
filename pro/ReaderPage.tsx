@@ -437,7 +437,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
       )}
       {drill && <ReviewSession cards={drill} onClose={() => setDrill(null)} />}
       {def.word !== null && (
-        <DefinitionPanel key={def.word} def={def} onClose={closeDef} onExplain={explain} onKeepWord={lookLine.current ? keepWord : undefined} />
+        <DefinitionPanel key={def.word} def={def} onClose={closeDef} onExplain={explain} onKeepWord={lookLine.current ? keepWord : undefined} say={lookLine.current ? { videoId: record.id, text: lookLine.current.text, start: lookLine.current.startTime, end: lookLine.current.endTime } : null} />
       )}
     </div>
   );

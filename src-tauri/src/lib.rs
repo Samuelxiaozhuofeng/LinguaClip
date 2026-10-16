@@ -12,6 +12,7 @@ mod decode;
 mod device;
 mod dicts;
 mod dicts_import;
+mod dtw;
 mod groq;
 mod import;
 mod import_queue;

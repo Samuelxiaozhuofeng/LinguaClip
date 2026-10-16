@@ -438,7 +438,8 @@ const Studio: React.FC = () => {
 
       {showSavedList && <SavedDrawer />}
       {defOpen && (
-        <DefinitionPanel key={def.word} def={def} onClose={closeDef} onWordToAnki={actions.onWordToAnki} onExplain={explain} onKeepWord={keepWord} />
+        <DefinitionPanel key={def.word} def={def} onClose={closeDef} onWordToAnki={actions.onWordToAnki} onExplain={explain} onKeepWord={keepWord}
+          say={currentSub && videoId ? { videoId, text: currentSub.text, start: currentSub.startTime, end: currentSub.endTime } : null} />
       )}
       {retry && <ReviewSession cards={retry} onClose={() => { setRetry(null); setStuck(new Set()); }} />}
     </div>

@@ -19,20 +19,24 @@ export const htmlText = (html: string) => html
   .replace(/\s+/g, ' ')
   .trim();
 
-const LANG_NAME: Record<DictLang, string> = { en: 'English', es: 'Spanish', fr: 'French', de: 'German', ja: 'Japanese' };
+const LANG_NAME: Record<DictLang, string> = { en: 'English', es: 'Spanish', fr: 'French', de: 'German', ja: 'Japanese', no: 'Norwegian Bokmål' };
 
 type WkDef = { definition?: string; examples?: string[]; parsedExamples?: { example?: string; translation?: string }[] };
 type WkItem = { partOfSpeech?: string; definitions?: WkDef[] };
 
 // One language's part of a Wiktionary answer: the word's own meanings, plus
 // the words it is a form of (llegué → llegar, fue → ir / ser) with the grammar
-// line, so the caller can show those words' meanings instead.
+// line, so the caller can show those words' meanings instead. Norwegian has no
+// group of its own: its entries sit in `other`, named by `language` (Danish's
+// `da` group is not it).
 export const parseWiktionary = (body: any, word: string, lang: DictLang): { entry: DictEntry | null; forms: { lemma: string; note: string }[] } | null => {
-  const items: WkItem[] | undefined = body?.[lang];
+  const items: WkItem[] | undefined = lang === 'no'
+    ? (Array.isArray(body?.other) ? body.other.filter((x: { language?: string }) => x?.language === LANG_NAME.no) : undefined)
+    : body?.[lang];
   if (!Array.isArray(items) || items.length === 0) return null;
   const senses: Sense[] = [];
   const forms: { lemma: string; note: string }[] = [];
-  const anchor = new RegExp(`href="/wiki/([^"#]+)#${LANG_NAME[lang]}"`, 'g');
+  const anchor = new RegExp(`href="/wiki/([^"#]+)#${LANG_NAME[lang].replace(/ /g, '_')}"`, 'g');
   for (const item of items) {
     const pos = htmlText(item.partOfSpeech ?? '');
     for (const d of item.definitions ?? []) {

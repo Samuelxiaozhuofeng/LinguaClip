@@ -83,6 +83,7 @@ export function formatImportError(raw: string): string {
     return t('import.failedSetup', { detail: raw.slice('setup:'.length) });
   }
   if (raw === 'podcast:format') return t('import.podcastFormat');
+  if (raw === 'bad-lang') return t('import.badLang');
   if (raw.startsWith('download:')) {
     return t('import.failedDownload', { detail: raw.slice('download:'.length) });
   }

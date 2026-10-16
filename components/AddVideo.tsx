@@ -31,6 +31,10 @@ const LANGS = [
   { value: 'es', key: 'import.langEs' },
   { value: 'ja', key: 'import.langJa' },
   { value: 'zh', key: 'import.langZh' },
+  { value: 'fr', key: 'import.langFr' },
+  { value: 'de', key: 'import.langDe' },
+  { value: 'ko', key: 'import.langKo' },
+  { value: 'no', key: 'import.langNo' },
   { value: 'auto', key: 'import.langAuto' },
 ] as const;
 
@@ -41,13 +45,15 @@ const QUALITY_KEYS = {
 } as const;
 
 const LANG_KEY = 'import_lang';
-const loadLang = () => { try { return localStorage.getItem(LANG_KEY) || 'en'; } catch { return 'en'; } };
+// Not a language the dropdown offers (an older or newer version wrote it): back to English.
+const loadLang = () => { try { const v = localStorage.getItem(LANG_KEY); return LANGS.some(l => l.value === v) ? v! : 'en'; } catch { return 'en'; } };
 const TRASH_KEY = 'import_trash_original';
 const loadTrash = () => { try { return localStorage.getItem(TRASH_KEY) === '1'; } catch { return false; } };
 
 // A track's language tag (ISO 639-2, sometimes -1) against the dialog's language.
 const TRACK_LANGS: Record<string, string[]> = {
   en: ['eng', 'en'], es: ['spa', 'es'], ja: ['jpn', 'ja'], zh: ['chi', 'zho', 'zh'],
+  fr: ['fre', 'fra', 'fr'], de: ['ger', 'deu', 'de'], ko: ['kor', 'ko'], no: ['nor', 'nob', 'no', 'nb'],
 };
 // "jpn" → "日语" / "Japanese"; the raw tag when the system does not know it.
 const langName = (code: string) => {

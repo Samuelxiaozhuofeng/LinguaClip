@@ -58,6 +58,17 @@ const words = (...spec) => spec.map(([w, from, to]) => ({ w, from, to }));
   assert.equal(await resegment([]), null, 'no words -> nothing');
 }
 
+// A silence of more than GAP_MS (3 s, dtw.rs GAP_MS) is a cut even with no
+// sentence end: no AI, "Hello" at 1 s and "world." at 51 s are two lines.
+{
+  const w = words(['Hello', 1000, 1400], ['world.', 51_000, 51_400]);
+  const srt = await resegment(w);
+  assert.match(srt, /1\n00:00:01,000 --> 00:00:01,800\nHello\n/);
+  assert.match(srt, /2\n00:00:51,000 --> 00:00:51,800\nworld\.\n/);
+  // Exactly 3 s apart stays one line, as in dtw.rs.
+  assert.equal((await resegment(words(['a', 0, 400], ['b', 3000, 3400]))).split('-->').length, 2);
+}
+
 // Japanese / Chinese keep whisper's own lines; a stray Latin word does not
 // change that, nor a Japanese name in a Spanish video.
 {
@@ -179,6 +190,16 @@ console.error = () => { errors++; };
   assert.ok(asked.includes('w500'), 'in-flight call not cut off');
   assert.ok(!asked.includes('w1000') && !asked.includes('w1250'), 'braked batches skip the AI');
   assert.deepEqual(srtWords(srt), w.map(x => x.w));
+}
+
+{
+  // The model answers one line for all of it: the 50 s silence is cut anyway.
+  setAI(1);
+  globalThis.fetch = async () => ok([0]);
+  const w = words(['Hello', 1000, 1400], ['there', 1400, 1800], ['world.', 51_000, 51_400]);
+  const srt = await resegment(w);
+  assert.match(srt, /\nHello there\n/);
+  assert.match(srt, /2\n00:00:51,000 --> 00:00:51,800\nworld\.\n/);
 }
 
 console.error = realError;

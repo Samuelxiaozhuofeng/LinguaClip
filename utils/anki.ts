@@ -84,6 +84,7 @@ export const addNote = async (
     screenshotBase64?: string;
     audioBase64?: string;
     audioExt?: string;
+    wordAudioBase64?: string; // the word's own sound (m4a), before the line's in the same field
     word?: string;
     definition?: string;
     example?: string;
@@ -117,8 +118,13 @@ export const addNote = async (
             fields: [ankiField]
         });
     }
-    else if (appKey === 'audio' && data.audioBase64) {
-        audio.push({
+    else if (appKey === 'audio' && (data.audioBase64 || data.wordAudioBase64)) {
+        if (data.wordAudioBase64) audio.push({
+            data: data.wordAudioBase64,
+            filename: `linguaclip_word_${Date.now()}.m4a`,
+            fields: [ankiField]
+        });
+        if (data.audioBase64) audio.push({
             data: data.audioBase64,
             filename: `linguaclip_audio_${Date.now()}.${data.audioExt || 'webm'}`,
             fields: [ankiField]

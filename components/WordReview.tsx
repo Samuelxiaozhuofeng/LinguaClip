@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Rating, type Grade } from 'ts-fsrs';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, Volume2 } from 'lucide-react';
 import type { ReviewCard } from '../utils/review';
 import type { WordFront } from '../types';
 import { sentenceParts } from '../utils/textTokenizer';
@@ -8,6 +8,7 @@ import { furigana, hasKanji, readingOf, useJaVersion } from '../utils/japanese';
 import { useT } from '../utils/i18n';
 import { usePhraseDrag } from '../hooks/usePhraseDrag';
 import { clean } from '../utils/cleanHtml';
+import { formatCombo, getCombo } from '../utils/shortcuts';
 
 // A word card's two faces (think first, then turn it) and the four FSRS buttons
 // every review card ends on.
@@ -47,7 +48,7 @@ const Sentence: React.FC<{ text: string; word: string; turned: boolean; onLookup
   );
 };
 
-export const WordFace: React.FC<{ card: ReviewCard; front: WordFront; turned: boolean; onLookup: (w: string) => void; onReplay: () => void }> = ({ card, front, turned, onLookup, onReplay }) => {
+export const WordFace: React.FC<{ card: ReviewCard; front: WordFront; turned: boolean; onLookup: (w: string) => void; onReplay: () => void; onPlayWord?: () => void }> = ({ card, front, turned, onLookup, onReplay, onPlayWord }) => {
   const t = useT();
   const jaVersion = useJaVersion();
   const word = card.word ?? '';
@@ -71,6 +72,11 @@ export const WordFace: React.FC<{ card: ReviewCard; front: WordFront; turned: bo
         <Sentence text={card.text} word={word} turned onLookup={onLookup} className="font-serif text-[24px] leading-[2]" />
         <button type="button" onClick={e => { e.currentTarget.blur(); onReplay(); }} className="press shrink-0 h-9 px-3.5 rounded-full bg-page border border-line text-[13px] flex items-center gap-1.5">
           <RotateCcw size={14} /> {t('review.replay')}
+        </button>
+        {/* Just the word (docs/word-audio.md); greyed when the word isn't found in the line. */}
+        <button type="button" disabled={!onPlayWord} onClick={e => { e.currentTarget.blur(); onPlayWord?.(); }} title={`${t('review.playWord')} (${formatCombo(getCombo('playWord'))})`}
+          className="press shrink-0 h-9 px-3.5 rounded-full bg-page border border-line text-[13px] flex items-center gap-1.5 disabled:opacity-40">
+          <Volume2 size={14} /> {t('review.playWord')}
         </button>
       </div>
       <Html html={card.example} className="text-[14px] leading-relaxed text-mute" />

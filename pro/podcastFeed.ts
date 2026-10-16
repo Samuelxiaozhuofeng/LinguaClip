@@ -9,9 +9,10 @@ export type Show = { feed: string; title: string; image?: string; lang: string; 
 export type Pasted = { kind: 'apple'; id: string } | { kind: 'closed'; name: string } | { kind: 'feed'; url: string } | { kind: 'bad' };
 
 // The languages the transcription is told by name; anything else is guessed by it.
-const ASR = ['en', 'es', 'ja', 'zh', 'fr', 'de', 'ko'];
+const ASR = ['en', 'es', 'ja', 'zh', 'fr', 'de', 'ko', 'no'];
 export const asrLang = (tag: string | null | undefined) => {
-  const l = (tag ?? '').trim().toLowerCase().split(/[-_]/)[0];
+  const raw = (tag ?? '').trim().toLowerCase().split(/[-_]/)[0];
+  const l = raw === 'nb' ? 'no' : raw; // Bokmål; the transcribers only know `no`
   return ASR.includes(l) ? l : 'auto';
 };
 

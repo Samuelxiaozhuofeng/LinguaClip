@@ -1,0 +1,12 @@
+main: processing 'ej_mid.wav' (2880000 samples, 180.0 sec), 10 threads, 1 processors, 5 beams + best of 5, lang = ja, task = transcribe, timestamps = 1 ...
+whisper_vad: vad_segment_info: orig_start: 0.00, orig_end: 1.10, vad_start: 0.00, vad_end: 1.10
+whisper_vad: vad_segment_info: orig_start: 1.10, orig_end: 3.69, vad_start: 1.30, vad_end: 3.89
+whisper_vad: vad_segment_info: orig_start: 4.02, orig_end: 5.48, vad_start: 4.09, vad_end: 5.55
+whisper_vad: vad_segment_info: orig_start: 5.94, orig_end: 8.88, vad_start: 5.75, vad_end: 8.69
+whisper_vad: vad_segment_info: orig_start: 9.17, orig_end: 12.66, vad_start: 8.89, vad_end: 12.38
+whisper_vad: vad_segment_info: orig_start: 12.66, orig_end: 14.58, vad_start: 12.58, vad_end: 14.50
+whisper_vad: vad_segment_info: orig_start: 14.58, orig_end: 16.43, vad_start: 14.70, vad_end: 16.55
+whisper_vad: vad_segment_info: orig_start: 16.66, orig_end: 17.58, vad_start: 16.75, vad_end: 17.67
+whisper_vad: vad_segment_info: orig_start: 18.20, orig_end: 19.28, vad_start: 17.87, vad_end: 18.95
+whisper_vad: vad_segment_info: orig_start: 19.32, orig_end: 21.29, vad_start: 19.15, vad_end: 21.12
+whisper_vad: vad_segment_info: orig_start: 21.72, orig_end: 26.70, vad_start: 21.32, vad_end: 26.30
