@@ -1,11 +1,14 @@
 # Builds the Intel Mac app only when asked (`gh workflow run mac-intel.yml`).
 # Runs the whole local-transcription chain on a real Intel Mac first (download
 # the x86_64 whisper-cli, pull audio out of a video, whisper), then zips the app
-# as the "LinguaClip-mac-intel" artifact. The Apple-silicon build is made locally.
+# into the "ci-build" prerelease. The Apple-silicon build is made locally.
 name: Mac Intel build
 
 on:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   mac-intel:
@@ -48,7 +51,12 @@ jobs:
             cp $B/LinguaClip.app.tar.gz LinguaClip-mac-intel.app.tar.gz
             cp $B/LinguaClip.app.tar.gz.sig LinguaClip-mac-intel.app.tar.gz.sig
           fi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LinguaClip-mac-intel
-          path: LinguaClip-mac-intel*
+      # Into the private repo's "ci-build" prerelease, not an artifact: release files
+      # don't count against Actions storage. Downloaded after the run, then deleted.
+      - name: Upload to the ci-build release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ci-build --prerelease --title "CI builds (deleted after download)" --notes "" || true
+          gh release upload ci-build LinguaClip-mac-intel* --clobber
