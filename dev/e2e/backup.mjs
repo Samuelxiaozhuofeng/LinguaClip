@@ -64,6 +64,7 @@ export default [
       await see(page.getByRole('button', { name: '取消收藏' }), '收藏按钮变成「取消收藏」');
       await page.getByRole('button', { name: /^下一句/ }).first().click(); // the transport's skip button
       await see(page.getByText('第 2 / 3 句'), '进到「第 2 / 3 句」');
+      await page.mouse.move(300, 30); // the back button shows near the top
       await page.getByRole('button', { name: '回到你的视频列表' }).click();
       await homeHasIt(ctx, '备份前');
 

@@ -68,6 +68,7 @@ export default [
       await see(page.getByRole('button', { name: '取消收藏' }), '收藏按钮变成「取消收藏」');
       await page.getByRole('button', { name: '下一句', exact: true }).click();
       await see(page.getByText('第 2 / 3 句'), '进到「第 2 / 3 句」');
+      await page.mouse.move(300, 30); // the back button shows near the top
       await page.getByRole('button', { name: '回到你的视频列表' }).click();
       await nav('句子');
       const text = firstLine(ctx.sample);
@@ -90,6 +91,7 @@ export default [
       await page.getByRole('button', { name: '继续听写' }).first().click();
       await see(page.getByText('第 2 / 3 句'), '直接接着练「第 2 / 3 句」');
       if (await page.getByRole('dialog', { name: '这次怎么练' }).count()) throw new Error('又弹了「这次怎么练」面板，应直接开练');
+      await page.mouse.move(300, 30); // the back button shows near the top
       await page.getByRole('button', { name: '回到你的视频列表' }).click();
       await see(page.getByText(NAME), '回到首页');
     },

@@ -29,6 +29,7 @@ import { usePracticeClock } from '../utils/today';
 import { addLine, addWord, clearMastered, getAllCards, hasAudio, lineCardId, Reason, ReviewCard } from '../utils/review';
 import ReviewSession from './ReviewSession';
 import { useTimedWords } from '../utils/wordTimes';
+import { useTopAutoHide } from '../hooks/useTopAutoHide';
 
 // The practice room: the video fills the top, a white sheet overlaps it from below with
 // the part's timeline, the line you work on (centred), and the remote (Transport).
@@ -274,11 +275,12 @@ const Studio: React.FC = () => {
   );
   const menuPanel = <>{modeRow}{ratioRow}</>;
 
+  const topBar = useTopAutoHide();
   const timeLabel = videoRef.current && Number.isFinite(videoRef.current.duration)
     ? `${Storage.formatTimeCode(videoRef.current.currentTime)} / ${Storage.formatTimeCode(videoRef.current.duration)}` : '';
 
   return (
-    <div className="relative h-full flex flex-col bg-black">
+    <div className="relative h-full flex flex-col bg-black" onMouseMove={topBar.onMouseMove} onMouseLeave={topBar.onMouseLeave}>
       {/* --- The video fills the top; the back pill floats on it (clear of the Mac's traffic lights) --- */}
       <div className="relative min-h-0 flex items-center justify-center" style={{ flex: `${videoShare} 1 0` }}>
         {videoSrc ? (
@@ -291,7 +293,7 @@ const Studio: React.FC = () => {
             <span className="press rounded-full bg-accent text-white w-16 h-16 flex items-center justify-center"><Play size={26} fill="currentColor" className="ml-1" /></span>
           </button>
         )}
-        <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 lg:pr-6 flex items-center justify-between gap-2 text-[13px]`} data-tauri-drag-region="deep">
+        <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 lg:pr-6 flex items-center justify-between gap-2 text-[13px] [&>*]:transition-opacity [&:focus-within>*]:opacity-100 [&:focus-within>*]:pointer-events-auto ${topBar.showTop ? '' : '[&>*]:opacity-0 [&>*]:pointer-events-none'}`} data-tauri-drag-region="deep">
           {/* Same pill as the top bar on the other pages, on the same centre line as the traffic lights. */}
           <div className="flex items-center gap-0.5 p-1 rounded-full bg-page border border-line text-ink min-w-0 max-w-[60%]">
             <button type="button" onClick={actions.onExit} title={t('studio.backToVideos')} aria-label={t('studio.backToVideos')}
@@ -313,7 +315,7 @@ const Studio: React.FC = () => {
       </div>
 
       {/* --- The white sheet: where you are in the part, the line you work on, the remote --- */}
-      <section className="relative -mt-6 min-h-[340px] bg-page rounded-t-3xl flex flex-col" style={{ flex: `${100 - videoShare} 1 0` }}
+      <section className="relative min-h-[340px] bg-page rounded-t-3xl flex flex-col" style={{ flex: `${100 - videoShare} 1 0` }}
         aria-label={t('studio.lineCount', { current: stripAt + 1, total: stripLines.length })}>
         <div className="px-6 lg:px-24 pt-6">
           <Timeline lines={stripLines} current={stripAt} watch={watch} onPick={id => (id === currentSub?.id ? actions.onReplayCurrent() : subtitles.some(s => s.id === id) && actions.onJumpToSaved(id))}
@@ -326,7 +328,7 @@ const Studio: React.FC = () => {
         {/* The pinned key table takes its own column, so it never covers the line however small the window. */}
         <div className="flex-1 min-h-0 flex">
         <div className="flex-1 min-w-0 overflow-y-auto px-6 lg:px-24 py-5 flex flex-col">
-          <div className="mt-[5vh] w-full max-w-4xl mx-auto flex flex-col items-center gap-4 text-center">
+          <div className="mt-[2vh] w-full max-w-4xl mx-auto flex flex-col items-center gap-4 text-center">
               {isJa && <JaBanner />}
               {!currentSub ? (
                 <span className="font-serif italic text-mute text-xl">{t('studio.endOfPart')}</span>
