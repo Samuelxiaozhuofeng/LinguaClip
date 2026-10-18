@@ -967,7 +967,7 @@ export const zh: Record<keyof typeof en, string> = {
   'listen.blindHint': '先不看字，把这段听一遍。没听清的句子按 ⇧ 空格重听，还是听不出就按 V 只看这一句，觉得难就按 S 记成难点；听完按 C 打开文字稿对照。',
   'listen.backToLine': '回到当前句',
   'listen.loop': '单句循环',
-  'listen.loopTitle': '每句放完再放一遍（次数在练习页设置）',
+  'listen.loopTitle': '每句放完再放一遍，开着时右边选放几遍（和听写页共用）',
   'listen.keys': 'S 记难点 · A 记上一句 · C 看稿方式 · V 看这一句',
   'listen.allDone': '整集听完了',
   'listen.sectionDone': '第 {n} 段学完了',

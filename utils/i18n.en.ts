@@ -965,7 +965,7 @@ export const en = {
   'listen.blindHint': 'Listen to this section without the text first. Replay a line you missed with ⇧Space; still lost, press V to see just that line; mark a hard one with S; then press C to check against the transcript.',
   'listen.backToLine': 'Back to the current line',
   'listen.loop': 'Loop line',
-  'listen.loopTitle': 'Play each line again (how many times: on the practice page)',
+  'listen.loopTitle': 'Play each line again; while on, pick how many times beside it (shared with dictation)',
   'listen.keys': 'S mark hard · A mark previous · C transcript · V this line',
   'listen.allDone': 'Episode finished',
   'listen.sectionDone': 'Section {n} done',

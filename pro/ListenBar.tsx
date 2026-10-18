@@ -3,9 +3,10 @@ import { Pause, Play, Repeat, RotateCcw, RotateCw, SkipBack, SkipForward } from 
 import { Btn, Seg, Stamp } from '../components/ui';
 import { formatTimeCode } from '../utils/storage';
 import { useT } from '../utils/i18n';
+import { LOOP_TIMES, setLoopTimes, useLoop } from '../utils/loop';
 
 // The listening page's bottom bar: the timeline (section ticks, this section's band), speed,
-// line loop, pause at line ends, the page's own switches (`extra`), and the transport.
+// line loop (and, while on, how many plays), pause at line ends, the page's own switches (`extra`), and the transport.
 
 const SPEEDS = [0.75, 0.9, 1, 1.25, 1.5, 2];
 
@@ -19,6 +20,7 @@ const ListenBar: React.FC<{
   onSeek: (s: number) => void; onPrev: () => void; onNext: () => void; onBack: () => void; onFwd: () => void; onToggle: () => void;
 }> = ({ time, duration, playing, band, ticks, speed, onSpeed, loop, onLoop, autoPause, onAutoPause, extra, keys, onSeek, onPrev, onNext, onBack, onFwd, onToggle }) => {
   const t = useT();
+  const { times } = useLoop();
   const scrub = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.type === 'pointermove' && !e.buttons) return;
     if (e.type === 'pointerdown') e.currentTarget.setPointerCapture(e.pointerId);
@@ -45,6 +47,8 @@ const ListenBar: React.FC<{
         <div className="flex-1 min-w-fit flex items-center gap-2">
           <Seg<number> size="sm" className="shrink-0 [&>button]:px-1.5" value={speed} onChange={onSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
           <Btn size="sm" tone={loop ? 'accent-soft' : 'white'} aria-pressed={loop} onClick={onLoop} title={t('listen.loopTitle')}><Repeat size={14} />{t('listen.loop')}</Btn>
+          {loop && <Seg<number> size="sm" className="shrink-0 [&>button]:px-1.5" value={times} onChange={n => setLoopTimes(n as typeof times)}
+            options={LOOP_TIMES.map(n => ({ value: n, label: n ? t('transport.loopN', { n }) : t('transport.loopForever'), title: t('transport.loopTimes') }))} />}
           <Btn size="sm" tone={autoPause ? 'accent-soft' : 'white'} aria-pressed={autoPause} onClick={onAutoPause} title={t('watch.autoPauseTitle')}>{t('watch.autoPause')}</Btn>
           {extra}
         </div>
