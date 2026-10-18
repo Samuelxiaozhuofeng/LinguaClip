@@ -5,7 +5,8 @@ import { cardLangs, type LangSource } from './deckLang';
 import { getAllVideosFromDB } from './fileSystemAccess';
 import { clipKey, findSource } from './clips';
 import { cutClip } from './desktop';
-import { formatTimeCode, getAudioPaddingConfig } from './storage';
+import { formatTimeCode, getAudioPaddingConfig, getWordVoice } from './storage';
+import { wordVoiceB64 } from './wordVoice';
 import { getAllCards, getCard, hasAudio, markAnkiSent, type ReviewCard } from './review';
 import { readClipB64 as readB64, wordClipB64 } from './wordAudio';
 import { loadWords } from './wordTimes';
@@ -28,7 +29,7 @@ export const cutSpan = (c: Pick<ReviewCard, 'start' | 'end'>, offset: number, pa
 // A cut that failed for its own line (ffmpeg: / clip: / missing:) vs the cutting tool itself missing (same as settleLine).
 export const toolMissing = (e: unknown) => !/^(ffmpeg|clip|missing):/.test(String(e));
 
-export interface Media { audio?: string; ext?: string; image?: string; word?: string; silent: boolean } // base64; word = the word's own sound (m4a)
+export interface Media { audio?: string; ext?: string; image?: string; word?: string; wordExt?: string; silent: boolean } // base64; word = the word's own sound (m4a, or mp3 when read aloud)
 export interface Steps {
   media: (c: ReviewCard) => Promise<Media>; // throws only when the cutting tool is missing
   send: (c: ReviewCard, m: Media) => Promise<void>;
@@ -132,10 +133,11 @@ export const exportToAnki = async (cards: ReviewCard[], onProgress?: (done: numb
     const shot = cut.image ?? c.clip?.image;
     const image = wantShot && shot ? await readB64(shot).catch(() => undefined) : undefined;
     // A word card's own word first (docs/word-audio.md): only where its word times are exact.
-    const word = wantAudio && c.deck === 'word' && c.word
+    const said = wantAudio && c.deck === 'word' && c.word && getWordVoice() === 'tts' ? await wordVoiceB64(c.word, c.videoId) : undefined;
+    const word = said ?? (wantAudio && c.deck === 'word' && c.word
       ? await wordClipB64(src, { text: c.text, startTime: c.start, endTime: c.end }, c.word, await loadWords(c.videoId), `anki_${batch}_${clipKey(c)}_w${nameHash(c.word)}`)
-      : undefined;
-    return { audio, ext: 'm4a', image, word, silent: wantAudio && !audio };
+      : undefined);
+    return { audio, ext: 'm4a', image, word, wordExt: said ? 'mp3' : undefined, silent: wantAudio && !audio };
   };
 
   const send = async (c: ReviewCard, m: Media) => {
@@ -148,6 +150,7 @@ export const exportToAnki = async (cards: ReviewCard[], onProgress?: (done: numb
       audioBase64: m.audio,
       audioExt: m.ext,
       wordAudioBase64: m.word,
+      wordAudioExt: m.wordExt,
       word,
       definition: word ? withAiBlock(clean(c.definition ?? ''), c.ai ?? '') : undefined,
       example: word && c.example ? clean(c.example) : undefined,

@@ -42,6 +42,7 @@ export const savePracticeConfig = (config: PracticeConfig) => {
 };
 
 export const getWordFront = (): WordFront => getPracticeConfig().wordFront === 'sentence' ? 'sentence' : 'word';
+export const getWordVoice = (): 'clip' | 'tts' => getPracticeConfig().wordVoice === 'tts' ? 'tts' : 'clip';
 export const getMasteredBtn = () => getPracticeConfig().masteredBtn !== false;
 export const getWeekStats = () => getPracticeConfig().weekStats !== false;
 export const setPracticeFlag = (key: 'masteredBtn' | 'weekStats', on: boolean) => savePracticeConfig({ ...getPracticeConfig(), [key]: on });

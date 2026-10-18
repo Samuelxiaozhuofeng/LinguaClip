@@ -6,7 +6,7 @@ import { getClipProgress, retryClips, subscribeClips } from '../utils/clips';
 import { downloadConvertTool, loadConvertTool, useConvertTool } from '../utils/convertTool';
 import ConvertToolRow from './ConvertToolRow';
 import { useT } from '../utils/i18n';
-import { getAudioPaddingConfig, getMasteredBtn, getPracticeConfig, getWordFront, saveAudioPaddingConfig, savePracticeConfig, setPracticeFlag } from '../utils/storage';
+import { getAudioPaddingConfig, getMasteredBtn, getPracticeConfig, getWordFront, getWordVoice, saveAudioPaddingConfig, savePracticeConfig, setPracticeFlag } from '../utils/storage';
 import type { WordFront } from '../types';
 
 // Cards keep their own clip of the line (utils/clips.ts): on / off, which kind, and how far along.
@@ -86,6 +86,32 @@ const WordFrontPicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
   );
 };
 
+// Where a word's own sound comes from (docs/word-audio.md).
+const WordVoicePicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
+  const t = useT();
+  const [voice, setVoice] = useState(getWordVoice);
+  const pick = (v: 'clip' | 'tts') => { setVoice(v); savePracticeConfig({ ...getPracticeConfig(), wordVoice: v }); onSaved(); };
+  const opts = [
+    { value: 'clip' as const, label: t('settingsGeneral.wordVoiceClip'), hint: t('settingsGeneral.wordVoiceClipHint') },
+    { value: 'tts' as const, label: t('settingsGeneral.wordVoiceTts'), hint: t('settingsGeneral.wordVoiceTtsHint') },
+  ];
+  return (
+    <Field label={t('settingsGeneral.wordVoice')}>
+      <div className="flex flex-col gap-2">
+        {opts.map(o => (
+          <label key={o.value} className="flex items-start gap-2 cursor-pointer">
+            <input type="radio" name="wordVoice" checked={voice === o.value} onChange={() => pick(o.value)} className="mt-1 accent-accent" />
+            <span className="flex flex-col gap-0.5">
+              <span className="text-sm font-semibold">{o.label}</span>
+              <span className="text-xs text-mute leading-relaxed">{o.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </Field>
+  );
+};
+
 // Settings → Cards & review: what goes into review and how cards look; `children` is the Anki group.
 const SettingsCards: React.FC<{ onSaved: () => void; children: React.ReactNode }> = ({ onSaved, children }) => {
   const t = useT();
@@ -117,6 +143,7 @@ const SettingsCards: React.FC<{ onSaved: () => void; children: React.ReactNode }
           </label>
         </Field>
         <WordFrontPicker onSaved={onSaved} />
+        <WordVoicePicker onSaved={onSaved} />
         <ClipsRow onSaved={onSaved} />
       </Group>
       <Group title={t('settings.group.cardAudio')}>

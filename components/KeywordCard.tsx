@@ -9,6 +9,8 @@ import { addWordIfNew, getAllCards, wordCardId } from '../utils/review';
 import { keywordLines, keywordsOn, prepareKeywords, readKeywords, type Keyword, type Keywords } from '../utils/keywordPrep';
 import { loadWords } from '../utils/wordTimes';
 import { locateWord } from '../utils/wordAudio';
+import { getWordVoice } from '../utils/storage';
+import { wordVoiceUrl } from '../utils/wordVoice';
 
 // This episode's keywords (docs/keywords.md): the summary and the words, each opening the line
 // it is in with its sound, and "+" into the word cards. Everything the AI wrote is plain text.
@@ -41,10 +43,14 @@ const KeywordView: React.FC<{ record: VideoRecord; data: Keywords }> = ({ record
   const playWord = async (k: Keyword) => {
     const l = lines[k.line];
     const me = ++playing.current;
-    if (!record.videoPath || !l) return;
-    const spot = locateWord(l, k.word, await loadWords(record.id), k.at)!; // a known place is never null
-    if (me !== playing.current) return;
-    clip.play({ path: record.videoPath, offset: 0 }, spot.from, spot.to);
+    const fromVideo = async () => {
+      if (!record.videoPath || !l) return;
+      const spot = locateWord(l, k.word, await loadWords(record.id), k.at)!; // a known place is never null
+      if (me !== playing.current) return;
+      clip.play({ path: record.videoPath, offset: 0 }, spot.from, spot.to);
+    };
+    if (getWordVoice() === 'tts') clip.playVoice(wordVoiceUrl(k.word, record.id, 2000), () => { fromVideo().catch(() => {}); });
+    else await fromVideo();
   };
   const playLine = (k: Keyword) => {
     const l = lines[k.line];

@@ -85,6 +85,7 @@ export const addNote = async (
     audioBase64?: string;
     audioExt?: string;
     wordAudioBase64?: string; // the word's own sound (m4a), before the line's in the same field
+    wordAudioExt?: string; // default 'm4a'; 'mp3' when read aloud (utils/wordVoice.ts)
     word?: string;
     definition?: string;
     example?: string;
@@ -121,7 +122,7 @@ export const addNote = async (
     else if (appKey === 'audio' && (data.audioBase64 || data.wordAudioBase64)) {
         if (data.wordAudioBase64) audio.push({
             data: data.wordAudioBase64,
-            filename: `linguaclip_word_${Date.now()}.m4a`,
+            filename: `linguaclip_word_${Date.now()}.${data.wordAudioExt || 'm4a'}`,
             fields: [ankiField]
         });
         if (data.audioBase64) audio.push({

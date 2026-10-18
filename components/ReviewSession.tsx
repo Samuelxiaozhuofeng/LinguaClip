@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PracticeMode } from '../types';
+import { clipOf, useClip } from '../hooks/useClip';
 import { Rating, type Grade } from 'ts-fsrs';
 import { ReviewCard, recordOutcome, repointVideo, getAllCards, dueQueue, addWord, gradeOf, previewDue, schedule, setMastered, removeCard, restoreCard, type Removed } from '../utils/review';
 import { patchVideoRecord } from '../utils/videoStorage';
-import { getAudioPaddingConfig, getWordFront, getMasteredBtn } from '../utils/storage';
+import { getWordFront, getMasteredBtn, getWordVoice } from '../utils/storage';
+import { wordVoiceUrl } from '../utils/wordVoice';
 import { videoSrcFromPath, pickVideoPath } from '../utils/desktop';
 import { findSource, holdClips, fillClips, type Source } from '../utils/clips';
 import { Check, Play, Repeat, RotateCcw, Trash2, X } from 'lucide-react';
@@ -33,59 +35,7 @@ import { locateWord, type WordSpot } from '../utils/wordAudio';
 // thought about then turned; either ends on the four FSRS buttons, and "Again" comes
 // back at the end of the round. Also opened on top of the practice page, so it owns its keys.
 
-// The line's audio with the user's lead-in / tail padding.
-export const clipOf = (c: ReviewCard): [number, number] => {
-  const { startPadding, endPadding } = getAudioPaddingConfig();
-  return [Math.max(0, c.start - startPadding / 1000), c.end + endPadding / 1000];
-};
-
-// One <video> that plays a stretch and stops; keeps its src while the path stays the same.
-export const useClip = () => {
-  const ref = useRef<HTMLVideoElement>(null);
-  const [src, setSrc] = useState<string | null>(null);
-  const srcRef = useRef<string | null>(null);
-  const pending = useRef<(() => void) | null>(null);
-  const raf = useRef(0);
-  const stopAt = useRef<{ end: number; then?: () => void } | null>(null);
-
-  const stop = () => {
-    cancelAnimationFrame(raf.current);
-    stopAt.current = null;
-    pending.current = null;
-    ref.current?.pause();
-  };
-  const watch = () => {
-    raf.current = requestAnimationFrame(() => {
-      const v = ref.current, s = stopAt.current;
-      if (!v || !s) return;
-      if (v.currentTime >= s.end || v.ended) { stop(); s.then?.(); } else watch();
-    });
-  };
-  // `from` / `to` are times in the source video; a card's own clip starts `offset` seconds in.
-  const play = ({ path, offset }: Source, from: number, to: number, then?: () => void) => {
-    from = Math.max(0, from - offset);
-    to -= offset;
-    stop();
-    const go = () => {
-      const v = ref.current;
-      if (!v) return;
-      const token = { end: to, then };
-      stopAt.current = token;
-      v.currentTime = from;
-      // Blocked playback still moves on, so an auto-advance never hangs.
-      v.play().then(watch, () => { if (stopAt.current === token) { stop(); then?.(); } });
-    };
-    if (path === srcRef.current && ref.current && ref.current.readyState >= 1) go();
-    else { pending.current = go; srcRef.current = path; setSrc(path); }
-  };
-  useEffect(() => stop, []);
-
-  const onLoadedMetadata = () => { const go = pending.current; pending.current = null; go?.(); };
-  const video = (className: string) => (
-    <video ref={ref} crossOrigin="anonymous" src={src ? videoSrcFromPath(src) : undefined} onLoadedMetadata={onLoadedMetadata} className={className} />
-  );
-  return { play, stop, video, ref };
-};
+export { clipOf, useClip } from '../hooks/useClip';
 
 // `langOf` (from a library page): each card's language deck. Then lookups use the card's
 // own language, and "more" after the round stays in the deck the round came from.
@@ -220,7 +170,19 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
     return () => { live = false; };
   }, [card, isWord]);
   const wordAt = spot && card && spot.id === card.id ? spot.at : null;
-  const playWord = () => { if (source && wordAt) { clearLoop(); clip.play(source, wordAt.from, wordAt.to); } };
+  const now = useRef({ id: '', source, wordAt }); // the fallback plays where the word is by then, not at the click
+  now.current = { id: card?.id ?? '', source, wordAt };
+  const playWord = () => {
+    if (!card?.word) return;
+    const tts = getWordVoice() === 'tts';
+    if (!tts && !(source && wordAt)) return;
+    clearLoop();
+    const id = card.id;
+    clip.playVoice(tts ? wordVoiceUrl(card.word, card.videoId, 2000) : Promise.resolve(null), () => {
+      const n = now.current;
+      if (n.id === id && n.source && n.wordAt) clip.play(n.source, n.wordAt.from, n.wordAt.to);
+    });
+  };
 
   const next = () => { clip.stop(); setMode(PracticeMode.INPUT); setTurned(false); setSuggest(undefined); setAt(0); setIdx(i => i + 1); };
 
@@ -428,7 +390,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
               </div>
             ) : path && card && splitsReady ? (
               isWord ? (
-                <WordFace key={`${round}-${idx}`} card={card} front={front} turned={turned} onLookup={lookup} onReplay={() => playCard()} onPlayWord={wordAt ? playWord : undefined} />
+                <WordFace key={`${round}-${idx}`} card={card} front={front} turned={turned} onLookup={lookup} onReplay={() => playCard()} onPlayWord={wordAt || getWordVoice() === 'tts' ? playWord : undefined} />
               ) : (
                 <DictationLine
                   key={`${round}-${idx}`}

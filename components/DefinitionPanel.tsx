@@ -10,6 +10,8 @@ import type { Source } from '../utils/clips';
 import { getVideoRecord } from '../utils/videoStorage';
 import { loadWords } from '../utils/wordTimes';
 import { locateWord, type WordSpot } from '../utils/wordAudio';
+import { getWordVoice } from '../utils/storage';
+import { wordVoiceUrl } from '../utils/wordVoice';
 
 // Single word-definition surface for both learning modes: a small card beside the
 // clicked word (below it, or above when there's more room there), closed by Esc, the X or a click outside. A dictionary entry is
@@ -155,10 +157,19 @@ const DefinitionPanel: React.FC<{
     });
     return () => { live = false; };
   }, [say?.videoId, say?.text, say?.start, say?.end, say?.source]); // eslint-disable-line react-hooks/exhaustive-deps
-  const canSay = !!spot?.src && !!spot.at && !say?.busy && add.busy === null;
+  const tts = getWordVoice() === 'tts';
+  const hasClip = !!spot?.src && !!spot.at;
+  const canSay = (tts || hasClip) && !say?.busy && add.busy === null;
+  const spotNow = useRef(spot); // the fallback plays where the word is by then, not at the click
+  spotNow.current = spot;
+  const sayWord = () => {
+    if (!canSay || !say) return;
+    const url = tts && def.word ? wordVoiceUrl(def.word, say.videoId, 2000) : Promise.resolve(null);
+    clip.playVoice(url, () => { const s = spotNow.current; if (s?.src && s.at) clip.play(s.src, s.at.from, s.at.to); });
+  };
   const sayBtn = say && (
-    <Btn square size="sm" flat disabled={!canSay} onClick={() => { if (canSay) clip.play(spot!.src!, spot!.at!.from, spot!.at!.to); }}
-      title={spot && !spot.at ? t('definition.sayNone') : t('definition.say')} aria-label={t('definition.say')} className="shrink-0 self-center">
+    <Btn square size="sm" flat disabled={!canSay} onClick={() => { sayWord(); }}
+      title={spot && !spot.at && !tts ? t('definition.sayNone') : t('definition.say')} aria-label={t('definition.say')} className="shrink-0 self-center">
       <Volume2 size={15} />
     </Btn>
   );

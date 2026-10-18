@@ -3,7 +3,7 @@ import { synthesizeSpeech } from './desktop';
 // Clean read-aloud for "break it down": Edge's neural voices first, the Mac's
 // own speech synthesis when that fails. One clip plays at a time.
 
-const VOICES: Record<string, string> = {
+export const VOICES: Record<string, string> = {
   en: 'en-US-JennyNeural',
   es: 'es-ES-ElviraNeural',
   fr: 'fr-FR-DeniseNeural',

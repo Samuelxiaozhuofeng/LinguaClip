@@ -65,6 +65,7 @@ export interface PracticeConfig {
   clipKind?: 'video' | 'audio'; // what a new clip is: a small video, or sound + a still; default video
   videoShare?: number; // % of the practice page's width given to the video; default 60
   wordFront?: WordFront; // what a word card shows before it is turned (review and Anki); default 'word'
+  wordVoice?: 'clip' | 'tts'; // how a word's own sound is played (docs/word-audio.md); default 'clip'
   masteredBtn?: boolean; // review shows "Got it" on sentence cards (docs/review.md); default on
   weekStats?: boolean; // home shows the 7-day chart (docs/stats.md); default on
   custom?: import('./utils/customPick').CustomConfig; // the start-of-practice panel's last choice
