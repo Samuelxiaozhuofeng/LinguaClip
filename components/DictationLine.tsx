@@ -9,6 +9,7 @@ import { Btn } from './ui';
 import { useT } from '../utils/i18n';
 import { usePhraseDrag } from '../hooks/usePhraseDrag';
 import { matches } from '../utils/shortcuts';
+import { IS_WINDOWS } from '../utils/platform';
 import { useJaVersion } from '../utils/japanese';
 import { wordSpans } from '../utils/wordTimes';
 import type { Word } from '../utils/resegment';
@@ -22,6 +23,8 @@ interface Props {
   // fromRatio / toRatio: 0..1 into the line; toRatio set = stop there (one word).
   onReplay: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number) => void;
   onLookup: (word: string) => void;
+  // Given: Space in an empty blank (and Option+Space on a Mac) plays/pauses instead of moving on (docs/shortcuts.md).
+  onTogglePlay?: () => void;
   blanks?: number[]; // word indices the user types; omit = every word
   nextLabel?: string; // feedback's forward button; defaults to "next line"
   hideNext?: boolean; // no forward button: the caller moves on (review's grade buttons)
@@ -51,7 +54,7 @@ export const slotEm = (word: string) =>
 // Typing and the answer share one setting, so submitting changes colours, not positions.
 export const LINE = 'flex flex-wrap justify-center items-baseline gap-x-[0.3em] font-serif text-[38px] leading-[54px]';
 
-const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay, onLookup, blanks, nextLabel, hideNext, onResult, extra, splitVersion, timedWords }) => {
+const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay, onLookup, onTogglePlay, blanks, nextLabel, hideNext, onResult, extra, splitVersion, timedWords }) => {
   const t = useT();
   // A Japanese line is re-split when its dictionary or AI cut points arrive, but
   // never under the user's fingers: once something is typed the split holds.
@@ -100,6 +103,8 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
   const [peek, setPeek] = useState<number | null>(null);
   const peekTimer = useRef<number | null>(null);
   const replayTimer = useRef<number | null>(null);
+  // The blank a right word just moved on to: the habitual Space after that word lands there and is swallowed, not play/pause.
+  const autoNext = useRef(-1);
   const attempt = useRef({ helped: false, reported: false });
   const report = (correct: boolean) => {
     if (attempt.current.reported) return;
@@ -136,6 +141,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
   // composing: a Japanese (or Chinese) input method is still turning keystrokes
   // into text; the word is only judged once it is committed.
   const change = (i: number, value: string, composing = false) => {
+    autoNext.current = -1;
     const next = [...inputs];
     next[i] = value;
     setInputs(next);
@@ -147,6 +153,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     if (!isInputCorrectFlexibleCase(next[i] ?? '', wordTokens[i].value, wordTokens[i].reading)) return;
     const nxt = stepBlank(i, 1);
     if (nxt >= 0) {
+      autoNext.current = nxt;
       setTimeout(() => refs.current[nxt]?.focus(), 100);
     } else if (areAllWordsCorrectFlexibleCase(tokens, next)) {
       report(true);
@@ -175,8 +182,14 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     if (matches(e, 'playFrom')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, spanOf(i)[0]); return; }
     if (matches(e, 'playWord')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, ...spanOf(i)); return; }
     if (matches(e, 'peek')) { e.preventDefault(); showPeek(i); return; }
+    const spaceToggles = e.code === 'Space' && !e.shiftKey && !e.metaKey && !e.ctrlKey && (e.altKey ? !IS_WINDOWS : inputs[i] === '');
+    if (onTogglePlay && spaceToggles && !e.altKey && autoNext.current === i) { e.preventDefault(); autoNext.current = -1; return; }
+    if (onTogglePlay && (spaceToggles || matches(e, 'playTyping'))) {
+      e.preventDefault(); e.stopPropagation(); onTogglePlay(); return;
+    }
     if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
+      autoNext.current = -1;
       const nxt = stepBlank(i, 1);
       if (nxt >= 0) refs.current[nxt]?.focus(); else submit();
     } else if (e.key === 'Backspace' && inputs[i] === '') {

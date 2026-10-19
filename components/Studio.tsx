@@ -376,6 +376,7 @@ const Studio: React.FC = () => {
                     splitVersion={splitVersion}
                     onComplete={correct => (correct && mode === PracticeMode.FEEDBACK ? actions.onContinue() : actions.onInputComplete(correct))}
                     onReplay={actions.onReplayCurrent}
+                    onTogglePlay={actions.onTogglePlay}
                     timedWords={timedWords}
                     onLookup={lookup}
                     extra={offerBtn}

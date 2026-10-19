@@ -8,13 +8,15 @@ import type { DictKey } from './i18n';
 // key can never swallow what the user types.
 
 export type Combo = { code: string; mod?: boolean; shift?: boolean };
-export type ActionId = 'play' | 'replay' | 'loop' | 'playFrom' | 'playWord' | 'prev' | 'next' | 'continue' | 'peek' | 'anki' | 'breakdown' | 'skipWord' | 'skipLine' | 'reveal';
+export type ActionId = 'play' | 'replay' | 'loop' | 'playFrom' | 'playWord' | 'prev' | 'next' | 'continue' | 'peek' | 'anki' | 'breakdown' | 'skipWord' | 'skipLine' | 'reveal' | 'playTyping';
 
 type Action = { id: ActionId; def: Combo; label: DictKey; fixed?: boolean; dictationOnly?: boolean };
 
 export const ACTIONS: Action[] = [
   { id: 'play', def: { code: 'Space' }, label: 'keys.play', fixed: true },
   { id: 'replay', def: { code: 'Space', shift: true }, label: 'keys.replay' },
+  // In a blank Space is play/pause only while it's empty; this one works mid-word too (docs/shortcuts.md).
+  { id: 'playTyping', def: { code: 'KeyE', mod: true }, label: 'keys.playTyping', dictationOnly: true },
   { id: 'loop', def: { code: 'KeyL', mod: true }, label: 'keys.loop' },
   { id: 'playFrom', def: { code: 'KeyJ', mod: true }, label: 'keys.playFrom', dictationOnly: true },
   { id: 'playWord', def: { code: 'KeyK', mod: true }, label: 'keys.playWord', dictationOnly: true },
@@ -26,7 +28,7 @@ export const ACTIONS: Action[] = [
   { id: 'peek', def: { code: 'KeyX', mod: true }, label: 'keys.peek', dictationOnly: true },
   { id: 'anki', def: { code: 'KeyN', mod: true, shift: true }, label: 'keys.anki' },
   { id: 'breakdown', def: { code: 'KeyB', mod: true }, label: 'keys.breakdown', dictationOnly: true },
-  { id: 'skipWord', def: { code: 'Space' }, label: 'keys.skipWord', fixed: true, dictationOnly: true },
+  { id: 'skipWord', def: { code: 'ArrowRight' }, label: 'keys.skipWord', fixed: true, dictationOnly: true },
 ];
 
 const STORAGE_KEY = 'linguaclip_shortcuts';
