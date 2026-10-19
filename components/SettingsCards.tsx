@@ -92,8 +92,8 @@ const WordVoicePicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
   const [voice, setVoice] = useState(getWordVoice);
   const pick = (v: 'clip' | 'tts') => { setVoice(v); savePracticeConfig({ ...getPracticeConfig(), wordVoice: v }); onSaved(); };
   const opts = [
-    { value: 'clip' as const, label: t('settingsGeneral.wordVoiceClip'), hint: t('settingsGeneral.wordVoiceClipHint') },
     { value: 'tts' as const, label: t('settingsGeneral.wordVoiceTts'), hint: t('settingsGeneral.wordVoiceTtsHint') },
+    { value: 'clip' as const, label: t('settingsGeneral.wordVoiceClip'), hint: t('settingsGeneral.wordVoiceClipHint') },
   ];
   return (
     <Field label={t('settingsGeneral.wordVoice')}>

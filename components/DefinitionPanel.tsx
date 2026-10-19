@@ -169,7 +169,7 @@ const DefinitionPanel: React.FC<{
   };
   const sayBtn = say && (
     <Btn square size="sm" flat disabled={!canSay} onClick={() => { sayWord(); }}
-      title={spot && !spot.at && !tts ? t('definition.sayNone') : t('definition.say')} aria-label={t('definition.say')} className="shrink-0 self-center">
+      title={spot && !spot.at && !tts ? t('definition.sayNone') : t(tts ? 'definition.sayWord' : 'definition.say')} aria-label={t(tts ? 'definition.sayWord' : 'definition.say')} className="shrink-0 self-center">
       <Volume2 size={15} />
     </Btn>
   );

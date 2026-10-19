@@ -2,29 +2,22 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::{SinkExt, StreamExt};
 use reqwest_websocket::{Message, RequestBuilderExt};
-use sha2::{Digest, Sha256};
 use tauri_plugin_http::reqwest;
 
+use crate::tts_gec;
+
 // Microsoft Edge's "Read aloud" voices: no key, no account. Not a public API —
-// it only answers a client that looks like Edge (User-Agent + Sec-MS-GEC), so
-// these constants may need bumping when Microsoft tightens the check (403).
+// it only answers a client that looks like Edge (User-Agent + v2 Sec-MS-GEC from
+// tts_gec.rs, a port of edge-tts). When it starts returning 403 again, bump these
+// constants to match edge-tts constants.py (and drm.py if the algorithm changed).
 // Goes through reqwest so the macOS system proxy applies: from mainland China a
 // direct connection is reset most of the time.
 const TOKEN: &str = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
-const GEC_VERSION: &str = "1-143.0.3650.75";
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.3650.75";
+const GEC_VERSION: &str = "2-143.0.3650.75";
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0";
 const ENDPOINT: &str = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1";
 const TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_TEXT: usize = 300;
-
-// SHA-256 of (Windows file-time ticks, rounded down to 5 minutes) + token.
-// A clock that is off by more than a few minutes gets a 403.
-fn sec_ms_gec(unix_secs: u64) -> String {
-  let mut t = unix_secs + 11_644_473_600;
-  t -= t % 300;
-  let digest = Sha256::digest(format!("{}{}", t as u128 * 10_000_000, TOKEN));
-  digest.iter().map(|b| format!("{b:02X}")).collect()
-}
 
 fn xml_escape(s: &str) -> String {
   s.replace('&', "&amp;")
@@ -60,7 +53,7 @@ async fn synthesize(text: &str, voice: &str) -> Result<Vec<u8>, String> {
   let url = format!(
     "{ENDPOINT}?TrustedClientToken={TOKEN}&ConnectionId={}&Sec-MS-GEC={}&Sec-MS-GEC-Version={GEC_VERSION}",
     hex_id(),
-    sec_ms_gec(now)
+    tts_gec::sec_ms_gec_v2(now, TOKEN)
   );
   let client = reqwest::Client::builder()
     .http1_only()
@@ -140,10 +133,23 @@ mod tests {
   #[test]
   fn gec_rounds_to_five_minutes() {
     // Same 5-minute window → same signature; next window → different.
+    let gec = |t| tts_gec::sec_ms_gec_v2(t, TOKEN);
     let base = 1_790_000_000 - (1_790_000_000 + 11_644_473_600) % 300;
-    assert_eq!(sec_ms_gec(base), sec_ms_gec(base + 299));
-    assert_ne!(sec_ms_gec(base), sec_ms_gec(base + 300));
-    assert_eq!(sec_ms_gec(base).len(), 64);
+    assert_eq!(gec(base), gec(base + 299));
+    assert_ne!(gec(base), gec(base + 300));
+    assert_eq!(gec(base).len(), 16 + 1 + 64);
+  }
+
+  #[test]
+  fn gec_v2_matches_edge_tts() {
+    // Computed with edge-tts drm.py generate_sec_ms_gec_v2.
+    for (t, want) in [
+      (1_760_000_000, "6D50DDDB91812C33-DD68EFB01898B0750C9797D51A5FF93471DFDAE6888A1039D532CBDCCE54545D"),
+      (1_760_876_543, "30C97C971A706048-D63B76D6447F549B49132493A6985D2BE844849722F4E79E1ACBE1EF476741A7"),
+      (1_700_000_000, "2CD23A2CA0B2595A-F3C846C370E05F9CC83ACC5F995C5F5D87A4D0F14CE8936A0F902E64099E38A2"),
+    ] {
+      assert_eq!(tts_gec::sec_ms_gec_v2(t, TOKEN), want, "{t}");
+    }
   }
 
   #[test]

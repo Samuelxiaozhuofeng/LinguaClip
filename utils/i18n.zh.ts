@@ -266,8 +266,8 @@ export const zh: Record<keyof typeof en, string> = {
   'settingsGeneral.wordVoice': '单词发音',
   'settingsGeneral.wordVoiceClip': '视频原声',
   'settingsGeneral.wordVoiceClipHint': '从视频里截出这个词，听到的是角色本人的声音',
-  'settingsGeneral.wordVoiceTts': '朗读',
-  'settingsGeneral.wordVoiceTtsHint': '用标准朗读读这个词，要联网；2 秒没出来就放原声',
+  'settingsGeneral.wordVoiceTts': '词典发音',
+  'settingsGeneral.wordVoiceTtsHint': '用词典里的真人发音（英语剑桥、西法德欧路、日语 Jisho），没有就朗读；要联网，2 秒没出来就放原声',
   'settingsGeneral.autoAddReviewHint': '不勾选时，这些句子会在答案下面出一个按钮，你自己决定要不要加。',
   'settingsGeneral.sectionLength': '分段长度',
   'settingsGeneral.listenTries': '练难点每句先听几遍',
@@ -743,6 +743,7 @@ export const zh: Record<keyof typeof en, string> = {
   'studio.retryStuck': '趁热再练刚才那 {n} 句',
   'definition.keep': '记下这个词（进单词复习）',
   'definition.say': '听这个词在这句里的原声',
+  'definition.sayWord': '听这个词',
   'definition.sayNone': '这句里找不到这个词，放不了',
   'definition.kept': '已记下',
   // --- JaSetup.tsx (Japanese splitting dictionary) ---

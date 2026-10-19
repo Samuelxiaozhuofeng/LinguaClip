@@ -215,7 +215,7 @@ export const parseCambridge = (html: string, word: string, source: DictSource = 
   return { word: clean(first?.querySelector('.headword, .dhw')?.textContent) || word, phonetic: ipa ? `/${ipa}/` : '', senses, source };
 };
 
-const EUDIC_HOST: Record<Exclude<DictLang, 'en' | 'ja' | 'no'>, string> = {
+export const EUDIC_HOST: Record<Exclude<DictLang, 'en' | 'ja' | 'no'>, string> = {
   es: 'https://www.esdict.cn',
   fr: 'https://www.frdic.com',
   de: 'https://www.godic.net',
@@ -338,9 +338,9 @@ export const parseEudic = (html: string): DictEntry | null => {
 // Wikimedia asks for a User-Agent that names the app; a 404 there = no such word.
 // Cambridge's bot check sometimes holds a request open rather than refusing it,
 // so it gets a shorter wait before the next dictionary takes over.
-const get = async (url: string, ua = 'Mozilla/5.0', ms = 15_000): Promise<Response> => {
+export const get = async (url: string, ua = 'Mozilla/5.0', ms = 15_000): Promise<Response> => {
   const res = await fetch(url, { headers: { 'User-Agent': ua, Origin: '' }, signal: AbortSignal.timeout(ms) });
-  if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status, res });
   return res;
 };
 

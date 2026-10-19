@@ -265,8 +265,8 @@ export const en = {
   'settingsGeneral.wordVoice': 'Word sound',
   'settingsGeneral.wordVoiceClip': 'From the video',
   'settingsGeneral.wordVoiceClipHint': 'The word cut from the video, in the character\'s own voice',
-  'settingsGeneral.wordVoiceTts': 'Read aloud',
-  'settingsGeneral.wordVoiceTtsHint': 'A clear standard voice reads the word; needs the internet, and plays the video\'s sound if nothing comes within 2 seconds',
+  'settingsGeneral.wordVoiceTts': 'Dictionary voice',
+  'settingsGeneral.wordVoiceTtsHint': 'A real person\'s recording from a dictionary (Cambridge for English, Eudic for Spanish, French and German, Jisho for Japanese), else a voice reads it; needs the internet, and plays the video\'s sound if nothing comes within 2 seconds',
   'settingsGeneral.autoAddReviewHint': 'When off, those lines show a button under the answer so you choose whether to add them.',
   'settingsGeneral.sectionLength': 'Section length',
   'settingsGeneral.listenTries': 'Plays per hard line before the text',
@@ -742,6 +742,7 @@ export const en = {
   'studio.retryStuck': "Go over those {n} lines again while they're fresh",
   'definition.keep': 'Keep this word (word review)',
   'definition.say': 'Hear it in this line',
+  'definition.sayWord': 'Hear this word',
   'definition.sayNone': 'Not found in this line, nothing to play',
   'definition.kept': 'Kept',
   // --- JaSetup.tsx (Japanese splitting dictionary) ---

@@ -21,6 +21,7 @@ mod paths;
 mod podcast;
 mod repeat_fix;
 mod tts;
+mod tts_gec;
 mod gpus;
 mod whisper_setup;
 mod word_order;
