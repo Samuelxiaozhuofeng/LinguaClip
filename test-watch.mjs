@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 const out = join(tmpdir(), `watch-${process.pid}.mjs`);
 await build({ entryPoints: ['utils/srtParser.ts'], bundle: true, format: 'esm', outfile: out, logLevel: 'error' });
-const { lineAt, parseSRT } = await import(out);
+const { lineAt, lineEnded, passed, parseSRT } = await import(out);
 
 const lines = parseSRT(`1
 00:00:01,000 --> 00:00:02,000
@@ -38,4 +38,14 @@ assert.deepEqual(got('1\r\n00:00:01.5 --> 00:00:02.250\r\nA\r\n\r\n\r\n2\r\n01:0
 assert.deepEqual(got('1\n00:00:01,000 --> 00:00:01,000\nzero\n'), [[1, 1, 1, 'zero']], 'zero length kept');
 assert.deepEqual(got('garbage --> nope\ntext\n'), [], 'no times: skipped');
 assert.equal(lineAt([], 3), -1, 'no lines');
+
+// lineEnded: a frame landing in the sliver where lineAt has already moved on still ends the line
+const two = lines[1]; // 3 → 4.5, three starts at 4.5
+assert.equal(lineEnded(two, 4.49, 4.4995), true, 'into the sliver before a back-to-back line: ended');
+assert.equal(lineAt(lines, 4.4995), 2, '(lineAt has moved on there)');
+assert.equal(lineEnded(two, 4.4995, 4.51), false, 'not ended twice');
+assert.equal(lineEnded(two, 4.0, 4.4), false, 'still inside');
+assert.equal(lineEnded(two, 4.48, 4.6), true, 'plain crossing');
+// a drill line's / section's end in the same sliver: caught on the same frame as the line's end
+assert.equal(passed(4.5, 4.49, 4.4995), lineEnded(two, 4.49, 4.4995), 'same slack as lineEnded');
 console.log('test-watch: ok');

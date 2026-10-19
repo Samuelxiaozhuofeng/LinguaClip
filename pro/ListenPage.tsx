@@ -8,7 +8,7 @@ import WatchSummary from '../components/WatchSummary';
 import ReviewSession from '../components/ReviewSession';
 import { JaBanner } from '../components/JaSetup';
 import { useSavedLines } from '../hooks/useSavedLines';
-import { lineAt, parseSRT } from '../utils/srtParser';
+import { lineAt, lineEnded, parseSRT, passed } from '../utils/srtParser';
 import { buildSections, sectionAt, sectionLengthOf, sectionStart } from '../utils/sections';
 import { detectLang } from '../utils/dictionary';
 import { useJaVersion } from '../utils/japanese';
@@ -136,7 +136,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
       const was = lineAt(lines, before);
       if (a.paused || was < 0 || now <= before) { prevT.current = now; return; }
       const line = lines[was];
-      const crossed = before < line.endTime && now >= line.endTime;
+      const crossed = lineEnded(line, before, now);
       const s = sectionOf.get(line.id) ?? 0, end = sectionEnd(s);
       const last = sections[s]?.subtitles.at(-1);
       const lastAt = last ? indexOf.get(last.id) ?? -1 : -1;
@@ -151,7 +151,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
         plays.current.n++;
         pause(was); // the gap is still this line (and this section)
         gap.current = window.setTimeout(() => { gap.current = 0; seek(line.startTime, true); }, LOOP_GAP_MS);
-      } else if (tgt >= 0 && before < tEnd && now >= tEnd && heldAt.current !== tgt) {
+      } else if (tgt >= 0 && passed(tEnd, before, now) && heldAt.current !== tgt) {
         pause(tgt); // the hard line heard (from it or a line before it, however long the frame)
         const { play: k, shown: up, tries: n } = opts.current;
         if (up) heldAt.current = tgt; // with its text: stays stopped for the reader
@@ -160,7 +160,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
           const from = lines[tgt].startTime;
           gap.current = window.setTimeout(() => { gap.current = 0; seek(from, true); }, LOOP_GAP_MS);
         }
-      } else if (!opts.current.through && lastAt >= 0 && before < end && now >= end && heldAt.current !== lastAt) {
+      } else if (!opts.current.through && lastAt >= 0 && passed(end, before, now) && heldAt.current !== lastAt) {
         // Once: closing the summary and pressing play goes on past the section end.
         heldAt.current = lastAt;
         pause(lastAt);

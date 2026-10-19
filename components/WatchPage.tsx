@@ -10,7 +10,7 @@ import ReviewSession from './ReviewSession';
 import { useLookup, aroundOf } from '../hooks/useLookup';
 import { useSavedLines } from '../hooks/useSavedLines';
 import { useAnkiIntegration } from '../hooks/useAnkiIntegration';
-import { lineAt, parseSRT } from '../utils/srtParser';
+import { lineAt, lineEnded, parseSRT } from '../utils/srtParser';
 import { isFullscreen, setFullscreen, videoSrcFromPath } from '../utils/desktop';
 import { detectLang } from '../utils/dictionary';
 import { settleSplits } from '../utils/jaSegments';
@@ -97,7 +97,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
         setCur(c => (c.at === at && c.on === on ? c : { at, on }));
         const was = lineAt(lines, before);
         if (autoPauseRef.current && !busy() && !v.paused && was >= 0 && was !== heldAt.current
-          && before < lines[was].endTime && now >= lines[was].endTime && now - before < 0.5 * Math.max(1, v.playbackRate)) {
+          && lineEnded(lines[was], before, now) && now - before < 0.5 * Math.max(1, v.playbackRate)) {
           v.pause();
           heldAt.current = was;
           const back = Math.max(lines[was].startTime, lines[was].endTime - 0.02);

@@ -47,12 +47,22 @@ export const parseSRT = (data: string): Subtitle[] => {
   return subtitles;
 };
 
+// A seek to a line's start can land a hair before it: still that line.
+const EPS = 0.001;
+
 // The last line that has started by `t` (-1 before the first). Lines are sorted by start.
 export const lineAt = (lines: Subtitle[], t: number): number => {
   let lo = 0, hi = lines.length - 1, at = -1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    if (lines[mid].startTime <= t + 0.001) { at = mid; lo = mid + 1; } else hi = mid - 1;
+    if (lines[mid].startTime <= t + EPS) { at = mid; lo = mid + 1; } else hi = mid - 1;
   }
   return at;
 };
+
+// Did playback from `before` to `now` run past `end`? Same slack as lineAt: with the next line
+// starting right at a line's end, lineAt already moves on EPS early, and a frame landing in that
+// sliver would otherwise skip the stop (the line loop / pause at line end "not braking"). Every
+// stop on one page uses this, so none of them is beaten to it by another one EPS earlier.
+export const passed = (end: number, before: number, now: number) => before < end - EPS && now >= end - EPS;
+export const lineEnded = (line: Subtitle, before: number, now: number) => passed(line.endTime, before, now);
