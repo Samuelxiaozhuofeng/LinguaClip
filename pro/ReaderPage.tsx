@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { loose, matches } from '../utils/shortcuts';
 import { ArrowLeft, Pause, Play, RotateCcw, X } from 'lucide-react';
 import type { Subtitle, VideoRecord } from '../types';
 import { Btn, Seg } from '../components/ui';
@@ -215,9 +216,9 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     if (e.isComposing || e.keyCode === 229) return;
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     if (drill) return; // the dictation keeps every key to itself
-    if (e.key === 'Escape') { if (def.word !== null) closeDef(); else if (summary) setSummary(false); else if (clip) closePlayer(); return; }
+    if (loose(e, 'reader.close')) { if (def.word !== null || summary || clip) e.preventDefault(); if (def.word !== null) closeDef(); else if (summary) setSummary(false); else if (clip) closePlayer(); return; }
     if (summary) return;
-    if (e.code === 'Space' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && clip) { e.preventDefault(); togglePause(); }
+    if (matches(e, 'reader.play') && clip) { e.preventDefault(); togglePause(); }
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => keys.current(e);

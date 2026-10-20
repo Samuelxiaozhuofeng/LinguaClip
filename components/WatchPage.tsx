@@ -16,7 +16,7 @@ import { detectLang } from '../utils/dictionary';
 import { settleSplits } from '../utils/jaSegments';
 import { addWord, lineCardsFor, ReviewCard } from '../utils/review';
 import { formatTimeCode, getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos, WatchPrefs, WatchSubs } from '../utils/storage';
-import { formatCombo, matches, useShortcuts } from '../utils/shortcuts';
+import { formatCombo, lineKey, loose, matches, useShortcuts } from '../utils/shortcuts';
 import { IS_WINDOWS } from '../utils/platform';
 import { DictKey, useT } from '../utils/i18n';
 import { usePracticeClock } from '../utils/today';
@@ -233,27 +233,26 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   keys.current = (e: KeyboardEvent) => {
     if (e.isComposing || e.keyCode === 229 || drill) return;
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-    if (e.key === 'Escape') {
+    if (loose(e, 'watch.close')) {
+      if (def.word !== null || summary || full) e.preventDefault(); // a rebound key mustn't also press a focused button
       if (def.word !== null) closeLookup();
       else if (summary) setSummary(false);
       else if (full) toggleFull();
       return;
     }
     if (summary || recording) return;
-    const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
-    const mod = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
     let act: (() => void) | null = null;
-    if (matches(e, 'replay')) act = replay;
-    else if (e.code === 'Space' && plain) act = togglePlay;
-    // ← / → change lines — a learner's jump is by line, not by seconds (⌘ too, as before).
-    else if (((plain || mod) && e.code === 'ArrowLeft') || matches(e, 'prev')) act = prev;
-    else if (((plain || mod) && e.code === 'ArrowRight') || matches(e, 'next')) act = next;
-    else if (plain && e.code === 'KeyS') act = save;
-    else if (plain && e.code === 'KeyP') act = toggleAutoPause;
-    else if (plain && e.code === 'KeyC') act = cycleSubs;
-    else if (plain && e.code === 'KeyV' && shown && prefs.subs !== 'show') act = () => setRevealed(shown.id); // = the ··· / blurred line's click
-    else if (plain && e.code === 'KeyF') act = toggleFull;
-    else if (matches(e, 'anki') && ankiReady) act = toAnki;
+    if (matches(e, 'watch.replay')) act = replay;
+    else if (matches(e, 'watch.play')) act = togglePlay;
+    // A learner's jump is by line, not by seconds.
+    else if (lineKey(e, 'prev')) act = prev;
+    else if (lineKey(e, 'next')) act = next;
+    else if (matches(e, 'watch.save')) act = save;
+    else if (matches(e, 'watch.autoPause')) act = toggleAutoPause;
+    else if (matches(e, 'watch.subs')) act = cycleSubs;
+    else if (matches(e, 'watch.peek') && shown && prefs.subs !== 'show') act = () => setRevealed(shown.id); // = the ··· / blurred line's click
+    else if (matches(e, 'watch.full')) act = toggleFull;
+    else if (matches(e, 'watch.anki') && ankiReady) act = toAnki;
     if (!act) return;
     e.preventDefault();
     act();
@@ -323,18 +322,19 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   const isSaved = !!target && savedIds.has(target.id);
   const mySaved = savedItems.filter(l => mine.includes(l.id));
   const withKey = (label: string, key: string) => `${label} (${key})`;
+  const key = (id: string) => formatCombo(combos[`watch.${id}`]);
   const onOff = (label: string, on: boolean) => <><span className="flex-1">{label}</span>{on && <Check size={15} className="text-accent" />}</>;
   const legend: [string, string][] = [
-    [formatCombo(combos.play), t('keys.play')],
-    [`← / ${formatCombo(combos.prev)}`, t('keys.prev')],
-    [`→ / ${formatCombo(combos.next)}`, t('keys.next')],
-    [formatCombo(combos.replay), t('keys.replay')],
-    ['S', t('watch.keySave')],
-    ['P', t('watch.autoPause')],
-    ['C', t('watch.keySubs')],
-    ['V', t('watch.showLine')],
-    ['F', t('watch.fullscreen')],
-    ...(ankiReady ? [[formatCombo(combos.anki), t('keys.anki')] as [string, string]] : []),
+    [key('play'), t('keys.play')],
+    [key('prev'), t('keys.prev')],
+    [key('next'), t('keys.next')],
+    [key('replay'), t('keys.replay')],
+    [key('save'), t('watch.keySave')],
+    [key('autoPause'), t('watch.autoPause')],
+    [key('subs'), t('watch.keySubs')],
+    [key('peek'), t('watch.showLine')],
+    [key('full'), t('watch.fullscreen')],
+    ...(ankiReady ? [[key('anki'), t('keys.anki')] as [string, string]] : []),
   ];
 
   return (
@@ -386,12 +386,12 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
         <div className="mt-1 flex items-center gap-2 text-mute">
           <div className="flex-1 min-w-0 flex items-center gap-1">
             <span className="text-xs tabular-nums pr-2 whitespace-nowrap">{formatTimeCode(time)} / {formatTimeCode(duration)}</span>
-            <Btn square size="sm" flat onClick={save} disabled={recording || !target} title={withKey(isSaved ? t('transport.unsaveLine') : t('transport.saveLine'), 'S')} className={isSaved ? '!text-accent' : ''}>
+            <Btn square size="sm" flat onClick={save} disabled={recording || !target} title={withKey(isSaved ? t('transport.unsaveLine') : t('transport.saveLine'), key('save'))} className={isSaved ? '!text-accent' : ''}>
               <Bookmark size={17} fill={isSaved ? 'currentColor' : 'none'} />
             </Btn>
           </div>
           <div className="flex items-center gap-1.5 shrink-0 text-ink">
-            <Btn square flat onClick={replay} disabled={recording || !target} title={withKey(t('transport.replayLine'), formatCombo(combos.replay))} className="!text-ink"><RotateCcw size={18} /></Btn>
+            <Btn square flat onClick={replay} disabled={recording || !target} title={withKey(t('transport.replayLine'), key('replay'))} className="!text-ink"><RotateCcw size={18} /></Btn>
             <button type="button" onClick={e => { e.currentTarget.blur(); togglePlay(); }} disabled={recording} aria-label={playing ? t('transport.pauseSpace') : t('transport.playSpace')}
               className="press w-11 h-11 rounded-full bg-accent text-white flex items-center justify-center">
               {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
@@ -399,15 +399,15 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
             <span className="w-10" />{/* keeps play in the middle now that replay sits alone beside it */}
           </div>
           <div className="flex-1 min-w-0 flex items-center justify-end gap-2">
-            <Btn square size="sm" flat onClick={toggleFull} title={withKey(full ? t('watch.exitFullscreen') : t('watch.fullscreen'), 'F')} aria-label={full ? t('watch.exitFullscreen') : t('watch.fullscreen')}>
+            <Btn square size="sm" flat onClick={toggleFull} title={withKey(full ? t('watch.exitFullscreen') : t('watch.fullscreen'), key('full'))} aria-label={full ? t('watch.exitFullscreen') : t('watch.fullscreen')}>
               {full ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
             </Btn>
             {/* Everything used less than once a line: how subtitles show, the pause at each line's end, the list, pinning, Anki */}
             <Menu up className="w-[280px]" items={[
-              { label: onOff(t('watch.autoPause'), prefs.autoPause), title: withKey(t('watch.autoPauseTitle'), 'P'), onClick: toggleAutoPause },
+              { label: onOff(t('watch.autoPause'), prefs.autoPause), title: withKey(t('watch.autoPauseTitle'), key('autoPause')), onClick: toggleAutoPause },
               { label: onOff(t('watch.list'), prefs.list), onClick: () => setPrefs({ list: !prefs.list }) },
               { label: onOff(t('watch.pin'), prefs.pin), onClick: () => setPrefs({ pin: !prefs.pin }) },
-              ...(ankiReady ? [{ label: t('transport.sendToAnki'), title: formatCombo(combos.anki), disabled: ankiStatus !== 'idle' || !target, onClick: toAnki }] : []),
+              ...(ankiReady ? [{ label: t('transport.sendToAnki'), title: key('anki'), disabled: ankiStatus !== 'idle' || !target, onClick: toAnki }] : []),
               'divider',
             ]} trigger={(open, toggle) => (
               <Btn square size="sm" flat onClick={toggle} title={t('home.more')} aria-label={t('home.more')} className={open ? '!bg-shade !text-ink' : ''}><MoreHorizontal size={18} /></Btn>
@@ -421,7 +421,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
               <div className="px-2.5 py-2 flex flex-col gap-2">
                 <span className="text-xs text-mute">{t('transport.speed')}</span>
                 <Seg<number> size="sm" className="w-full [&>button]:flex-1 [&>button]:px-0" value={speed} onChange={setSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
-                <span className="text-xs text-mute">{withKey(t('watch.keySubs'), 'C')}</span>
+                <span className="text-xs text-mute">{withKey(t('watch.keySubs'), key('subs'))}</span>
                 <Seg size="sm" className="w-full [&>button]:flex-1" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey) }))} />
               </div>
             </Menu>

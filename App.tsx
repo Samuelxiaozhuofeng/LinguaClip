@@ -25,7 +25,7 @@ import { fileNameFromPath, isAudioRecord, pathExists, pickVideoPath, videoSrcFro
 import { parseSRT } from './utils/srtParser';
 import { t, useLang } from './utils/i18n';
 import { markInterruptedJobs, startImportListener } from './utils/importJob';
-import { matches } from './utils/shortcuts';
+import { isDefault, loose, matches } from './utils/shortcuts';
 import { getLoop, setLoopOn, useLoop } from './utils/loop';
 import { countLine } from './utils/today';
 import { deleteCards, keepOrphans, orphanCards } from './utils/review';
@@ -398,16 +398,16 @@ export default function App() {
   const blurStepPaused = learningMode === LearningMode.BLUR && blurPlaybackMode === BlurPlaybackMode.SENTENCE_BY_SENTENCE && (!isPlaying || loopOn); // a looping line never stops by itself
 
   const keyboardShortcuts = useMemo(() => ([
-    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'replay'), handler: () => replayCurrent() },
-    { code: 'Space', shiftKey: false, preventDefault: true, allowInEditable: false, condition: () => inPractice, handler: () => togglePlayOrStep() },
-    { code: 'Enter', preventDefault: true, allowInEditable: false, condition: () => inPractice && (mode === PracticeMode.FEEDBACK || blurStepPaused), handler: () => handleContinue() },
-    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'loop'), handler: () => toggleLoopRef.current() },
-    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'prev'), handler: () => handleSkip('prev') },
-    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'next'), handler: () => handleSkip('next') },
-    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'skipLine'), handler: () => handleSkip('next') },
-    { condition: (e: KeyboardEvent) => inPractice && matches(e, 'anki'), handler: (e: KeyboardEvent) => handleAddToAnkiShortcut(e) },
+    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'dict.replay'), handler: () => replayCurrent() },
+    { preventDefault: true, allowInEditable: false, condition: (e: KeyboardEvent) => inPractice && (matches(e, 'dict.play') || (isDefault('dict.play') && e.code === 'Space' && !e.shiftKey)), handler: () => togglePlayOrStep() },
+    { preventDefault: true, allowInEditable: false, condition: (e: KeyboardEvent) => inPractice && (mode === PracticeMode.FEEDBACK || blurStepPaused) && loose(e, 'dict.continue', 'dictOut'), handler: () => handleContinue() },
+    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'dict.loop'), handler: () => toggleLoopRef.current() },
+    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'dict.prev'), handler: () => handleSkip('prev') },
+    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'dict.next'), handler: () => handleSkip('next') },
+    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'dict.skipLine'), handler: () => handleSkip('next') },
+    { condition: (e: KeyboardEvent) => inPractice && matches(e, 'dict.anki'), handler: (e: KeyboardEvent) => handleAddToAnkiShortcut(e) },
     // In a blank DictationLine handles these (from / just that word); anywhere else there's no current word, so replay the line.
-    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && (matches(e, 'playFrom') || matches(e, 'playWord')), handler: () => replayCurrent() },
+    { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && (matches(e, 'dict.playFrom') || matches(e, 'dict.playWord')), handler: () => replayCurrent() },
   ]), [inPractice, mode, blurStepPaused, replayCurrent, togglePlayOrStep, handleContinue, handleSkip, handleAddToAnkiShortcut]);
 
   useKeyboardShortcuts(keyboardShortcuts);

@@ -24,7 +24,7 @@ import { getClozeJob, prepareCloze, subscribeCloze } from '../utils/clozePrep';
 import { hasKana, jaReady, useJaVersion } from '../utils/japanese';
 import { jaCheckOn, prepareSegments, settleSplits } from '../utils/jaSegments';
 import { IS_WINDOWS } from '../utils/platform';
-import { matches, formatCombo, useShortcuts } from '../utils/shortcuts';
+import { loose, matches, formatCombo, useShortcuts } from '../utils/shortcuts';
 import { usePracticeClock } from '../utils/today';
 import { addLine, addWord, clearMastered, getAllCards, hasAudio, lineCardId, Reason, ReviewCard } from '../utils/review';
 import ReviewSession from './ReviewSession';
@@ -177,7 +177,7 @@ const Studio: React.FC = () => {
   useEffect(() => {
     if (!bdActive?.reviewing) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Enter' || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (!loose(e, 'dict.continue', 'dictOut') || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       e.preventDefault();
       bdNext();
     };
@@ -193,7 +193,7 @@ const Studio: React.FC = () => {
   useEffect(() => {
     if (isBlur || mode !== PracticeMode.INPUT || bdActive) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!matches(e, 'breakdown')) return;
+      if (!matches(e, 'dict.breakdown')) return;
       e.preventDefault();
       if (bdBlocked) setBdHint(bdBlocked); else startBreakdown();
     };
@@ -228,7 +228,8 @@ const Studio: React.FC = () => {
   // Esc closes whichever panel is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.isComposing || e.keyCode === 229) return;
+      if (!loose(e, 'dict.close') || e.isComposing || e.keyCode === 229) return;
+      if (showSavedList || def.word) e.preventDefault();
       if (showSavedList) actions.onToggleSavedList(false);
       else if (def.word) closeDef();
     };
@@ -244,7 +245,7 @@ const Studio: React.FC = () => {
   ];
   if (!isBlur && mode === PracticeMode.INPUT && !bdActive) {
     menuItems.push({
-      label: <><Scissors size={15} /> {bd.state.status === 'loading' ? t('studio.breakdownLoading') : t('studio.breakdown')}<span className="ml-auto pl-3 text-mute">{formatCombo(combos.breakdown)}</span></>,
+      label: <><Scissors size={15} /> {bd.state.status === 'loading' ? t('studio.breakdownLoading') : t('studio.breakdown')}<span className="ml-auto pl-3 text-mute">{formatCombo(combos['dict.breakdown'])}</span></>,
       onClick: startBreakdown,
       disabled: !hasClozeAi || bd.tooShort || bd.state.status === 'loading',
       title: !hasClozeAi ? t('studio.breakdownNeedKey') : bd.tooShort ? t('studio.breakdownTooShort') : t('studio.breakdownTitle'),

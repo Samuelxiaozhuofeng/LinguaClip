@@ -3,7 +3,7 @@ import { Play, Pause, SkipBack, SkipForward, RotateCcw, Repeat, Bookmark, PlusCi
 import { usePracticeContext } from '../hooks/usePracticeContext';
 import { Btn, Menu, MenuItem, Seg } from './ui';
 import { useT } from '../utils/i18n';
-import { formatCombo, useShortcuts, ActionId } from '../utils/shortcuts';
+import { formatCombo, useShortcuts } from '../utils/shortcuts';
 import { useLoop, setLoopTimes, LOOP_TIMES } from '../utils/loop';
 import { LearningMode, BlurPlaybackMode } from '../types';
 
@@ -35,7 +35,7 @@ const Transport: React.FC<{ menuItems: MenuItem[]; menuPanel?: React.ReactNode; 
   };
   const af = ankiFace();
   const combos = useShortcuts();
-  const withKey = (label: string, id: ActionId) => `${label} (${formatCombo(combos[id])})`;
+  const withKey = (label: string, id: string) => `${label} (${formatCombo(combos[`dict.${id}`])})`;
   const items: MenuItem[] = [...menuItems, { label: <><Keyboard size={15} /> {pinned ? t('keys.hide') : t('keys.show')}</>, onClick: onTogglePinned }];
 
   return (

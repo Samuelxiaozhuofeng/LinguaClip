@@ -14,7 +14,7 @@ import { IS_WINDOWS } from '../utils/platform';
 import DictationLine from './DictationLine';
 import DefinitionPanel from './DefinitionPanel';
 import { WordFace, GradeBar } from './WordReview';
-import { matches, formatCombo, getCombo } from '../utils/shortcuts';
+import { isDefault, loose, matches, formatCombo, getCombo, keyLabel } from '../utils/shortcuts';
 import { useLoop, getLoop, setLoopOn, loopMore, holdPageLoop, LOOP_GAP_MS } from '../utils/loop';
 import { useLookup, aroundOf } from '../hooks/useLookup';
 import { getVideoFromDB } from '../utils/fileSystemAccess';
@@ -153,7 +153,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
     if (on && loopable.current && clip.ref.current?.paused) playCard();
   };
   const loopBtn = (
-    <Btn square flat onClick={toggleLoop} aria-pressed={loop.on} title={`${t(loop.on ? 'transport.loopOn' : 'transport.loopOff')} (${formatCombo(getCombo('loop'))})`}
+    <Btn square flat onClick={toggleLoop} aria-pressed={loop.on} title={`${t(loop.on ? 'transport.loopOn' : 'transport.loopOff')} (${formatCombo(getCombo('review.loop'))})`}
       className={`relative ${loop.on ? '!text-accent' : '!text-ink'}`}>
       <Repeat size={18} />
       {loop.on && loop.times > 0 && <span className="absolute right-0.5 bottom-0.5 text-[10px] font-semibold leading-none">{loop.times}</span>}
@@ -310,19 +310,21 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
       const inside = rootRef.current?.contains(e.target as Node);
       const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
       const k = keys.current;
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (k.defOpen) k.closeDef(); else k.onClose(); return; }
-      const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
-      if (!k.done && !k.defOpen && matches(e, 'loop')) { e.preventDefault(); e.stopPropagation(); k.toggleLoop(); return; }
+      // While typing in a sentence card's blank only ⌘ keys and Esc count here.
+      const on = (id: string) => matches(e, id) && !(typing && !getCombo(id).mod && e.code !== 'Escape');
+      if (on('review.close') || (loose(e, 'review.close', typing ? 'reviewBlank' : 'reviewOut') && e.code === 'Escape')) { e.preventDefault(); e.stopPropagation(); if (k.defOpen) k.closeDef(); else k.onClose(); return; }
+      if (!k.done && !k.defOpen && on('review.loop')) { e.preventDefault(); e.stopPropagation(); k.toggleLoop(); return; }
       if (!typing && !k.done && !k.defOpen) {
         const hit = (run: () => void) => { e.preventDefault(); e.stopPropagation(); run(); };
-        if (k.front0 && plain && e.code === 'Space') return hit(k.turn);
-        // ⌘⌫ (Ctrl+Backspace on Windows) deletes the card; inside a blank it stays an editing key.
-        if (k.canRemove && e.key === 'Backspace' && (IS_WINDOWS ? e.ctrlKey : e.metaKey) && !e.altKey && !e.shiftKey) return hit(k.remove);
-        if (k.grading && plain && /^[1-4]$/.test(e.key)) return hit(() => k.grade(+e.key as Grade));
-        if (k.grading && plain && e.key === '5' && k.canMaster) return hit(k.master);
-        if (k.grading && plain && e.key === 'Enter' && k.suggest) return hit(() => k.grade(k.suggest!));
-        if (k.grading && matches(e, 'replay')) return hit(() => k.playCard());
-        if (k.grading && k.isWord && matches(e, 'playWord')) return hit(k.playWord); // a sentence card's ⌘K stays the blank's
+        if (k.front0 && on('review.flip')) return hit(k.turn);
+        // ⌘⌫ (Ctrl+Backspace on Windows) by default; inside a blank it stays an editing key.
+        if (k.canRemove && on('review.remove') && (!isDefault('review.remove') || (IS_WINDOWS ? e.ctrlKey : e.metaKey))) return hit(k.remove);
+        const g = ([1, 2, 3, 4] as Grade[]).find(n => on(`review.g${n}`));
+        if (k.grading && g) return hit(() => k.grade(g));
+        if (k.grading && on('review.master') && k.canMaster) return hit(k.master);
+        if (k.grading && on('review.suggest') && k.suggest) return hit(() => k.grade(k.suggest!));
+        if (k.grading && on('review.replay')) return hit(() => k.playCard());
+        if (k.grading && k.isWord && on('review.playWord')) return hit(k.playWord); // a sentence card's ⌘K stays the blank's
       }
       if (!inside) e.stopPropagation();
     };
@@ -345,7 +347,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
           {!done && (
             <div className="flex items-center gap-2">
               {canRemove && (
-                <button type="button" onClick={e => { e.currentTarget.blur(); remove(); }} title={t('review.deleteTitle', { key: IS_WINDOWS ? 'Ctrl+Backspace' : '⌘⌫' })} aria-label={t('review.delete')}
+                <button type="button" onClick={e => { e.currentTarget.blur(); remove(); }} title={t('review.deleteTitle', { key: keyLabel('review.remove') })} aria-label={t('review.delete')}
                   className="press h-[42px] px-3.5 rounded-full bg-page border border-line text-ink flex items-center gap-1.5"><Trash2 size={15} /> {t('review.delete')}</button>
               )}
               <span className="h-[42px] px-4 rounded-full bg-page border border-line text-ink flex items-center tabular-nums">{t('session.progress', { current: idx + 1, total: queue.length })}</span>
@@ -398,6 +400,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
                   mode={mode}
                   splitVersion={splitVersion}
                   hideNext
+                  inReview
                   onComplete={complete}
                   onReplay={replay}
                   timedWords={timedWords}
@@ -424,7 +427,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
             {canMaster && (
               <button type="button" onClick={e => { e.currentTarget.blur(); master(); }} title={t('review.masteredTitle')}
                 className="press w-[132px] h-[58px] rounded-2xl border border-line bg-page flex flex-col items-center justify-center gap-0.5">
-                <span className="flex items-center gap-1.5"><span className="text-[11px] text-mute">5</span><span className="text-[15px] font-semibold">{t('review.mastered')}</span></span>
+                <span className="flex items-center gap-1.5"><span className="text-[11px] text-mute">{keyLabel('review.master')}</span><span className="text-[15px] font-semibold">{t('review.mastered')}</span></span>
                 <Check size={14} className="text-mute" />
               </button>
             )}

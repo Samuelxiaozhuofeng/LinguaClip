@@ -16,7 +16,7 @@ import { settleSplits } from '../utils/jaSegments';
 import { videoSrcFromPath } from '../utils/desktop';
 import { getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos, type WatchSubs } from '../utils/storage';
 import { LOOP_GAP_MS, loopMore, setLoopOn, useLoop } from '../utils/loop';
-import { matches } from '../utils/shortcuts';
+import { lineKey, loose, matches } from '../utils/shortcuts';
 import { IS_WINDOWS } from '../utils/platform';
 import { useT, type DictKey } from '../utils/i18n';
 import { useListenText } from './useListenText';
@@ -354,29 +354,28 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   keys.current = (e: KeyboardEvent) => {
     if (e.isComposing || e.keyCode === 229 || drill || pickerShow) return;
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-    if (cards.blocking.current) { if (e.key === 'Escape' && cards.intro) cards.closeIntro(); return; }
-    if (e.key === 'Escape') { if (def.word !== null) closeLookup(); else if (summary) setSummary(null); else if (passCard) setPassCard(null); return; }
+    if (cards.blocking.current) { if (loose(e, 'watch.close') && cards.intro) { e.preventDefault(); cards.closeIntro(); } return; }
+    if (loose(e, 'watch.close')) { if (def.word !== null || summary || passCard) e.preventDefault(); if (def.word !== null) closeLookup(); else if (summary) setSummary(null); else if (passCard) setPassCard(null); return; }
     if (summary) return;
     if (passCard && def.word === null) {
-      if ((e.code === 'Space' || e.code === 'Enter') && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); cardMain(); }
+      if ((loose(e, 'watch.play', 'alone') || loose(e, 'watch.drillNext', 'alone')) && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); cardMain(); }
       return;
     }
-    const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey;
-    const mod = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
     let act: (() => void) | null = null;
-    if (inDrill && (((plain || mod) && e.code === 'ArrowRight') || (plain && e.code === 'Enter' && !(e.target instanceof HTMLButtonElement)) || matches(e, 'next'))) act = () => { if (def.word === null) drillNext(); };
-    else if (inDrill && plain && (e.code === 'KeyV' || e.code === 'KeyC')) act = drillShow;
-    else if (matches(e, 'replay')) act = replay;
-    else if (matches(e, 'loop')) act = () => setLoopOn(!loop.on);
-    else if (e.code === 'Space' && plain) act = togglePlay;
-    // ← / → change lines, like the watch page (⌘ too); ±5 s is the bar's buttons.
-    else if (((plain || mod) && e.code === 'ArrowLeft') || matches(e, 'prev')) act = prev;
-    else if (((plain || mod) && e.code === 'ArrowRight') || matches(e, 'next')) act = next;
-    else if (plain && e.code === 'KeyS') act = toggleMark;
-    else if (plain && e.code === 'KeyA') act = markPrev;
-    else if (plain && e.code === 'KeyP') act = () => { setAutoPause(!autoPause); saveWatchPrefs({ autoPause: !autoPause }); };
-    else if (plain && e.code === 'KeyC') act = () => changeMode(MODES[(MODES.indexOf(effMode) + 1) % MODES.length]);
-    else if (plain && e.code === 'KeyV') act = togglePeek;
+    // In a drill, next = its own key or the next-line key; show = its own key or the subtitles key.
+    if (inDrill && ((matches(e, 'watch.drillNext') && !(e.target instanceof HTMLButtonElement)) || lineKey(e, 'next'))) act = () => { if (def.word === null) drillNext(); };
+    else if (inDrill && (matches(e, 'watch.drillShow') || matches(e, 'watch.subs'))) act = drillShow;
+    else if (matches(e, 'watch.replay')) act = replay;
+    else if (matches(e, 'watch.loop')) act = () => setLoopOn(!loop.on);
+    else if (matches(e, 'watch.play')) act = togglePlay;
+    // Line keys, like the watch page; ±5 s is the bar's buttons.
+    else if (lineKey(e, 'prev')) act = prev;
+    else if (lineKey(e, 'next')) act = next;
+    else if (matches(e, 'watch.save')) act = toggleMark;
+    else if (matches(e, 'watch.markPrev')) act = markPrev;
+    else if (matches(e, 'watch.autoPause')) act = () => { setAutoPause(!autoPause); saveWatchPrefs({ autoPause: !autoPause }); };
+    else if (matches(e, 'watch.subs')) act = () => changeMode(MODES[(MODES.indexOf(effMode) + 1) % MODES.length]);
+    else if (matches(e, 'watch.peek')) act = togglePeek;
     if (!act) return;
     e.preventDefault();
     act();

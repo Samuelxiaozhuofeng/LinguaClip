@@ -8,7 +8,7 @@ import { ArrowRight } from 'lucide-react';
 import { Btn } from './ui';
 import { useT } from '../utils/i18n';
 import { usePhraseDrag } from '../hooks/usePhraseDrag';
-import { matches } from '../utils/shortcuts';
+import { getCombo, isDefault, loose, matches, sameCombo } from '../utils/shortcuts';
 import { IS_WINDOWS } from '../utils/platform';
 import { useJaVersion } from '../utils/japanese';
 import { wordSpans } from '../utils/wordTimes';
@@ -36,6 +36,7 @@ interface Props {
   // and these boxes always count the same split). Omitted: re-split until typed in.
   splitVersion?: number;
   timedWords?: Word[]; // the line's spoken words, times as 0..1 of the line (wordsInLine)
+  inReview?: boolean; // a review sentence card: other keys live here are review's (docs/shortcuts.md)
 }
 
 // How far into the line word i starts, by letters: a rough stand-in for time when
@@ -54,7 +55,7 @@ export const slotEm = (word: string) =>
 // Typing and the answer share one setting, so submitting changes colours, not positions.
 export const LINE = 'flex flex-wrap justify-center items-baseline gap-x-[0.3em] font-serif text-[38px] leading-[54px]';
 
-const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay, onLookup, onTogglePlay, blanks, nextLabel, hideNext, onResult, extra, splitVersion, timedWords }) => {
+const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay, onLookup, onTogglePlay, blanks, nextLabel, hideNext, onResult, extra, splitVersion, timedWords, inReview }) => {
   const t = useT();
   // A Japanese line is re-split when its dictionary or AI cut points arrive, but
   // never under the user's fingers: once something is typed the split holds.
@@ -177,31 +178,37 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     // Space picks a kanji and Enter commits it inside an input method; those keys
     // are not ours. Safari reports the committing Enter with keyCode 229.
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-    if (matches(e, 'reveal')) { e.preventDefault(); e.stopPropagation(); report(false); onComplete(false); return; }
-    if (matches(e, 'replay')) { e.preventDefault(); e.stopPropagation(); clearReplay(); onReplay(false); return; }
-    if (matches(e, 'playFrom')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, spanOf(i)[0]); return; }
-    if (matches(e, 'playWord')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, ...spanOf(i)); return; }
-    if (matches(e, 'peek')) { e.preventDefault(); showPeek(i); return; }
-    const spaceToggles = e.code === 'Space' && !e.shiftKey && !e.metaKey && !e.ctrlKey && (e.altKey ? !IS_WINDOWS : inputs[i] === '');
-    if (onTogglePlay && spaceToggles && !e.altKey && autoNext.current === i) { e.preventDefault(); autoNext.current = -1; return; }
-    if (onTogglePlay && (spaceToggles || matches(e, 'playTyping'))) {
+    if (matches(e, 'blank.reveal')) { e.preventDefault(); e.stopPropagation(); report(false); onComplete(false); return; }
+    if (matches(e, 'dict.replay')) { e.preventDefault(); e.stopPropagation(); clearReplay(); onReplay(false); return; }
+    if (matches(e, 'dict.playFrom')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, spanOf(i)[0]); return; }
+    if (matches(e, 'dict.playWord')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, ...spanOf(i)); return; }
+    if (matches(e, 'blank.peek')) { e.preventDefault(); showPeek(i); return; }
+    // Play/pause and next-blank on one key (Space by default): empty blank = play, text = next.
+    // Mac Option+Space plays too while play/pause is still Space.
+    const shared = sameCombo(getCombo('dict.play'), getCombo('blank.jump'));
+    const altSpace = !IS_WINDOWS && e.altKey && e.code === 'Space' && !e.shiftKey && !e.metaKey && !e.ctrlKey && isDefault('dict.play');
+    const playKey = altSpace || (matches(e, 'dict.play') && (!shared || inputs[i] === ''));
+    if (onTogglePlay && shared && inputs[i] === '' && matches(e, 'blank.jump') && autoNext.current === i) { e.preventDefault(); autoNext.current = -1; return; }
+    if (onTogglePlay && (playKey || matches(e, 'dict.playTyping'))) {
       e.preventDefault(); e.stopPropagation(); onTogglePlay(); return;
     }
-    if (e.key === ' ' || e.key === 'Enter') {
+    // The editing keys keep their cursor rule; any other key bound here just acts.
+    const at = (code: string, ok: boolean) => e.code !== code || ok;
+    const caret = e.currentTarget.selectionStart;
+    const zone = inReview ? 'reviewBlank' : 'dictBlank';
+    if (loose(e, 'blank.jump', zone) || loose(e, 'blank.submit', zone)) {
       e.preventDefault();
       autoNext.current = -1;
       const nxt = stepBlank(i, 1);
       if (nxt >= 0) refs.current[nxt]?.focus(); else submit();
-    } else if (e.key === 'Backspace' && inputs[i] === '') {
+    } else if ((loose(e, 'blank.back', zone) && at('Backspace', inputs[i] === '')) || (loose(e, 'blank.backLeft', zone) && at('ArrowLeft', caret === 0))) {
       const prev = stepBlank(i, -1);
       if (prev >= 0) { e.preventDefault(); refs.current[prev]?.focus(); }
-    } else if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) {
-      const prev = stepBlank(i, -1);
-      if (prev >= 0) { e.preventDefault(); refs.current[prev]?.focus(); }
-    } else if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) {
+    } else if (loose(e, 'blank.skip', zone) && at('ArrowRight', caret === e.currentTarget.value.length)) {
       const nxt = stepBlank(i, 1);
       if (nxt >= 0) { e.preventDefault(); refs.current[nxt]?.focus(); }
     }
+    if (e.key === 'Enter') e.preventDefault(); // the form never hands the line in by itself (Enter may be rebound)
   };
 
   const paste = (e: React.ClipboardEvent) => {

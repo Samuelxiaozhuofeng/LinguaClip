@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { en } from './i18n.en';
 import { zh } from './i18n.zh';
 import { IS_WINDOWS } from './platform';
+import { keyLabel, useShortcuts } from './shortcuts';
 
 // Language state + translation lookup. Works both outside React (event handlers,
 // hooks/useAnkiIntegration.ts, utils/ai.ts call `t()` directly) and inside it
@@ -56,7 +57,8 @@ const forPlatform = (s: string) => (IS_WINDOWS
   : s);
 
 export function t(key: DictKey, vars?: Record<string, string | number>): string {
-  const template = forPlatform(dicts[currentLang][key] ?? dicts.en[key] ?? String(key));
+  // `{key:watch.save}` = that action's key as the user has set it (docs/shortcuts.md).
+  const template = forPlatform(dicts[currentLang][key] ?? dicts.en[key] ?? String(key)).replace(/\{key:([\w.]+)\}/g, (_, id) => keyLabel(id));
   if (!vars) return template;
   return template.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? String(vars[name]) : match));
 }
@@ -69,5 +71,6 @@ export function useLang(): Lang {
 // Subscribes the calling component to language changes; returns the translate function.
 export function useT(): typeof t {
   useLang();
+  useShortcuts(); // copy that names a key follows a rebind
   return t;
 }

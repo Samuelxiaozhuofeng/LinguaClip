@@ -8,7 +8,7 @@ import { furigana, hasKanji, readingOf, useJaVersion } from '../utils/japanese';
 import { useT } from '../utils/i18n';
 import { usePhraseDrag } from '../hooks/usePhraseDrag';
 import { clean } from '../utils/cleanHtml';
-import { formatCombo, getCombo } from '../utils/shortcuts';
+import { formatCombo, getCombo, keyLabel } from '../utils/shortcuts';
 
 // A word card's two faces (think first, then turn it) and the four FSRS buttons
 // every review card ends on.
@@ -74,7 +74,7 @@ export const WordFace: React.FC<{ card: ReviewCard; front: WordFront; turned: bo
           <RotateCcw size={14} /> {t('review.replay')}
         </button>
         {/* Just the word (docs/word-audio.md); greyed when the word isn't found in the line. */}
-        <button type="button" disabled={!onPlayWord} onClick={e => { e.currentTarget.blur(); onPlayWord?.(); }} title={`${t('review.playWord')} (${formatCombo(getCombo('playWord'))})`}
+        <button type="button" disabled={!onPlayWord} onClick={e => { e.currentTarget.blur(); onPlayWord?.(); }} title={`${t('review.playWord')} (${formatCombo(getCombo('review.playWord'))})`}
           className="press shrink-0 h-9 px-3.5 rounded-full bg-page border border-line text-[13px] flex items-center gap-1.5 disabled:opacity-40">
           <Volume2 size={14} /> {t('review.playWord')}
         </button>
@@ -103,7 +103,7 @@ export const GradeBar: React.FC<{ due: Record<Grade, number> | null; now: number
         <button key={g} type="button" onClick={e => { e.currentTarget.blur(); onGrade(g); }}
           className={`press w-[132px] h-[58px] rounded-2xl flex flex-col items-center justify-center gap-0.5 ${g === suggest ? 'border-2 border-accent bg-accent-soft' : 'border border-line bg-page'}`}>
           <span className="flex items-center gap-1.5">
-            <span className="text-[11px] text-mute">{g === suggest ? `${g} · ↵` : g}</span>
+            <span className="text-[11px] text-mute">{g === suggest ? `${keyLabel(`review.g${g}`)} · ${keyLabel('review.suggest')}` : keyLabel(`review.g${g}`)}</span>
             <span className={`text-[15px] font-semibold ${g === Rating.Again ? 'text-accent' : 'text-ink'}`}>{t(`grade.${g}` as 'grade.1')}</span>
           </span>
           <span className="text-xs text-mute">{when(g)}</span>
