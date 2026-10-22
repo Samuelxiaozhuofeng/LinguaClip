@@ -11,6 +11,7 @@
  */
 import { createEmptyCard, fsrs, Rating, State, type Card, type Grade } from 'ts-fsrs';
 import { parseSRT } from './srtParser';
+import { readDeferred, deferredAt, type Deferred } from './reviewDefer';
 import { getAllVideosFromDB, getVideoFromDB } from './fileSystemAccess';
 import type { SavedLine } from '../types';
 
@@ -100,8 +101,12 @@ export const previewDue = (card: ReviewCard, now: number): Record<Grade, number>
 export const inReview = (c: ReviewCard) => hasAudio(c) && !c.mastered;
 export const isDue = (c: ReviewCard, now = Date.now()) => inReview(c) && c.fsrs.due <= now;
 
-export const dueQueue = (cards: ReviewCard[], deck: Deck, now = Date.now(), limit = SESSION_SIZE) =>
-  cards.filter(c => c.deck === deck && isDue(c, now)).sort((a, b) => a.fsrs.due - b.fsrs.due).slice(0, limit);
+// 没打分就离开过的卡排在后面，按推后时间先后；其余照旧按 due（docs/review.md「没打分的卡排到后面」）。
+export const dueQueue = (cards: ReviewCard[], deck: Deck, now = Date.now(), limit = SESSION_SIZE, deferred: Deferred = readDeferred()) =>
+  cards.filter(c => c.deck === deck && isDue(c, now))
+    .map(c => ({ c, d: deferredAt(deferred, c.id, c.fsrs.last_review) }))
+    .sort((a, b) => a.d === undefined ? (b.d === undefined ? a.c.fsrs.due - b.c.fsrs.due : -1) : b.d === undefined ? 1 : a.d - b.d)
+    .slice(0, limit).map(x => x.c);
 
 export const isNew = (c: ReviewCard) => c.fsrs.state === State.New;
 

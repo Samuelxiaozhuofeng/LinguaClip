@@ -77,6 +77,27 @@ assert.deepEqual(q.slice(0, 2).map(x => x.id), ['a', 'b']);
 assert.ok(!q.some(x => x.id === 'future' || x.id === 'w' || x.id === 'mute'));
 assert.deepEqual(R.deckCounts(cards, now), { line: { due: 22, total: 24, remembered: 0 }, word: { due: 1, total: 1, remembered: 0 } });
 
+// Left without a grade (skipped / quit): next round puts it after the other due cards, earliest-left first (docs/review.md).
+const many = Array.from({ length: 18 }, (_, i) => mk(`d${i}`, 'line', now - 100 + i));
+const oldOrder = many.map(x => x.id).slice(0, R.SESSION_SIZE);
+assert.deepEqual(R.dueQueue(many, 'line', now, R.SESSION_SIZE, {}).map(x => x.id), oldOrder, 'empty table: order unchanged');
+const later = R.dueQueue(many, 'line', now, many.length, { d0: now - 50, d1: now - 60, d2: now - 40 }).map(x => x.id);
+assert.deepEqual(later.slice(0, 15), many.slice(3).map(x => x.id), 'deferred cards should come after the rest');
+assert.deepEqual(later.slice(15), ['d1', 'd0', 'd2']);
+assert.ok(!R.dueQueue(many, 'line', now, R.SESSION_SIZE, { d0: 1, d1: 2, d2: 3 }).some(x => ['d0', 'd1', 'd2'].includes(x.id)));
+// Graded after it was left: the old entry no longer counts.
+const graded = many.map(x => x.id === 'd0' ? { ...x, fsrs: { ...x.fsrs, last_review: now - 10 } } : x);
+assert.equal(R.dueQueue(graded, 'line', now, R.SESSION_SIZE, { d0: now - 50 })[0].id, 'd0');
+// Default table from localStorage: none (node), broken JSON, or a real entry.
+assert.deepEqual(R.dueQueue(many, 'line', now).map(x => x.id), oldOrder);
+const store = new Map();
+globalThis.localStorage = { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+store.set('linguaclip_review_deferred', '{bad');
+assert.deepEqual(R.dueQueue(many, 'line', now).map(x => x.id), oldOrder, 'broken JSON: old order');
+store.set('linguaclip_review_deferred', JSON.stringify({ d0: now }));
+assert.equal(R.dueQueue(many, 'line', now)[0].id, 'd1');
+delete globalThis.localStorage;
+
 // Ids: one sentence card per video line; word cards hang off it.
 assert.equal(R.lineCardId('v1', 12.3), 'v1|12.30');
 assert.equal(R.wordCardId('v1', 12.3, 'Friend'), 'v1|12.30|w|friend');

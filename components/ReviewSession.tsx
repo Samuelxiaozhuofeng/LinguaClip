@@ -4,6 +4,7 @@ import { clipOf, useClip } from '../hooks/useClip';
 import { Rating, type Grade } from 'ts-fsrs';
 import { ReviewCard, recordOutcome, repointVideo, getAllCards, dueQueue, addWord, gradeOf, previewDue, schedule, setMastered, removeCard, restoreCard, type Removed } from '../utils/review';
 import { patchVideoRecord } from '../utils/videoStorage';
+import { deferCard } from '../utils/reviewDefer';
 import { getWordFront, getMasteredBtn, getWordVoice } from '../utils/storage';
 import { wordVoiceUrl } from '../utils/wordVoice';
 import { videoSrcFromPath, pickVideoPath } from '../utils/desktop';
@@ -184,6 +185,15 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
     });
   };
 
+  // 没打分就离开（跳过 / 退出时正显示的那张）：下次排到后面；本轮重来过的不算。
+  const deferNow = () => { if (card && !done && !repeats.current.has(card.id)) deferCard(card.id); };
+  const skip = () => { deferNow(); next(); };
+  const quit = () => { deferNow(); onClose(); };
+  // 别的路径卸载（如键盘切到底层导航）也算退出；延到下一拍，StrictMode 的假卸载随即重挂会取消它。
+  const leaving = useRef(deferNow);
+  leaving.current = deferNow;
+  const unmountTimer = useRef(0);
+  useEffect(() => { window.clearTimeout(unmountTimer.current); return () => { unmountTimer.current = window.setTimeout(() => leaving.current()); }; }, []);
   const next = () => { clip.stop(); setMode(PracticeMode.INPUT); setTurned(false); setSuggest(undefined); setAt(0); setIdx(i => i + 1); };
 
   // Find this card's file, then play it once.
@@ -302,8 +312,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
   const defOpen = def.word !== null;
   const front0 = isWord && !turned && !!path && splitsReady && !done;
   const canRemove = !!card && !done;
-  const keys = useRef({ onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord });
-  keys.current = { onClose, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord };
+  const keys = useRef({ quit, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord });
+  keys.current = { quit, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return; // Esc / Enter inside a Japanese input method
@@ -312,7 +322,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
       const k = keys.current;
       // While typing in a sentence card's blank only ⌘ keys and Esc count here.
       const on = (id: string) => matches(e, id) && !(typing && !getCombo(id).mod && e.code !== 'Escape');
-      if (on('review.close') || (loose(e, 'review.close', typing ? 'reviewBlank' : 'reviewOut') && e.code === 'Escape')) { e.preventDefault(); e.stopPropagation(); if (k.defOpen) k.closeDef(); else k.onClose(); return; }
+      if (on('review.close') || (loose(e, 'review.close', typing ? 'reviewBlank' : 'reviewOut') && e.code === 'Escape')) { e.preventDefault(); e.stopPropagation(); if (k.defOpen) k.closeDef(); else k.quit(); return; }
       if (!k.done && !k.defOpen && on('review.loop')) { e.preventDefault(); e.stopPropagation(); k.toggleLoop(); return; }
       if (!typing && !k.done && !k.defOpen) {
         const hit = (run: () => void) => { e.preventDefault(); e.stopPropagation(); run(); };
@@ -343,7 +353,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
         {!hidden && source?.image && <img src={videoSrcFromPath(source.image)} alt="" className="absolute inset-0 w-full h-full object-contain" />}
         {front0 && <p className="absolute text-[13px] text-mute">{t('review.hidden')}</p>}
         <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 lg:pr-6 flex items-center justify-between gap-3 text-[13px]`} data-tauri-drag-region="deep">
-          <button type="button" onClick={onClose} className="press h-[42px] pl-3.5 pr-4 rounded-full bg-page border border-line text-ink flex items-center gap-1.5"><X size={15} /> {t('session.quit')}</button>
+          <button type="button" onClick={quit} className="press h-[42px] pl-3.5 pr-4 rounded-full bg-page border border-line text-ink flex items-center gap-1.5"><X size={15} /> {t('session.quit')}</button>
           {!done && (
             <div className="flex items-center gap-2">
               {canRemove && (
@@ -387,7 +397,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
                 <p className="text-sm text-mute leading-relaxed">{t('session.missingBody', { name: card!.videoName })}</p>
                 <div className="pt-3 flex gap-2">
                   <Btn tone="accent" onClick={() => { relink().catch(console.error); }}>{t('session.relink')}</Btn>
-                  <Btn onClick={next}>{t('session.skip')}</Btn>
+                  <Btn onClick={skip}>{t('session.skip')}</Btn>
                 </div>
               </div>
             ) : path && card && splitsReady ? (
@@ -418,7 +428,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
               className="press h-[52px] px-7 rounded-full bg-accent text-white text-[15px] font-semibold flex items-center gap-2.5">
               {t('review.show')}<span className="text-xs font-medium px-2 py-0.5 rounded-md bg-white/20">{t('review.space')}</span>
             </button>
-            <Btn size="sm" flat onClick={next}>{t('session.skip')}</Btn>
+            <Btn size="sm" flat onClick={skip}>{t('session.skip')}</Btn>
           </footer>
         ) : grading && at ? (
           <footer className="shrink-0 h-[96px] flex items-center justify-center gap-3 text-ink">
@@ -438,7 +448,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
             {!isWord && loopBtn}
             <button type="button" onClick={e => { e.currentTarget.blur(); playCard(); }} aria-label={t('transport.playSpace')}
               className="press w-12 h-12 rounded-full bg-accent text-white flex items-center justify-center"><Play size={19} fill="currentColor" className="ml-0.5" /></button>
-            <Btn size="sm" flat onClick={next}>{t('session.skip')}</Btn>
+            <Btn size="sm" flat onClick={skip}>{t('session.skip')}</Btn>
           </footer>
         )}
       </section>
