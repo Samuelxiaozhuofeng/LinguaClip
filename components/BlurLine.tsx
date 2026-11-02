@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { tokenizeText, TokenType } from '../utils/textTokenizer';
 import { useT } from '../utils/i18n';
 import { useJaVersion } from '../utils/japanese';
 import { usePhraseDrag } from '../hooks/usePhraseDrag';
+import { usePracticeContext } from '../hooks/usePracticeContext';
+import { formatCombo, matches, useShortcuts } from '../utils/shortcuts';
 
 // A clicked word without its punctuation: what gets looked up.
 export const bareWord = (raw: string) => raw.replace(/[.,/#!$%^&*;:{}=\-_`~()?"'\u3000-\u303f\uff01-\uff0f\uff1a-\uff20]/g, '');
@@ -10,7 +12,8 @@ export const bareWord = (raw: string) => raw.replace(/[.,/#!$%^&*;:{}=\-_`~()?"'
 // Blur mode line: every word starts as a covered block. First click reveals it,
 // second click looks it up; dragging across words opens them all and looks the phrase up.
 // Lookup itself lives in Studio (DefinitionPanel).
-// onReveal fires once per line, on the first covered word opened.
+// onReveal fires once per line, on the first covered word opened (or the whole line by key).
+// dict.revealLine toggles the whole line: any word covered → all shown, all shown → all covered.
 const BlurLine: React.FC<{ text: string; onLookup: (word: string) => void; onReveal?: () => void }> = ({ text, onLookup, onReveal }) => {
   const t = useT();
   const jaVersion = useJaVersion();
@@ -18,11 +21,15 @@ const BlurLine: React.FC<{ text: string; onLookup: (word: string) => void; onRev
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
   const [picked, setPicked] = useState<number | null>(null);
 
+  const counted = useRef(false);
+  const countReveal = () => { if (!counted.current) { counted.current = true; onReveal?.(); } };
+
   useEffect(() => { setRevealed(new Set()); setPicked(null); }, [text, jaVersion]);
+  useEffect(() => { counted.current = false; }, [text]);
 
   const wordTok = useMemo(() => tokens.filter(tk => tk.type === TokenType.WORD).map(tk => tk.index), [tokens]);
   const { bind, inSel } = usePhraseDrag((a, b) => {
-    if (revealed.size === 0) onReveal?.();
+    countReveal();
     setRevealed(prev => { const n = new Set(prev); for (let k = a; k <= b; k++) n.add(k); return n; });
     setPicked(null);
     onLookup(tokens.slice(wordTok[a], wordTok[b] + 1).map(tk => tk.value).join(''));
@@ -33,7 +40,7 @@ const BlurLine: React.FC<{ text: string; onLookup: (word: string) => void; onRev
     const word = bareWord(raw);
     if (!word) return;
     if (!revealed.has(wordIdx)) {
-      if (revealed.size === 0) onReveal?.();
+      countReveal();
       setRevealed(prev => new Set(prev).add(wordIdx));
       setPicked(wordIdx);
       return;
@@ -41,6 +48,29 @@ const BlurLine: React.FC<{ text: string; onLookup: (word: string) => void; onRev
     setPicked(wordIdx);
     onLookup(word);
   };
+
+  // Same guard as the practice page's keys in App.tsx: not while composing, typing,
+  // recording an Anki clip or under the section / video done overlay. Review and
+  // dialogs on top stop the key before it gets here.
+  const { practice, anki } = usePracticeContext();
+  const combos = useShortcuts();
+  const keysOn = !practice.showSectionComplete && !practice.showComplete && anki.ankiStatus !== 'recording';
+  useEffect(() => {
+    if (!keysOn) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229 || !matches(e, 'dict.revealLine')) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      e.preventDefault();
+      setPicked(null);
+      if (revealed.size < wordTok.length) {
+        countReveal();
+        setRevealed(new Set(wordTok.map((_, i) => i)));
+      } else setRevealed(new Set());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [keysOn, revealed, wordTok, onReveal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   let wordIdx = 0;
   return (
@@ -56,7 +86,7 @@ const BlurLine: React.FC<{ text: string; onLookup: (word: string) => void; onRev
               type="button"
               {...bind(idx)}
               onClick={e => click(e, idx, tk.value)}
-              title={isRevealed ? t('common.lookup') : t('blur.reveal')}
+              title={isRevealed ? t('common.lookup') : combos['dict.revealLine'].code ? t('blur.revealKey', { key: formatCombo(combos['dict.revealLine']) }) : t('blur.reveal')}
               aria-label={isRevealed ? undefined : t('blur.hiddenWord')}
               className={`press inline-block align-baseline rounded-md px-1 ${
                 isRevealed || inSel(idx)

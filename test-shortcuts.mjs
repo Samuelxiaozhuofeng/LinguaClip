@@ -68,7 +68,7 @@ assert.equal(takenBy('watch.save', k('ArrowUp', true), defaults), 'watch.prev', 
 assert.equal(takenBy('watch.save', k('ArrowLeft', true), defaults), 'watch.prev', '⌘← too');
 assert.equal(takenBy('watch.save', k('ArrowUp', true), { ...defaults, 'watch.prev': k('KeyJ') }), null, 'hidden keys go once prev is changed');
 assert.equal(takenBy('watch.prev', k('ArrowLeft'), { ...defaults, 'watch.prev': k('KeyJ'), 'watch.save': k('ArrowUp', true) }), 'watch.save', 'back to ← brings ⌘↑ back: clash');
-assert.equal(takenBy('dict.prev', k('KeyD', true), { ...defaults, 'watch.save': k('KeyD', true) }), 'watch.save', 'dictation prev is a hidden watch key');
+assert.equal(takenBy('dict.prev', k('KeyI', true), { ...defaults, 'watch.save': k('KeyI', true) }), 'watch.save', 'dictation prev is a hidden watch key');
 assert.ok(!zonesShare('dict.play', 'blank.jump') && !zonesShare('watch.peek', 'watch.drillShow'), 'meant to share');
 
 // Reading back: unknown ids and keys a page can't take are dropped.
@@ -181,6 +181,16 @@ assert.ok(live.matches(ev('Digit1', '1'), 'review.g1'), 'QWERTY 1 grades');
 assert.ok(!live.matches(ev('Digit1', '!', { shiftKey: true }), 'review.g1'), 'QWERTY: ! is not a grade');
 live = await fresh({ 'dict.prev': k('Escape', false, true) });
 assert.ok(!live.loose(ev('Escape', 'Escape', { shiftKey: true }), 'watch.close') && live.lineKey(ev('Escape', 'Escape', { shiftKey: true }), 'prev'), 'hidden line key on ⇧Esc: watch close lets it go');
+// A new default on a key the user already gave another action: the user's key wins.
+live = await fresh({ 'dict.replay': k('KeyD', true) });
+assert.equal(live.getCombo('dict.replay').code, 'KeyD', 'user key kept');
+assert.equal(live.getCombo('dict.revealLine').code, '', 'new default yields: no key');
+assert.ok(live.matches(ev('KeyD', 'd', { metaKey: true }), 'dict.replay') && !live.matches(ev('KeyD', 'd', { metaKey: true }), 'dict.revealLine'), '⌘D runs only replay');
+assert.ok(live.isDefault('dict.revealLine') && !JSON.parse(store.get('linguaclip_keys'))['dict.revealLine'], 'nothing stored for it');
+assert.equal(live.resetCombo('dict.replay'), null, 'replay back to default');
+assert.ok(live.matches(ev('KeyD', 'd', { metaKey: true }), 'dict.revealLine'), '… and reveal line has ⌘D again');
+live = await fresh({ 'watch.save': k('KeyD', true) });
+assert.ok(live.matches(ev('KeyD', 'd', { metaKey: true }), 'dict.revealLine'), 'another page on ⌘D: no yield');
 // Resetting one page leaves an old clash elsewhere alone.
 live = await fresh({ 'watch.save': k('ArrowUp', true), 'reader.play': k('KeyQ') });
 live.resetPage('reader');

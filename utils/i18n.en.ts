@@ -436,6 +436,7 @@ export const en = {
 
   // --- BlurLine.tsx ---
   'blur.reveal': 'Reveal',
+  'blur.revealKey': 'Reveal · {key} reveals the whole line',
   'blur.hiddenWord': 'Hidden word',
 
   // --- Studio.tsx ---
@@ -594,6 +595,7 @@ export const en = {
   'keys.continue': 'Confirm/continue',
   'keys.peek': 'Hint',
   'keys.anki': 'Send to Anki',
+  'keys.revealLine': 'Show whole line (blur)',
   'keys.breakdown': 'Break it down',
   'keys.skipWord': 'Skip this box (caret at end)',
   'keys.playTyping': 'Play/pause while typing',
@@ -604,6 +606,7 @@ export const en = {
   'shortcuts.needMod': 'You type on this page: use ⌘, or a key that types nothing like Tab',
   'shortcuts.reserved': 'Taken by the system or by typing (copy, paste, find, ⌥ combos…), pick another',
   'shortcuts.taken': 'Already used by "{name}", pick another',
+  'shortcuts.unset': 'Not set',
   'shortcuts.fixed': 'Fixed',
   'shortcuts.reset': 'Reset to defaults',
   'keys.closeDict': 'Close lookup / saved list',

@@ -3,7 +3,7 @@ import { IS_WINDOWS } from './platform';
 import { ACTION, ACTIONS, pageOf, type ActionId, type Combo, type Page } from './shortcutActions';
 import { loadCustom, saveCustom, type Custom } from './shortcutStore';
 import { clash, clashes, effective, refuse, sameCombo, takenBy, type Clash } from './shortcutRules';
-import { getLang } from './i18n';
+import { getLang, t } from './i18n';
 
 // The one place keys are matched and named: every page's key handler, the "…"
 // legend, the pinned corner legend, button tooltips and Settings read from here.
@@ -13,12 +13,23 @@ export { ACTIONS, PAGES } from './shortcutActions';
 export type { ActionId, Combo, Page } from './shortcutActions';
 export { sameCombo, typesText } from './shortcutRules';
 
+// No key: matches nothing, shown as 「未设置」.
+const NONE: Combo = { code: '' };
 let custom: Custom = loadCustom();
 let snapshot = build();
 const listeners = new Set<() => void>();
 
+// The user's keys win: an action still on its default (e.g. one added by an update) whose
+// default is a key the user gave another action live at the same time has no key until one
+// is recorded for it (docs/shortcuts.md). Worked out on read; nothing is stored.
 function build(): Record<ActionId, Combo> {
-  return Object.fromEntries(ACTIONS.map(a => [a.id, custom[a.id] ?? a.def]));
+  const own = (id: ActionId) => !!custom[id] && !sameCombo(custom[id], ACTION.get(id)!.def);
+  const yields = new Set<ActionId>();
+  for (const h of clashes(custom)) for (const i of [0, 1]) {
+    const id = h.srcs[i], by = h.srcs[1 - i];
+    if (h.ids[i] === id && !own(id) && own(by) && sameCombo(custom[by], ACTION.get(id)!.def)) yields.add(id);
+  }
+  return Object.fromEntries(ACTIONS.map(a => [a.id, yields.has(a.id) ? NONE : custom[a.id] ?? a.def]));
 }
 
 function commit(next: Custom) {
@@ -76,7 +87,7 @@ const comboOf = (e: KeyboardEvent | ReactKeyboardEvent): Combo => ({ code: event
 // also has to type that digit, as before (AZERTY's bare 1 key types &: not a 1).
 const bareDigit = (c: Combo) => !c.mod && !c.shift && /^Digit\d$/.test(c.code);
 const sameAs = (e: KeyboardEvent | ReactKeyboardEvent, c: Combo) =>
-  sameCombo(comboOf(e), c) && (!bareDigit(c) || e.key === c.code.slice(5));
+  !!c.code && sameCombo(comboOf(e), c) && (!bareDigit(c) || e.key === c.code.slice(5));
 export const matches = (e: KeyboardEvent | ReactKeyboardEvent, id: ActionId) => !e.altKey && sameAs(e, getCombo(id));
 
 const KEY_NAMES: Record<string, string> = {
@@ -87,6 +98,7 @@ const ZH_NAMES: Record<string, string> = { Space: '空格', Enter: '回车' };
 const keyName = (code: string) => (getLang() === 'zh' && ZH_NAMES[code]) || KEY_NAMES[code] || code.replace(/^(Key|Digit|Numpad)/, '');
 
 export function formatCombo(c: Combo): string {
+  if (!c.code) return t('shortcuts.unset');
   if (IS_WINDOWS) return [c.mod && 'Ctrl', c.shift && 'Shift', keyName(c.code)].filter(Boolean).join('+');
   if (c.mod) return `⌘${c.shift ? '⇧' : ''}${keyName(c.code)}`;
   return [c.shift && 'Shift', keyName(c.code)].filter(Boolean).join('+');
@@ -110,7 +122,7 @@ export function checkNewCombo(e: KeyboardEvent, id: ActionId): { combo: Combo } 
 export const lineKey = (e: KeyboardEvent | ReactKeyboardEvent, dir: 'prev' | 'next') => {
   const id = `watch.${dir}`;
   if (matches(e, id)) return true;
-  if (!isDefault(id)) return false;
+  if (!isDefault(id) || !getCombo(id).code) return false;
   return matches(e, `dict.${dir}`) || (!e.altKey && sameCombo(comboOf(e), { code: getCombo(id).code, mod: true }));
 };
 
@@ -123,7 +135,7 @@ export const lineKey = (e: KeyboardEvent | ReactKeyboardEvent, dir: 'prev' | 'ne
 export const loose = (e: KeyboardEvent | ReactKeyboardEvent, id: ActionId, where?: string) => {
   if (matches(e, id)) return true;
   const code = getCombo(id).code;
-  if (!isDefault(id) || (eventCode(e) !== code && !(code === 'Enter' && e.code === 'NumpadEnter'))) return false;
+  if (!code || !isDefault(id) || (eventCode(e) !== code && !(code === 'Enter' && e.code === 'NumpadEnter'))) return false;
   if (where === 'alone') return true;
   if (code === 'Space' && e.key !== ' ') return false; // ⌥Space types a no-break space, as before
   if (e.altKey) return true;

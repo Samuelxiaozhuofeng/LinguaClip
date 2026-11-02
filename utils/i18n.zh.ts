@@ -437,6 +437,7 @@ export const zh: Record<keyof typeof en, string> = {
 
   // --- BlurLine.tsx ---
   'blur.reveal': '显示',
+  'blur.revealKey': '显示 · {key} 显示整句',
   'blur.hiddenWord': '隐藏的单词',
 
   // --- Studio.tsx ---
@@ -595,6 +596,7 @@ export const zh: Record<keyof typeof en, string> = {
   'keys.reveal': '直接看答案',
   'keys.peek': '提示',
   'keys.anki': '发送 Anki',
+  'keys.revealLine': '显示整句（模糊练）',
   'keys.breakdown': '拆开教我',
   'keys.skipWord': '跳过这一格（光标在词尾）',
   'keys.playTyping': '打字中播放/暂停',
@@ -605,6 +607,7 @@ export const zh: Record<keyof typeof en, string> = {
   'shortcuts.needMod': '这一页要打字，换成带 ⌘ 的，或 Tab 这类不出字的键',
   'shortcuts.reserved': '这个键被系统或打字占用了（复制、粘贴、查找、⌥ 组合等），换一个',
   'shortcuts.taken': '这个键已经给了「{name}」，换一个',
+  'shortcuts.unset': '未设置',
   'shortcuts.fixed': '固定',
   'shortcuts.reset': '恢复默认',
   'keys.closeDict': '关掉查词 / 收藏列表',

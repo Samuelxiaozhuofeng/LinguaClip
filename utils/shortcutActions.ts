@@ -42,6 +42,7 @@ export const ACTIONS: Def[] = [
   dict('continue', k('Enter'), 'keys.continue', 'shortcuts.gTools', ['dictOut']), // never inside a blank
   dict('breakdown', k('KeyB', true), 'keys.breakdown', 'shortcuts.gTools'),
   dict('anki', k('KeyN', true, true), 'keys.anki', 'shortcuts.gTools'),
+  dict('revealLine', k('KeyD', true), 'keys.revealLine', 'shortcuts.gTools'), // blur mode only (BlurLine)
   dict('close', k('Escape'), 'keys.closeDict', 'shortcuts.gTools'),
   blank('jump', k('Space'), 'keys.blankJump'),
   blank('skip', k('ArrowRight'), 'keys.skipWord'),
