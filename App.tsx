@@ -263,8 +263,8 @@ export default function App() {
           dialog.alert(t('app.noSubtitlesTitle'), t('app.noSubtitlesBody', { name: record.videoFileName }));
           return;
         }
-        // Reading comes before practice: the record is left as it is.
-        if (choice.kind === 'read') {
+        if (choice.kind === 'read') { // before practice: the record is left as it is, only the last way is kept
+          if (!record.podcast) setLastWay(record.id, 'read');
           setReading({ record: { ...record, videoPath }, lm, by: choice.by });
           setAppState(AppState.READ);
           return;
@@ -438,7 +438,7 @@ export default function App() {
           rate: podcastRate,
         }} />
        ) :
-       <Home key="videos" onResume={handleResume} onOtherWay={otherWay} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} />}
+       <Home key="videos" onResume={handleResume} onOtherWay={otherWay} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} onPodcasts={PodcastPicker ? () => setAppState(AppState.PODCASTS) : undefined} />}
     </Shell>
   ) : (
     <PracticeProvider

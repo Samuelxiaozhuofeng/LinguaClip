@@ -14,11 +14,13 @@ import { formatTimeCode, getCustomConfig, getCustomPos, getLastWay, getWatchPref
 // Asked before every practice session: section by section as before, or a
 // custom set — so many minutes, at a level, from where the last set stopped —
 // or just watching (components/WatchPage.tsx), or reading the subtitles first
-// (pro/ReaderPage.tsx). The last way chosen comes back — never "read": that
-// comes before practice, and the panel reopens after it to pick the practice.
+// (pro/ReaderPage.tsx). The last way chosen comes back, except "read": a click on
+// the card goes back to reading, but the panel (which reopens after reading to pick
+// the practice) preselects the last practice, not reading.
 // Esc / clicking outside cancels; it never counts as a choice.
 // A record with no picture (a podcast episode, a sound file) listens instead of watching
-// (pro/ListenPage.tsx) where the Pro module is there; a podcast episode starts on it.
+// (pro/ListenPage.tsx) where the Pro module is there; a podcast episode starts on it, and so does
+// a sound file with no last way of its own.
 
 export type PanelChoice = { kind: 'all' } | { kind: 'watch' } | { kind: 'listen' } | { kind: 'read'; by: ReadBy } | { kind: 'custom'; cfg: CustomConfig; pick: CustomPick };
 
@@ -38,12 +40,14 @@ export async function nextPick(record: VideoRecord, cfg: CustomConfig, pace: Pac
 // A click on a video that was started before: the same way again, no panel (docs/watch.md).
 // null = ask with the panel: never started, a custom set whose level this video isn't graded
 // for yet (the level must not be dropped silently), or nothing to pick.
-// `practiceOnly` ("practise with dictation / blur"): a video last watched starts section by section.
+// `practiceOnly` ("practise with dictation / blur"): a video last watched or read starts section by section.
+// Last read but the Pro reader isn't there: asked with the panel.
 export async function resumeChoice(record: VideoRecord, lm: LearningMode, practiceOnly = false): Promise<PanelChoice | null> {
   let way = getLastWay(record.id);
-  if (way === 'watch' && practiceOnly) way = 'all';
+  if ((way === 'watch' || way === 'read') && practiceOnly) way = 'all';
   if (!way) return null;
   if (way === 'watch') return { kind: Listen && isAudioRecord(record) ? 'listen' : 'watch' };
+  if (way === 'read') return Reader ? { kind: 'read', by: getWatchPrefs().readBy } : null;
   if (way === 'all') return { kind: 'all' };
   const cfg = getCustomConfig();
   if (needsLabels(cfg) && !(await readLevels(record.id, parseSRT(record.subtitleText)))) return null;
@@ -60,13 +64,14 @@ const CustomPanel: React.FC<{
 }> = ({ record, pace, read: justRead, onCancel, onStart }) => {
   const t = useT();
   const hasAi = canCloze();
-  const last = getLastWay(record.id); // this video's own last way opens selected; a new video gets the last choice anywhere
+  const way = getLastWay(record.id); // this video's own last way opens selected; a new video (or one last read) gets the last choice anywhere
+  const last = way === 'read' ? null : way;
   const [cfg, setCfg] = useState<CustomConfig>(() => {
     const c = { ...getCustomConfig(), ...(last ? { on: last === 'custom' } : {}) };
     return hasAi ? c : { ...c, level: null };
   });
   const listen = !!Listen && isAudioRecord(record);
-  const [watch, setWatch] = useState(() => (listen && !!record.podcast) || (last ? last === 'watch' : getWatchPrefs().chosen));
+  const [watch, setWatch] = useState(() => (listen && (!!record.podcast || !last)) || (last ? last === 'watch' : getWatchPrefs().chosen));
   // A podcast episode: intensive listening or dictation only (docs/private/podcast.md, 精听).
   const pod = listen && !!record.podcast;
   const [read, setRead] = useState(false);
@@ -103,7 +108,7 @@ const CustomPanel: React.FC<{
 
   const start = (timeOnly = false) => {
     if (read) { saveWatchPrefs({ readBy }); onStart({ kind: 'read', by: readBy }); return; }
-    if (!record.podcast) saveWatchPrefs({ chosen: watch }); // a podcast's own default isn't the videos' last choice
+    if (!isAudioRecord(record)) saveWatchPrefs({ chosen: watch }); // a podcast's / sound file's own default isn't the videos' last choice
     if (watch) { onStart({ kind: listen ? 'listen' : 'watch' }); return; }
     if (!cfg.on) { saveCustomConfig(cfg); onStart({ kind: 'all' }); return; }
     if (want && !labels && !timeOnly) { if (!failed) setWaiting(true); return; }

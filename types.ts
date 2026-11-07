@@ -68,6 +68,9 @@ export interface PracticeConfig {
   wordVoice?: 'clip' | 'tts'; // how a word's own sound is played (docs/word-audio.md); default 'tts' (dictionary voice)
   masteredBtn?: boolean; // review shows "Got it" on sentence cards (docs/review.md); default on
   weekStats?: boolean; // home shows the 7-day chart (docs/stats.md); default on
+  todayBar?: boolean; // video home shows the "Today" bar (docs/stats.md); default on
+  looseJudge?: boolean; // dictation ignores edge punctuation and case, marks near misses (docs/dictation-judge.md); default on
+  subtitleMask?: boolean; // the hard-subtitle mask's menu items, key and block (docs/subtitle-mask.md); default on
   custom?: import('./utils/customPick').CustomConfig; // the start-of-practice panel's last choice
 }
 

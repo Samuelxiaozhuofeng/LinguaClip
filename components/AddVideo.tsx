@@ -14,6 +14,7 @@ import {
   startUrlImport,
 } from '../utils/importJob';
 import { parseSRT } from '../utils/srtParser';
+import { splitLongLines } from '../utils/splitLong';
 import { CLOUD, cloudKeyMissing, getTranscribeConfig } from '../utils/transcribeConfig';
 import * as VideoStorage from '../utils/videoStorage';
 import { getLang, useT } from '../utils/i18n';
@@ -198,9 +199,11 @@ const AddVideo: React.FC<Props> = ({ initialPath, initialSrt, onClose, onPractic
 
   // Video + own .srt: a finished record right away, then into practice. One that
   // has to be converted first becomes an import card carrying the subtitles.
+  // Either way their over-long lines are cut first, when Settings says so.
   const practiceWithSubtitles = async (video: string, srtPath: string) => {
     const file = await readSubtitleFile(srtPath);
-    const text = await file.text();
+    const raw = await file.text();
+    const text = getTranscribeConfig().splitLong ? splitLongLines(raw) : raw;
     const count = parseSRT(text).length;
     if (!count) {
       dialog.alert(t('app.noSubtitlesTitle'), t('app.noSubtitlesBody', { name: file.name }));

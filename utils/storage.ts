@@ -45,7 +45,10 @@ export const getWordFront = (): WordFront => getPracticeConfig().wordFront === '
 export const getWordVoice = (): 'clip' | 'tts' => getPracticeConfig().wordVoice === 'clip' ? 'clip' : 'tts';
 export const getMasteredBtn = () => getPracticeConfig().masteredBtn !== false;
 export const getWeekStats = () => getPracticeConfig().weekStats !== false;
-export const setPracticeFlag = (key: 'masteredBtn' | 'weekStats', on: boolean) => savePracticeConfig({ ...getPracticeConfig(), [key]: on });
+export const getTodayBar = () => getPracticeConfig().todayBar !== false;
+export const getLooseJudge = () => getPracticeConfig().looseJudge !== false;
+export const getSubtitleMaskOn = () => getPracticeConfig().subtitleMask !== false;
+export const setPracticeFlag = (key: 'masteredBtn' | 'weekStats' | 'todayBar' | 'looseJudge' | 'subtitleMask', on: boolean) => savePracticeConfig({ ...getPracticeConfig(), [key]: on });
 
 // --- Audio Padding Config Storage ---
 
@@ -132,7 +135,7 @@ export const forgetWatchPos = (videoId: string) => writeWatchPos(all => { delete
 
 // How each video was last started (docs/watch.md): clicking it starts that again, no panel.
 // Unreadable or unknown = never started = the panel asks.
-export type LastWay = 'all' | 'custom' | 'watch';
+export type LastWay = 'all' | 'custom' | 'watch' | 'read';
 const STORAGE_KEY_LAST_WAY = 'linguaclip_last_way';
 const readLastWay = (): Record<string, unknown> => {
   try {
@@ -144,7 +147,7 @@ const readLastWay = (): Record<string, unknown> => {
 };
 export const getLastWay = (videoId: string): LastWay | null => {
   const w = readLastWay()[videoId];
-  return w === 'all' || w === 'custom' || w === 'watch' ? w : null;
+  return w === 'all' || w === 'custom' || w === 'watch' || w === 'read' ? w : null;
 };
 export const setLastWay = (videoId: string, way: LastWay | null) => {
   try {

@@ -13,6 +13,7 @@ import ShortcutLegend, { usePinnedLegend } from './ShortcutLegend';
 import Timeline from './Timeline';
 import SavedDrawer from './SavedDrawer';
 import SoundNotes from './SoundNotes';
+import SubtitleMask from './SubtitleMask';
 import DefinitionPanel from './DefinitionPanel';
 import { useLookup, aroundOf } from '../hooks/useLookup';
 import { tokenizeText, getWordTokens } from '../utils/textTokenizer';
@@ -294,7 +295,8 @@ const Studio: React.FC = () => {
             <span className="press rounded-full bg-accent text-white w-16 h-16 flex items-center justify-center"><Play size={26} fill="currentColor" className="ml-1" /></span>
           </button>
         )}
-        <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 lg:pr-6 flex items-center justify-between gap-2 text-[13px] [&>*]:transition-opacity [&:focus-within>*]:opacity-100 [&:focus-within>*]:pointer-events-auto ${topBar.showTop ? '' : '[&>*]:opacity-0 [&>*]:pointer-events-none'}`} data-tauri-drag-region="deep">
+        <SubtitleMask videoId={videoId} media={videoRef} peekKey="dict.mask" onTap={showCenterPlay ? actions.onTogglePlay : undefined} />
+        <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 lg:pr-6 flex items-center justify-between gap-2 text-[13px] [&>*]:relative [&>*]:z-20 [&>*]:transition-opacity [&:focus-within>*]:opacity-100 [&:focus-within>*]:pointer-events-auto ${topBar.showTop ? '' : '[&>*]:opacity-0 [&>*]:pointer-events-none'}`} data-tauri-drag-region="deep">
           {/* Same pill as the top bar on the other pages, on the same centre line as the traffic lights. */}
           <div className="flex items-center gap-0.5 p-1 rounded-full bg-page border border-line text-ink min-w-0 max-w-[60%]">
             <button type="button" onClick={actions.onExit} title={t('studio.backToVideos')} aria-label={t('studio.backToVideos')}

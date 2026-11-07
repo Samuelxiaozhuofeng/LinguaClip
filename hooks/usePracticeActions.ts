@@ -32,7 +32,8 @@ export interface UsePracticeActionsParams {
   practiceHandleContinue: (
     onSectionComplete: () => void,
     onPracticeComplete: () => void,
-    onAnkiStatusChange: (status: string) => void
+    onAnkiStatusChange: (status: string) => void,
+    count?: boolean,
   ) => void;
   handleNextSection: (videoRef?: React.RefObject<HTMLVideoElement>, setIsPlaying?: (value: boolean) => void) => void;
 
@@ -84,8 +85,11 @@ export function usePracticeActions(params: UsePracticeActionsParams) {
       setCurrentSubtitleIndex(prev => (typeof prev === 'number' ? prev + 1 : currentSubtitleIndex + 1));
       setMode(PracticeMode.LISTENING);
       setAnkiStatus('idle');
+    } else if (direction === 'next' && subtitles.length > 0) {
+      // The section's last line: on to "section done" / "all done" like finishing it, but not counted (docs/shortcuts.md B2).
+      practiceHandleContinue(() => {}, onPracticeComplete, (status: string) => setAnkiStatus(status as any), false);
     }
-  }, [currentSubtitleIndex, subtitles.length, setCurrentSubtitleIndex, setMode, setAnkiStatus]);
+  }, [currentSubtitleIndex, subtitles.length, setCurrentSubtitleIndex, setMode, setAnkiStatus, practiceHandleContinue, onPracticeComplete]);
 
   const handleProgressSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     videoPlayerHandleProgressSeek(e, sections, currentSectionIndex, (sectionIndex, subIndex) => {

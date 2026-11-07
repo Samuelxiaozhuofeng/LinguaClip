@@ -1,4 +1,5 @@
 import type { DictKey } from './i18n';
+import { getSubtitleMaskOn } from './storage';
 
 // Every keyboard shortcut in the app, by page (docs/shortcuts.md「全部快捷键可改」).
 // Defaults are the keys the app always had; Settings lets each one be rebound.
@@ -12,7 +13,8 @@ export type Page = 'dict' | 'watch' | 'review' | 'reader';
 // page's own handler runs. Review's typing keys are only its ⌘ ones and Esc.
 type Zone = 'dictOut' | 'dictBlank' | 'reviewOut' | 'reviewBlank' | 'watch' | 'reader';
 
-type Def = { id: string; def: Combo; label: DictKey; group: DictKey; zones: Zone[]; single: boolean };
+// live: a feature switch; off = the action has no key, isn't listed and clashes with nothing (the user's key is kept).
+type Def = { id: string; def: Combo; label: DictKey; group: DictKey; zones: Zone[]; single: boolean; live?: () => boolean };
 
 const k = (code: string, mod = false, shift = false): Combo => ({ code, mod, shift });
 
@@ -39,10 +41,12 @@ export const ACTIONS: Def[] = [
   dict('prev', k('ArrowUp', true), 'keys.prev', 'shortcuts.gTools'),
   dict('next', k('ArrowDown', true), 'keys.next', 'shortcuts.gTools'),
   dict('skipLine', k('KeyT', true), 'keys.skipLine', 'shortcuts.gTools'),
+  dict('save', k('KeyI', true), 'keys.saveLine', 'shortcuts.gTools'), // the transport's bookmark (Transport)
   dict('continue', k('Enter'), 'keys.continue', 'shortcuts.gTools', ['dictOut']), // never inside a blank
   dict('breakdown', k('KeyB', true), 'keys.breakdown', 'shortcuts.gTools'),
   dict('anki', k('KeyN', true, true), 'keys.anki', 'shortcuts.gTools'),
   dict('revealLine', k('KeyD', true), 'keys.revealLine', 'shortcuts.gTools'), // blur mode only (BlurLine)
+  { ...dict('mask', k('KeyU', true), 'keys.mask', 'shortcuts.gTools'), live: getSubtitleMaskOn }, // lift the hard-subtitle mask for now (components/SubtitleMask.tsx)
   dict('close', k('Escape'), 'keys.closeDict', 'shortcuts.gTools'),
   blank('jump', k('Space'), 'keys.blankJump'),
   blank('skip', k('ArrowRight'), 'keys.skipWord'),
@@ -80,6 +84,7 @@ export const ACTIONS: Def[] = [
   review('loop', k('KeyL', true), 'keys.loop', ['reviewOut', 'reviewBlank']),
   review('replay', k('Space', false, true), 'keys.replay'),
   review('playWord', k('KeyK', true), 'keys.playWord'),
+  { ...review('mask', k('KeyU', true), 'keys.mask', ['reviewOut', 'reviewBlank']), live: getSubtitleMaskOn },
   review('close', k('Escape'), 'keys.closeReview', ['reviewOut', 'reviewBlank']),
 
   reader('play', k('Space'), 'keys.readerPlay'),
@@ -88,6 +93,7 @@ export const ACTIONS: Def[] = [
 
 export type ActionId = string;
 export const ACTION = new Map(ACTIONS.map(a => [a.id, a]));
+export const isLive = (a: Def) => !a.live || a.live();
 export const pageOf = (id: string): Page => (id.startsWith('blank.') ? 'dict' : id.split('.')[0]) as Page;
 export const PAGES: { id: Page; label: DictKey }[] = [
   { id: 'dict', label: 'shortcuts.pDict' }, { id: 'watch', label: 'shortcuts.pWatch' },

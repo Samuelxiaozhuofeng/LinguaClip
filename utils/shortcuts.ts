@@ -1,6 +1,6 @@
 import { useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { IS_WINDOWS } from './platform';
-import { ACTION, ACTIONS, pageOf, type ActionId, type Combo, type Page } from './shortcutActions';
+import { ACTION, ACTIONS, isLive, pageOf, type ActionId, type Combo, type Page } from './shortcutActions';
 import { loadCustom, saveCustom, type Custom } from './shortcutStore';
 import { clash, clashes, effective, refuse, sameCombo, takenBy, type Clash } from './shortcutRules';
 import { getLang, t } from './i18n';
@@ -29,7 +29,7 @@ function build(): Record<ActionId, Combo> {
     const id = h.srcs[i], by = h.srcs[1 - i];
     if (h.ids[i] === id && !own(id) && own(by) && sameCombo(custom[by], ACTION.get(id)!.def)) yields.add(id);
   }
-  return Object.fromEntries(ACTIONS.map(a => [a.id, yields.has(a.id) ? NONE : custom[a.id] ?? a.def]));
+  return Object.fromEntries(ACTIONS.map(a => [a.id, yields.has(a.id) || !isLive(a) ? NONE : custom[a.id] ?? a.def]));
 }
 
 function commit(next: Custom) {
@@ -40,6 +40,13 @@ function commit(next: Custom) {
 }
 
 export const getCombo = (id: ActionId): Combo => snapshot[id];
+// The actions whose feature is on: Settings and the key tables list only these.
+export const liveActions = () => ACTIONS.filter(isLive);
+// A feature switch (e.g. the hard-subtitle mask) flipped: work the keys out again.
+export function refreshShortcuts() {
+  snapshot = build();
+  listeners.forEach(l => l());
+}
 export const isDefault = (id: ActionId) => !custom[id] || sameCombo(custom[id], ACTION.get(id)!.def);
 export const isCustom = (id: ActionId) => !isDefault(id);
 

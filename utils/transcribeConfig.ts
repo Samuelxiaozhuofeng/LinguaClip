@@ -10,7 +10,8 @@ export type TranscribeMode = 'local' | 'cloud' | 'bailian';
 export type LocalModel = 'standard' | 'light';
 // gpu: Windows only — run whisper on the graphics card (Vulkan) instead of the CPU;
 // gpuName: which card ('' = automatic, a discrete one first; src-tauri/src/gpus.rs).
-export type TranscribeConfig = { mode: TranscribeMode; localModel: LocalModel; gpu: boolean; gpuName: string; groqKey: string; bailianKey: string };
+// splitLong: cut over-long lines of subtitles the user brings on a new import (utils/splitLong.ts).
+export type TranscribeConfig = { mode: TranscribeMode; localModel: LocalModel; gpu: boolean; gpuName: string; groqKey: string; bailianKey: string; splitLong: boolean };
 export type CloudMode = Exclude<TranscribeMode, 'local'>;
 
 export const CLOUD = {
@@ -19,7 +20,7 @@ export const CLOUD = {
 } as const;
 
 const STORAGE_KEY = 'linguaclip_transcribe_config';
-const DEFAULTS: TranscribeConfig = { mode: 'local', localModel: 'standard', gpu: false, gpuName: '', groqKey: '', bailianKey: '' };
+const DEFAULTS: TranscribeConfig = { mode: 'local', localModel: 'standard', gpu: false, gpuName: '', groqKey: '', bailianKey: '', splitLong: true };
 
 export function getTranscribeConfig(): TranscribeConfig {
   try {
@@ -32,6 +33,7 @@ export function getTranscribeConfig(): TranscribeConfig {
       gpuName: str(stored.gpuName),
       groqKey: str(stored.groqKey),
       bailianKey: str(stored.bailianKey),
+      splitLong: stored.splitLong !== false,
     };
   } catch {
     return { ...DEFAULTS };

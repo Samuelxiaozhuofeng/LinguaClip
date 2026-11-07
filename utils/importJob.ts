@@ -13,6 +13,7 @@ import { jaCheckOn, prepareSegments } from './jaSegments';
 import { hasKana } from './japanese';
 import { parseSRT } from './srtParser';
 import { resegment, Word } from './resegment';
+import { splitLongLines } from './splitLong';
 import { engineArgs, getTranscribeConfig } from './transcribeConfig';
 import * as VideoStorage from './videoStorage';
 import { getAllVideosFromDB } from './fileSystemAccess';
@@ -295,13 +296,16 @@ async function applyProgress(payload: ImportProgressPayload): Promise<void> {
       : null);
     notify();
     const recut = payload.words ? await resegment(payload.words) : null;
-    // Their own .srt came with the record and stays as it is.
+    // Their own .srt came with the record and stays as it is (cut in AddVideo already); a track
+    // read out of the video gets its over-long lines cut here, when Settings says so.
     const own = rec.importJob.subs === 'own';
+    const track = typeof rec.importJob.subs === 'number' && getTranscribeConfig().splitLong && payload.subtitleText
+      ? splitLongLines(payload.subtitleText) : payload.subtitleText;
     const name = fileNameFromPath(videoPath);
     // The re-cut can take a minute; a record deleted meanwhile must stay deleted.
     const finished = await VideoStorage.updateVideoWith(rec.id, r => {
       if (!r.importJob) return null;
-      const subtitleText = own ? r.subtitleText : recut ?? payload.subtitleText ?? '';
+      const subtitleText = own ? r.subtitleText : recut ?? track ?? '';
       const rest = { ...r };
       delete rest.importJob;
       return {

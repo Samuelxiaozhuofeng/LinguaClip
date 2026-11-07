@@ -16,7 +16,7 @@ const WeekStats: React.FC<{ remembered: number }> = ({ remembered }) => {
 
   if (!on) {
     // Each part only once it's above zero.
-    const todayWhat = [today.sec >= 60 && t('home.todayMin', { n: min(today.sec) }), today.lines && t('home.reviewLine', { n: today.lines })].filter(Boolean).join(' · ');
+    const todayWhat = [today.sec >= 60 && t('home.todayMin', { n: min(today.sec) }), today.lines && t(today.lines === 1 ? 'home.reviewLineOne' : 'home.reviewLine', { n: today.lines })].filter(Boolean).join(' · ');
     const stats = [todayWhat && t('home.today', { what: todayWhat }), remembered > 0 && t('home.remembered', { n: remembered })].filter(Boolean).join(' · ');
     return stats ? <span title={t('home.rememberedTitle')}>{stats}</span> : null;
   }

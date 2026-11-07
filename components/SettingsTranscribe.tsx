@@ -17,7 +17,8 @@ import ConvertToolRow from './ConvertToolRow';
 
 // Settings → Import & transcribe: this machine (standard / light model, graphics card
 // on Windows, where its parts live) or a cloud service (link to get a key, the key itself),
-// the video converter; `children` is what the AI does with the transcript.
+// splitting over-long lines of subtitles the user brings, the video converter; `children` is
+// what the AI does with the transcript.
 const SettingsTranscribe: React.FC<{ onSaved: () => void; children: React.ReactNode }> = ({ onSaved, children }) => {
   const t = useT();
   const [config, setConfig] = useState<TranscribeConfig>(getTranscribeConfig);
@@ -144,6 +145,14 @@ const SettingsTranscribe: React.FC<{ onSaved: () => void; children: React.ReactN
             />
           </Field>
         )}
+
+        <div>
+          <label className="flex items-center gap-2.5 text-sm cursor-pointer">
+            <input type="checkbox" checked={config.splitLong} onChange={e => update({ splitLong: e.target.checked })} className="w-4 h-4 accent-accent" />
+            {t('transcribe.splitLong')}
+          </label>
+          <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('transcribe.splitLongHint')}</span>
+        </div>
       </Group>
 
       <Group title={t('settings.group.videoFormat')}>

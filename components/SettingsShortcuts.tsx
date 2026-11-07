@@ -3,7 +3,7 @@ import { RotateCcw } from 'lucide-react';
 import { Btn, Seg } from './ui';
 import { useT, type DictKey } from '../utils/i18n';
 import {
-  ACTIONS, PAGES, ActionId, Page, checkNewCombo, formatCombo, isCustom, resetCombo, resetCombos, resetPage, setCombo, useShortcuts,
+  ACTIONS, PAGES, ActionId, Page, checkNewCombo, liveActions, formatCombo, isCustom, resetCombo, resetCombos, resetPage, setCombo, useShortcuts,
 } from '../utils/shortcuts';
 import { pageOf } from '../utils/shortcutActions';
 
@@ -43,7 +43,7 @@ const SettingsShortcuts: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
   }, [recording, onSaved, t]);
   useEffect(() => () => setRecording(null), []); // leaving Settings cancels
 
-  const mine = ACTIONS.filter(a => pageOf(a.id) === page);
+  const mine = liveActions().filter(a => pageOf(a.id) === page);
   const groups = [...new Set(mine.map(a => a.group))];
   const done = (fn: () => void) => { fn(); stop(); onSaved(); };
 

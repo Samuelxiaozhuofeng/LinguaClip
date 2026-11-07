@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, MoreHorizontal, Loader2, Play } from 'lucide-react';
 import { LearningMode, VideoRecord } from '../types';
 import * as VideoStorage from '../utils/videoStorage';
-import { forgetCustomPos, forgetWatchPos, formatTimeCode, getCustomPos, getLastWay, getPracticeConfig, getWatchPos, setLastWay } from '../utils/storage';
+import { forgetCustomPos, forgetWatchPos, getLastWay, getPracticeConfig, getWatchPos, setLastWay } from '../utils/storage';
+import { ShelfPos, cardFinished, cardWhere, lastWayName, lastWaySec } from '../utils/lastWayCard';
 import { parseSRT } from '../utils/srtParser';
 import { buildSections, sectionAt, sectionLengthOf } from '../utils/sections';
 import { fileNameFromPath, isAudioRecord, isVideoFile, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
@@ -21,11 +22,13 @@ import { forgetKeywords } from '../utils/keywordPrep';
 import { forgetPhrases } from '../utils/phrasePrep';
 import { cancelTrans } from '@pro';
 import { forgetLooked } from '../utils/readLooked';
+import { forgetMask } from '../utils/subtitleMask';
 import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribeCloze } from '../utils/clozePrep';
 import { cancelSegments, getSegJob, subscribeSeg } from '../utils/jaSegments';
 import { deckCounts, deleteVideoCards, getAllCards, keepOrphans, subscribeCards } from '../utils/review';
 import { clipVideoNow } from '../utils/clips';
 import WeekStats from './WeekStats';
+import TodayBar from './TodayBar';
 
 // Home does two things: pick up the video you were on, and add a new one (the top
 // bar's "+", or a drop). The most recent video leads as a big frame with its play
@@ -38,6 +41,7 @@ interface HomeProps {
   onEmptyChange?: (empty: boolean) => void;
   addAsked?: boolean; // the top bar's "+" was pressed
   onAddHandled?: () => void;
+  onPodcasts?: () => void; // the "Today" bar's "something new": go to the podcast page
   // The podcast page (a Pro tab): the same shelf with only podcast episodes, its own
   // add dialog and empty state, no drops. Without it, the videos (and sound files).
   podcasts?: { empty: React.ReactNode; add: (close: () => void) => React.ReactNode; rate?: (v: VideoRecord) => string | null };
@@ -52,7 +56,7 @@ const Line: React.FC<{ pct: number; className?: string }> = ({ pct, className = 
   </div>
 );
 
-const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsked, onAddHandled, podcasts }) => {
+const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsked, onAddHandled, onPodcasts, podcasts }) => {
   const t = useT();
   const lang = useLang();
   const [videos, setVideos] = useState<VideoRecord[] | null>(null);
@@ -81,15 +85,15 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
   // Computed the same way the practice page cuts the video, so the two agree.
   const sectionLength = getPracticeConfig().sectionLength;
   const shelfPosition = useMemo(() => {
-    const byId = new Map<string, { part: number; parts: number; line: number; lines: number; customSec?: number; customPct?: number; listen?: boolean; watch?: boolean }>();
+    const byId = new Map<string, ShelfPos>();
     // The card shows where a click goes on (docs/watch.md): the way this video was last
-    // started — where the custom sets reached, where watching stopped, else the section.
+    // started — where the custom sets reached, where watching / reading stopped, else the section.
     for (const v of videos ?? []) {
       if (v.importJob || !v.subtitleText) continue;
       try {
         const subs = parseSRT(v.subtitleText);
         const way = getLastWay(v.id);
-        const customSec = way === 'custom' ? getCustomPos(v.id) : way === 'watch' ? getWatchPos(v.id) : 0;
+        const customSec = lastWaySec(v.id, way);
         const end = subs[subs.length - 1]?.endTime ?? 0;
         const sections = buildSections(subs, sectionLengthOf(v));
         if (sections.length === 0) continue;
@@ -104,7 +108,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
           parts: sections.length,
           line: Math.min(Math.max(v.currentSubtitleIndex, 0), lines),
           lines,
-          ...(way === 'custom' || way === 'watch' ? { customSec, customPct: end ? Math.min(100, customSec / end * 100) : 0, watch: way === 'watch' } : {}),
+          ...(customSec !== undefined ? { customSec, customPct: end ? Math.min(100, customSec / end * 100) : 0, watch: way === 'watch', read: way === 'read' } : {}),
         });
       } catch { /* a record we cannot parse just falls back to percent */ }
     }
@@ -242,6 +246,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
       forgetWatchPos(v.id);
       setLastWay(v.id, null);
       forgetLooked(v.id);
+      forgetMask(v.id);
     } catch {
       dialog.alert(t('home.deleteFailTitle'), t('home.deleteFailBody'));
       setDeletingId(null);
@@ -283,19 +288,12 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
   const modeName = (m: LearningMode) => (m === LearningMode.BLUR ? t('home.blur') : t('home.dictate'));
   const lastMode = (v: VideoRecord) => v.learningMode ?? LearningMode.DICTATION;
   // What the card's button starts: on the podcast page, intensive listening.
-  const cardMode = (v: VideoRecord) => (podcasts ? t('custom.listen') : getLastWay(v.id) === 'watch' ? t(isAudioRecord(v) ? 'custom.listen' : 'custom.watch') : modeName(lastMode(v)));
+  const cardMode = (v: VideoRecord) => t(podcasts ? 'custom.listen' : lastWayName(v, getLastWay(v.id)));
   const otherMode = (v: VideoRecord) => (lastMode(v) === LearningMode.BLUR ? LearningMode.DICTATION : LearningMode.BLUR);
 
-  // "Part 2 of 5" and how far into that part, or lines when there is only one part.
-  const where = (v: VideoRecord) => {
-    const pos = shelfPosition.get(v.id);
-    if (!pos) return { text: `${v.completionRate}%`, pct: v.completionRate };
-    if (pos.listen) return { text: t('home.listenAt', { current: pos.part + 1, total: pos.parts }), pct: (pos.part / pos.parts) * 100 };
-    if (pos.customSec !== undefined) return { text: t(pos.watch ? 'home.watchAt' : 'home.customAt', { time: formatTimeCode(pos.customSec ?? 0) }), pct: pos.customPct ?? 0 };
-    const pct = pos.lines ? (pos.line / pos.lines) * 100 : 0;
-    if (pos.parts > 1) return { text: t('home.partOf', { current: pos.part + 1, total: pos.parts }), pct };
-    return { text: t('home.linesCount', { current: pos.line, total: pos.lines }), pct };
-  };
+  // "Part 2 of 5" and how far into that part (utils/lastWayCard.ts); "finished" when the big card says so.
+  const where = (v: VideoRecord) => cardWhere(v, shelfPosition.get(v.id), t);
+  const finished = (v: VideoRecord) => cardFinished(where(v).pct, shelfPosition.get(v.id));
 
   // One "…" entry per kind of AI prep: running, start, top up, or done.
   const prepItem = (job: { done: number; total: number } | undefined, info: PrepInfo | undefined, kind: 'Breakdown' | 'Cloze', start: () => Promise<unknown>): MenuItem | null => {
@@ -423,6 +421,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
         </div>
       ) : (
         <>
+          {!podcasts && <TodayBar lead={lead && !finished(lead) ? lead : undefined} where={where} mode={cardMode} onResume={v => onResume(v, lastMode(v))} onNew={onPodcasts} />}
           {lead && (() => {
             const w = where(lead);
             return (
@@ -440,7 +439,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
                     <p className="text-xl font-semibold leading-snug truncate" title={lead.displayName}>{lead.displayName}</p>
                     <div className="mt-2 flex items-center gap-3 text-[13px] text-mute min-w-0">
                       {ticks(lead)}
-                      <span className="truncate">{w.text} · {w.pct >= 100 && (shelfPosition.get(lead.id)?.customSec || (shelfPosition.get(lead.id)?.part ?? 0) + 1 >= (shelfPosition.get(lead.id)?.parts ?? 1)) ? t('home.finished') : t('home.continueMode', { mode: cardMode(lead) })}{prepLine(lead)}</span>
+                      <span className="truncate">{w.text && `${w.text} · `}{finished(lead) ? t('home.finished') : t('home.continueMode', { mode: cardMode(lead) })}{prepLine(lead)}</span>
                     </div>
                   </div>
                   {more(lead, 'lg')}
@@ -478,7 +477,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
                     {v.importJob ? (
                       jobStatus(v) ?? <Line pct={v.importJob.percent ?? 0} className="mt-2" />
                     ) : (
-                      <p className="mt-0.5 text-xs text-mute truncate">{w!.text} · {cardMode(v)}{prepLine(v)}</p>
+                      <p className="mt-0.5 text-xs text-mute truncate">{w!.text && `${w!.text} · `}{cardMode(v)}{prepLine(v)}</p>
                     )}
                     <div className="absolute top-2 right-2 rounded-lg bg-page opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                       {more(v)}

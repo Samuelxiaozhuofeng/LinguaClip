@@ -11,7 +11,7 @@ import { withAiSlot } from './aiLimit';
 export type Word = { w: string; from: number; to: number };
 
 const TARGET_WORDS = 10;   // what we ask each line to be
-const MAX_WORDS = 16;      // hard ceiling we enforce ourselves
+export const MAX_WORDS = 16;      // hard ceiling we enforce ourselves
 const BATCH_WORDS = 250;   // one model call; keeps it counting reliably
 const TAIL_MS = 400;       // whisper's end times run a touch early
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -104,32 +104,40 @@ export function withGaps(starts: number[], words: Word[]): number[] {
   return [...cuts].sort((a, b) => a - b);
 }
 
-const MIN_PIECE = 3;
+export const MIN_PIECE = 3;
 const ENDS_CLAUSE = /[,;:—]["'”’)\]]?$/;
 
 // Cut point for words[a..b): after in-sentence punctuation, else at the longest
 // pause, else evenly; each side keeps at least MIN_PIECE words, ties go to the
 // one nearest the middle so a line is not nibbled three words at a time.
-function cutPoint(words: Word[], a: number, b: number): number {
+// `ok(c)`: may it cut before word c (utils/splitLong.ts: not after "Mr."); every
+// rule only picks those, the even cut moving to the nearest one. Transcripts pass none.
+type CutOk = (c: number) => boolean;
+const anyCut: CutOk = () => true;
+
+function cutPoint(words: Word[], a: number, b: number, ok: CutOk): number {
   const mid = (a + b) / 2;
-  const cands: number[] = [];
-  for (let c = a + MIN_PIECE; c <= b - MIN_PIECE; c++) cands.push(c);
-  const nearest = (cs: number[]) => cs.reduce((x, y) => (Math.abs(y - mid) < Math.abs(x - mid) ? y : x));
+  const all: number[] = [];
+  for (let c = a + MIN_PIECE; c <= b - MIN_PIECE; c++) all.push(c);
+  const allowed = all.filter(ok);
+  const cands = allowed.length ? allowed : all;
+  const nearest = (cs: number[], to = mid) => cs.reduce((x, y) => (Math.abs(y - to) < Math.abs(x - to) ? y : x));
   const punct = cands.filter(c => ENDS_CLAUSE.test(words[c - 1].w));
   if (punct.length) return nearest(punct);
   const gap = (c: number) => words[c].from - words[c - 1].to;
   const longest = Math.max(...cands.map(gap));
   if (longest > 0) return nearest(cands.filter(c => gap(c) === longest));
-  return a + Math.ceil((b - a) / Math.ceil((b - a) / MAX_WORDS));
+  const even = a + Math.ceil((b - a) / Math.ceil((b - a) / MAX_WORDS));
+  return ok(even) || !allowed.length ? even : nearest(allowed, even);
 }
 
 // Keeps the ceiling a promise rather than a request: any line over MAX_WORDS is
 // cut again until every piece fits.
-export function enforceCeiling(starts: number[], words: Word[]): number[] {
+export function enforceCeiling(starts: number[], words: Word[], ok: CutOk = anyCut): number[] {
   const out: number[] = [];
   const split = (a: number, b: number) => {
     if (b - a <= MAX_WORDS) { out.push(a); return; }
-    const c = cutPoint(words, a, b);
+    const c = cutPoint(words, a, b, ok);
     split(a, c);
     split(c, b);
   };
@@ -160,7 +168,7 @@ async function ask(words: Word[]): Promise<number[]> {
   }
 }
 
-const stamp = (ms: number): string => {
+export const stamp = (ms: number): string => {
   const clamped = Math.max(0, Math.round(ms));
   const h = Math.floor(clamped / 3600000);
   const m = Math.floor(clamped / 60000) % 60;

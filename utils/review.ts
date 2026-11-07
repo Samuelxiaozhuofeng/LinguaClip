@@ -119,7 +119,7 @@ export const isRemembered = (c: ReviewCard) => c.deck === 'line' && hasAudio(c) 
 // (天気 vs 天気ですね, or a whole line kept by an older version) blanks every box
 // it overlaps in the line.
 export const wordBoxes = (words: string[], word: string): number[] => {
-  const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}'’-]/gu, '');
+  const norm = (w: string) => w.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}'’-]/gu, ''); // NFC: a decomposed accent is not dropped
   const i = words.findIndex(w => norm(w) === norm(word));
   if (i >= 0 || !/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(word + words.join(''))) return [Math.max(i, 0)];
   const at = words.join('').indexOf(word);

@@ -1,11 +1,12 @@
 // Backup and restore (docs/backup.md): back up, delete, restore everything back; a bad
 // backup is refused; a restore that fails half way shows the failure screen, from which
 // "go back to before the restore" and "give up restoring" both lead back into the app.
-import { readFileSync } from 'node:fs';
 import os from 'node:os';
 
 const NAME = 'Me at the zoo [jNQXAC9IVRw].mp4';
-const firstLine = sample => readFileSync(`${sample}.srt`, 'utf8').split(/\r?\n/)[2].trim();
+// The sample's first line has 18 words: on import it is cut after "are," (docs/import.md「自带字幕自动切长句」),
+// so the clip has 4 lines and line 1 is this.
+const firstLine = () => 'Alright, so here we are,';
 const btn = (page, name) => page.getByRole('button', { name, exact: true });
 const OUTSIDE = `${os.homedir()}/Desktop`; // where the mock's save dialog puts a backup
 
@@ -37,7 +38,7 @@ const confirmRestore = async ({ page, see }, body) => {
 const homeHasIt = async ({ page, see, nav, sample }, what) => {
   await nav('视频');
   await see(page.getByText(NAME), `${what}：首页视频卡片`, 20_000);
-  await see(page.getByText('1 / 3 句 · 继续听写'), `${what}：进度「1 / 3 句 · 继续听写」`);
+  await see(page.getByText('1 / 4 句 · 继续听写'), `${what}：进度「1 / 4 句 · 继续听写」`);
   await nav('句子');
   await see(page.getByText(firstLine(sample)), `${what}：「句子」页的卡`);
   await nav('视频');
@@ -59,11 +60,11 @@ export default [
       const panel = page.getByRole('dialog', { name: '这次怎么练' });
       await panel.getByRole('radio', { name: '按段从头练' }).click();
       await panel.getByRole('button', { name: '开始练习' }).click();
-      await see(page.getByText('第 1 / 3 句'), '练习页「第 1 / 3 句」');
+      await see(page.getByText('第 1 / 4 句'), '练习页「第 1 / 4 句」');
       await page.getByRole('button', { name: '收藏这句' }).click();
       await see(page.getByRole('button', { name: '取消收藏' }), '收藏按钮变成「取消收藏」');
       await page.getByRole('button', { name: /^下一句/ }).first().click(); // the transport's skip button
-      await see(page.getByText('第 2 / 3 句'), '进到「第 2 / 3 句」');
+      await see(page.getByText('第 2 / 4 句'), '进到「第 2 / 4 句」');
       await page.mouse.move(300, 30); // the back button shows near the top
       await page.getByRole('button', { name: '回到你的视频列表' }).click();
       await homeHasIt(ctx, '备份前');

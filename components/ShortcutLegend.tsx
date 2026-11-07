@@ -1,5 +1,5 @@
 import React from 'react';
-import { ACTIONS, formatCombo, useShortcuts } from '../utils/shortcuts';
+import { formatCombo, liveActions, useShortcuts } from '../utils/shortcuts';
 import { useT } from '../utils/i18n';
 
 const PIN_KEY = 'linguaclip_keys_pinned';
@@ -16,7 +16,7 @@ export const usePinnedLegend = () => {
 };
 
 // Outside dictation (blur mode) there is no blank, so only the line keys.
-const BLUR = ['dict.play', 'dict.replay', 'dict.loop', 'dict.prev', 'dict.next', 'dict.continue', 'dict.skipLine', 'dict.anki', 'dict.revealLine', 'dict.close'];
+const BLUR = ['dict.play', 'dict.replay', 'dict.loop', 'dict.prev', 'dict.next', 'dict.continue', 'dict.skipLine', 'dict.save', 'dict.anki', 'dict.revealLine', 'dict.mask', 'dict.close'];
 
 // The key table, as the user has set it: in the "…" menu and pinned beside the line.
 const ShortcutLegend: React.FC<{ dictation: boolean; className?: string }> = ({ dictation, className = '' }) => {
@@ -24,7 +24,7 @@ const ShortcutLegend: React.FC<{ dictation: boolean; className?: string }> = ({ 
   const combos = useShortcuts();
   return (
     <div className={`grid grid-cols-2 gap-x-5 gap-y-1.5 text-xs ${className}`}>
-      {ACTIONS.filter(a => dictation ? /^(dict|blank)\./.test(a.id) && a.id !== 'dict.revealLine' : BLUR.includes(a.id)).map(a => (
+      {liveActions().filter(a => dictation ? /^(dict|blank)\./.test(a.id) && a.id !== 'dict.revealLine' : BLUR.includes(a.id)).map(a => (
         <div key={a.id} className="flex justify-between gap-3 whitespace-nowrap">
           <span className="text-mute">{t(a.label)}</span>
           <span className="text-ink/80">{formatCombo(combos[a.id])}</span>

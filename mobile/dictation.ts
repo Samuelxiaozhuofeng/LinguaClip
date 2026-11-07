@@ -1,9 +1,9 @@
 // Grading a sentence typed on the phone's keyboard (review, docs/mobile-web.md 8): one
 // box for the whole line instead of the desktop's one box per word, so the typed words
 // are lined up with the line's words (longest common run, judged word by word with the
-// desktop's own rule, isInputCorrectFlexibleCase) and every stretch that differs counts
-// as one mistake. Japanese, typed without spaces, is judged as a whole: the line or its
-// reading in kana.
+// desktop's own rule, isInputCorrectFlexibleCase, always lenient: the phone has no setting,
+// docs/dictation-judge.md) and every stretch that differs counts as one mistake. Japanese,
+// typed without spaces, is judged as a whole: the line or its reading in kana.
 import { TokenType, getWordTokens, isInputCorrectFlexibleCase, tokenizeText } from '../utils/textTokenizer';
 import { hasKana, kanaFold, readingOf } from '../utils/japanese';
 
@@ -25,7 +25,7 @@ export function checkDictation(target: string, typed: string): Checked {
   const tokens = tokenizeText(target);
   const want = getWordTokens(tokens);
   const got = getWordTokens(tokenizeText(typed)).map(t => t.value);
-  const eq = (i: number, j: number) => isInputCorrectFlexibleCase(got[j], want[i].value, want[i].reading);
+  const eq = (i: number, j: number) => isInputCorrectFlexibleCase(got[j], want[i].value, want[i].reading, true);
   // lcs[i][j]: the longest common run of want[i..] and got[j..].
   const lcs = Array.from({ length: want.length + 1 }, () => new Array<number>(got.length + 1).fill(0));
   for (let i = want.length - 1; i >= 0; i--) {

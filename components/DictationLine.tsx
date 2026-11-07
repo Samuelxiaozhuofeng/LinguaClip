@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { PracticeMode } from '../types';
 import {
   tokenizeText, getWordTokens, Token, TokenType, compareWords,
-  isInputCorrectFlexibleCase, areAllWordsCorrectFlexibleCase,
+  isInputCorrectFlexibleCase, areAllWordsCorrectFlexibleCase, judgeWord, nearMarks, letters,
 } from '../utils/textTokenizer';
+import { getLooseJudge } from '../utils/storage';
 import { ArrowRight } from 'lucide-react';
 import { Btn } from './ui';
 import { useT } from '../utils/i18n';
@@ -64,6 +65,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
   const typedRef = useRef(false);
   useEffect(() => { if (!typedRef.current) setOwnVersion(jaVersion); }, [jaVersion, targetText]);
   const version = splitVersion ?? ownVersion;
+  const lenient = useMemo(getLooseJudge, []); // 宽松判对 (docs/dictation-judge.md)
   const tokens = useMemo(() => tokenizeText(targetText), [targetText, version]); // eslint-disable-line react-hooks/exhaustive-deps
   const wordTokens = useMemo(() => getWordTokens(tokens), [tokens]);
   // Each box's time in the line; without word timings, a guess by letters.
@@ -106,6 +108,8 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
   const replayTimer = useRef<number | null>(null);
   // The blank a right word just moved on to: the habitual Space after that word lands there and is swallowed, not play/pause.
   const autoNext = useRef(-1);
+  // Blanks the cursor has left (and not come back to): a near miss shows there (docs/dictation-judge.md).
+  const [left, setLeft] = useState<Set<number>>(new Set());
   const attempt = useRef({ helped: false, reported: false });
   const report = (correct: boolean) => {
     if (attempt.current.reported) return;
@@ -117,8 +121,9 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     if (mode === PracticeMode.INPUT) {
       attempt.current = { helped: false, reported: false };
       setInputs(wordTokens.map((w, i) => isBlank(i) ? '' : w.value));
+      setLeft(new Set());
       refs.current = refs.current.slice(0, wordTokens.length);
-      setTimeout(() => refs.current[firstBlank()]?.focus(), 50);
+      refs.current[firstBlank()]?.focus();
     }
   }, [mode, targetText, wordTokens, blankSet]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -151,12 +156,13 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
   };
 
   const settle = (i: number, next: string[]) => {
-    if (!isInputCorrectFlexibleCase(next[i] ?? '', wordTokens[i].value, wordTokens[i].reading)) return;
+    if (!isInputCorrectFlexibleCase(next[i] ?? '', wordTokens[i].value, wordTokens[i].reading, lenient)) return;
     const nxt = stepBlank(i, 1);
     if (nxt >= 0) {
       autoNext.current = nxt;
-      setTimeout(() => refs.current[nxt]?.focus(), 100);
-    } else if (areAllWordsCorrectFlexibleCase(tokens, next)) {
+      // Now, inside this keystroke: a fast typist's next letter must land in the next blank (docs/shortcuts.md B1).
+      refs.current[nxt]?.focus();
+    } else if (areAllWordsCorrectFlexibleCase(tokens, next, lenient)) {
       report(true);
       clearReplay();
       // All right: replay once and show the answer, then wait for Enter so words can be looked up.
@@ -169,7 +175,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     if (mode !== PracticeMode.INPUT) return;
     clearReplay();
     if (!inputs.some(w => w.trim().length > 0)) return;
-    const correct = areAllWordsCorrectFlexibleCase(tokens, inputs);
+    const correct = areAllWordsCorrectFlexibleCase(tokens, inputs, lenient);
     report(correct);
     onComplete(correct);
   };
@@ -243,7 +249,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
   };
 
   if (mode === PracticeMode.FEEDBACK) {
-    const results = compareWords(tokens, inputs);
+    const results = compareWords(tokens, inputs, lenient);
     const wrong = new Map(results.filter(r => !r.isCorrect).map(r => [r.tokenIndex, r]));
     const typed = wordTokens.filter((_, i) => isBlank(i)).length;
     return (
@@ -255,16 +261,18 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
           {groups.map((g, gi) => {
             if (!g.word) return <span key={g.key} className="text-mute">{g.punct}</span>;
             const r = isBlank(g.wi) ? wrong.get(g.word.index) : undefined;
+            // A near miss: what you typed is not struck out; only the letters that differ turn accent, over a dashed line.
+            const marks = r?.near ? nearMarks(r.inputWord, r.targetWord) : null;
             return (
               <span key={g.key} className="relative inline-flex items-baseline">
-                {r?.inputWord && (
+                {r?.inputWord && !r.near && (
                   <span className="absolute -top-4 left-1/2 -translate-x-1/2 font-sans text-sm leading-none text-mute line-through whitespace-nowrap" title={t('dictation.youTyped')}>
                     {r.inputWord}
                   </span>
                 )}
                 <button type="button" {...bind(gi)} onClick={e => { e.currentTarget.blur(); lookup(wordAt(gi)); }} title={r ? t('dictation.expected', { word: r.targetWord }) : t('common.lookup')}
-                  className={`rounded-md -mx-1 px-1 hover:bg-accent-soft ${inSel(gi) ? 'bg-accent-soft' : ''} ${!r ? '' : r.inputWord ? 'text-accent underline decoration-2 underline-offset-[8px]' : 'underline decoration-faint decoration-2 underline-offset-[8px]'}`}>
-                  {g.word.value}
+                  className={`rounded-md -mx-1 px-1 hover:bg-accent-soft ${inSel(gi) ? 'bg-accent-soft' : ''} ${!r ? '' : r.near ? 'underline decoration-dashed decoration-accent decoration-2 underline-offset-[8px]' : r.inputWord ? 'text-accent underline decoration-2 underline-offset-[8px]' : 'underline decoration-faint decoration-2 underline-offset-[8px]'}`}>
+                  {marks ? letters(g.word.value).map((ch, k) => marks[k] ? <span key={k} className="text-accent">{ch}</span> : ch) : g.word.value}
                 </button>
                 <span className="text-mute">{g.punct}</span>
               </span>
@@ -297,7 +305,9 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
           if (!isBlank(i)) {
             return <span key={g.key} className="text-ink/40 select-none">{tk.value}{punct}</span>;
           }
-          const ok = !!inputs[i] && isInputCorrectFlexibleCase(inputs[i], tk.value, tk.reading);
+          const verdict = inputs[i] ? judgeWord(inputs[i], tk.value, tk.reading, lenient) : 'wrong';
+          const ok = verdict === 'right';
+          const near = verdict === 'near' && left.has(i);
           return (
             <span key={g.key} className="relative inline-flex items-baseline">
               {/* The slot grows with what you type; once the word is right it shrinks to fit, so the line reads like prose. */}
@@ -310,9 +320,11 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
                   onChange={e => change(i, e.target.value, (e.nativeEvent as InputEvent).isComposing)}
                   onCompositionEnd={e => settle(i, Object.assign([...inputs], { [i]: e.currentTarget.value }))}
                   onKeyDown={e => keyDown(i, e)}
+                  onFocus={() => setLeft(prev => { if (!prev.has(i)) return prev; const n = new Set(prev); n.delete(i); return n; })}
+                  onBlur={() => setLeft(prev => new Set(prev).add(i))}
                   onPaste={paste}
                   // A 44px box keeps the underline just under the letters (not under the descenders), so a comma or full stop sits on it.
-                  className={`col-start-1 row-start-1 w-full min-w-0 h-[44px] p-0 bg-transparent border-0 border-b-2 rounded-none font-serif text-ink caret-accent outline-none focus:outline-none focus-visible:outline-none ${ok ? 'border-transparent' : 'border-faint focus:border-accent'}`}
+                  className={`col-start-1 row-start-1 w-full min-w-0 h-[44px] p-0 bg-transparent border-0 border-b-2 rounded-none font-serif text-ink caret-accent outline-none focus:outline-none focus-visible:outline-none ${ok ? 'border-transparent' : near ? 'border-dashed border-accent' : 'border-faint focus:border-accent'}`}
                   autoComplete="off" autoCorrect="off" spellCheck={false}
                 />
                 <span className="invisible h-0 overflow-hidden whitespace-pre col-start-1 row-start-1">{inputs[i] || ''}</span>

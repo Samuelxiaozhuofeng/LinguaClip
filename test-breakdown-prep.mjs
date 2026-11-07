@@ -47,6 +47,13 @@ const ok = { lang: 'en', points: [{ from: 1, to: 3, note: 'Was looking for：过
   assert.equal(res[1], null);
 }
 
+// 1a. A decomposed (NFD) subtitle and the AI's composed note name the same words.
+{
+  const fr = 'Elle a été très gentille avec moi hier soir.'.normalize('NFD');
+  const note = { lang: 'fr', points: [{ from: 2, to: 3, note: 'été très：过去分词 + 副词' }] };
+  assert.deepEqual(parseBatchResponse(JSON.stringify({ lines: [note] }), [fr])[0], note);
+}
+
 // 1b. Right count but shifted: b's answer lands on a, and its note names
 //     words a does not have at those positions, so it is dropped.
 {

@@ -56,7 +56,7 @@ ${breakdownRules(lang)}
 ${blocks.join('\n\n')}`;
 }
 
-const bare = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+const bare = (s: string) => s.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''); // NFC: a decomposed subtitle matches a composed note
 
 // A note must name its own phrase ("was looking for：…", as the prompt shows):
 // an answer shifted onto the wrong line points at words the note never mentions.

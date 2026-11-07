@@ -4,11 +4,10 @@ import { Btn, Seg, Stamp } from '../components/ui';
 import { formatTimeCode } from '../utils/storage';
 import { useT } from '../utils/i18n';
 import { LOOP_TIMES, setLoopTimes, useLoop } from '../utils/loop';
+import { SPEEDS } from '../utils/speedPref';
 
 // The listening page's bottom bar: the timeline (section ticks, this section's band), speed,
 // line loop (and, while on, how many plays), pause at line ends, the page's own switches (`extra`), and the transport.
-
-const SPEEDS = [0.75, 0.9, 1, 1.25, 1.5, 2];
 
 const ListenBar: React.FC<{
   time: number; duration: number; playing: boolean;
@@ -45,7 +44,7 @@ const ListenBar: React.FC<{
       <div className="mt-2 flex items-center gap-3">
         {/* Never narrower than its buttons: in a narrow window the key hints on the right give way. */}
         <div className="flex-1 min-w-fit flex items-center gap-2">
-          <Seg<number> size="sm" className="shrink-0 [&>button]:px-1.5" value={speed} onChange={onSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
+          <Seg<number> size="sm" className="shrink-0 [&>button]:px-1.5" value={speed} onChange={onSpeed} options={SPEEDS.listen.map(s => ({ value: s, label: `${s}×` }))} />
           <Btn size="sm" tone={loop ? 'accent-soft' : 'white'} aria-pressed={loop} onClick={onLoop} title={t('listen.loopTitle')}><Repeat size={14} />{t('listen.loop')}</Btn>
           {loop && <Seg<number> size="sm" className="shrink-0 [&>button]:px-1.5" value={times} onChange={n => setLoopTimes(n as typeof times)}
             options={LOOP_TIMES.map(n => ({ value: n, label: n ? t('transport.loopN', { n }) : t('transport.loopForever'), title: t('transport.loopTimes') }))} />}

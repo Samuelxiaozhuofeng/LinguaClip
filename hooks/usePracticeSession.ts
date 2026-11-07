@@ -35,7 +35,8 @@ export interface UsePracticeSessionReturn {
   
   // Actions
   switchSection: (index: number, videoRef?: React.RefObject<HTMLVideoElement>, setIsPlaying?: (value: boolean) => void) => void;
-  handleContinue: (onSectionComplete: () => void, onPracticeComplete: () => void, onAnkiStatusChange: (status: string) => void) => void;
+  // count: false = the line was skipped, not practised (today's line count stays).
+  handleContinue: (onSectionComplete: () => void, onPracticeComplete: () => void, onAnkiStatusChange: (status: string) => void, count?: boolean) => void;
   handleNextSection: (videoRef?: React.RefObject<HTMLVideoElement>, setIsPlaying?: (value: boolean) => void) => void;
 
   // Initialization
@@ -84,9 +85,10 @@ export function usePracticeSession(params: UsePracticeSessionParams): UsePractic
   const handleContinue = useCallback((
     onSectionComplete: () => void,
     onPracticeComplete: () => void,
-    onAnkiStatusChange: (status: string) => void
+    onAnkiStatusChange: (status: string) => void,
+    count = true,
   ) => {
-    countLine();
+    if (count) countLine();
     if (currentSubtitleIndex < subtitles.length - 1) {
       setCurrentSubtitleIndex(prev => prev + 1);
       setMode(PracticeMode.LISTENING);

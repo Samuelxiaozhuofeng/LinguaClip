@@ -33,6 +33,16 @@ r = check('Hello there.', '');
 assert.equal(r.correct, false);
 assert.equal(r.wrong, 1);
 
+// The phone is always lenient (docs/dictation-judge.md): case of the whole word doesn't count.
+r = check('I bought an iPhone.', 'i bought an IPHONE');
+assert.ok(r.correct, show(r));
+r = check('I walked home.', 'I walk home');
+assert.equal(r.correct, false, 'a near miss is still wrong');
+
+// A decomposed (NFD) subtitle against the phone keyboard's composed letters.
+r = check('Él está aquí.'.normalize('NFD'), 'él está aquí');
+assert.ok(r.correct, show(r));
+
 // Japanese without the splitting dictionary: the whole line, kana folded.
 r = check('すみません。', 'スミマセン');
 assert.ok(r.correct);

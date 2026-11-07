@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Plus } from 'lucide-react';
 import { AppState } from '../types';
 import { useT } from '../utils/i18n';
 import { IS_WINDOWS } from '../utils/platform';
-import { deckCounts, getAllCards, subscribeCards } from '../utils/review';
+import { useDueSnapshot } from '../hooks/useDueSnapshot';
 import { UpdatePill } from './UpdateUI';
 
 // Page frame for the non-practice screens: wordmark, a centred pill of tabs (the two
@@ -11,17 +11,12 @@ import { UpdatePill } from './UpdateUI';
 // `podcasts`: the official build's podcast tab.
 const Shell: React.FC<{ active: AppState; onNav: (s: AppState) => void; onAdd: () => void; hideAdd?: boolean; podcasts?: boolean; children: React.ReactNode }> = ({ active, onNav, onAdd, hideAdd, podcasts, children }) => {
   const t = useT();
-  const [due, setDue] = useState({ line: 0, word: 0 });
-  useEffect(() => {
-    const load = () => getAllCards().then(c => { const n = deckCounts(c); setDue({ line: n.line.due, word: n.word.due }); }).catch(() => {});
-    load();
-    return subscribeCards(load);
-  }, []);
+  const due = useDueSnapshot(); // shared with home's "Today" bar, so the numbers agree
   const NAV: { state: AppState; label: string; badge?: number }[] = [
     { state: AppState.UPLOAD, label: t('nav.videos') },
     ...(podcasts ? [{ state: AppState.PODCASTS, label: t('nav.podcasts') }] : []),
-    { state: AppState.LIBRARY, label: t('nav.saved'), badge: due.line },
-    { state: AppState.CARDS, label: t('nav.cards'), badge: due.word },
+    { state: AppState.LIBRARY, label: t('nav.saved'), badge: due?.line },
+    { state: AppState.CARDS, label: t('nav.cards'), badge: due?.word },
     { state: AppState.SETTINGS, label: t('nav.settings') },
   ];
   return (

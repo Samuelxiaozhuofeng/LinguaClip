@@ -7,6 +7,7 @@ import WatchList from './WatchList';
 import WatchSummary, { Looked } from './WatchSummary';
 import DefinitionPanel from './DefinitionPanel';
 import ReviewSession from './ReviewSession';
+import SubtitleMask, { useMaskMenu } from './SubtitleMask';
 import { useLookup, aroundOf } from '../hooks/useLookup';
 import { useSavedLines } from '../hooks/useSavedLines';
 import { useAnkiIntegration } from '../hooks/useAnkiIntegration';
@@ -18,15 +19,16 @@ import { addWord, lineCardsFor, ReviewCard } from '../utils/review';
 import { formatTimeCode, getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos, WatchPrefs, WatchSubs } from '../utils/storage';
 import { formatCombo, lineKey, loose, matches, useShortcuts } from '../utils/shortcuts';
 import { IS_WINDOWS } from '../utils/platform';
+import { SPEEDS, useSpeed } from '../utils/speedPref';
 import { DictKey, useT } from '../utils/i18n';
 import { usePracticeClock } from '../utils/today';
+import { maskShowing, setPeek, togglePeek } from '../utils/subtitleMask';
 
 // Watch mode: the whole window is the video, the subtitle sits on the picture.
 // Look words up, save lines (S), send them to Anki, and at the end dictate a few
 // of the lines saved this time; leaving midway just leaves. Its own page: the practice
 // session, its sections and its progress are never touched.
 
-const SPEEDS = [0.75, 0.9, 1, 1.25, 1.5, 2];
 const SUBS: WatchSubs[] = ['show', 'blur', 'hide'];
 const IDLE_MS = 2500; // the pointer hides after this long still; both bars show this long on entry
 const TOP_ZONE = 88; // px from the top edge that bring the back button up
@@ -43,7 +45,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   const [duration, setDuration] = useState(0);
   const [failed, setFailed] = useState(false);
   const [prefs, setPrefsState] = useState<WatchPrefs>(getWatchPrefs);
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useSpeed('watch');
   // The line on screen: `at` = last line started, `on` = still inside it (not in the gap after).
   const [cur, setCur] = useState({ at: -1, on: false });
   const [revealed, setRevealed] = useState<number | null>(null);
@@ -57,6 +59,9 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   const [mine, setMine] = useState<number[]>([]); // lines saved this time: the summary's
 
   const shown = cur.on ? lines[cur.at] : null;
+  // A lifted mask goes with the line it was lifted for (subtitle hidden / blurred), and with a change of display.
+  useEffect(() => { if (prefs.subs !== 'show') setPeek(false); }, [cur.at]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setPeek(false), [prefs.subs]);
   const target = cur.at >= 0 ? lines[cur.at] : null; // what S / Anki / replay act on
   const [listPct, setListPct] = useState(prefs.listPct); // live while dragging; saved on release
   const setPrefs = (patch: Partial<WatchPrefs>) => {
@@ -65,6 +70,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     saveWatchPrefs(patch);
   };
   const toast = useToast();
+  const maskItems = useMaskMenu(record.id, 'watch.peek', true);
   const say = (key: DictKey) => toast.say(t(key));
 
   const { savedIds, savedItems, toggleSave } = useSavedLines({ videoId: record.id, fullSubtitles: lines, videoFileName: record.videoFileName });
@@ -155,7 +161,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     const v = videoRef.current;
     return () => { if (v && !v.ended && v.currentTime > 0) setWatchPos(record.id, v.currentTime); };
   }, [record.id]);
-  useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = speed; }, [speed]);
+  useEffect(() => { if (videoRef.current) videoRef.current.defaultPlaybackRate = videoRef.current.playbackRate = speed; }, [speed]);
 
   // --- Lookup: pauses the video; closing the card resumes it if it was playing ---
   const dictLang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
@@ -250,7 +256,13 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     else if (matches(e, 'watch.save')) act = save;
     else if (matches(e, 'watch.autoPause')) act = toggleAutoPause;
     else if (matches(e, 'watch.subs')) act = cycleSubs;
-    else if (matches(e, 'watch.peek') && shown && prefs.subs !== 'show') act = () => setRevealed(shown.id); // = the ··· / blurred line's click
+    // = the ··· / blurred line's click, which also lifts the hard-subtitle mask for this line; with the
+    // subtitle showing anyway, V lifts / restores the mask (docs/subtitle-mask.md「临时掀开」)
+    else if (matches(e, 'watch.peek') && (prefs.subs !== 'show' ? !!shown : maskShowing(record.id, true))) act = () => {
+      if (prefs.subs === 'show') return togglePeek();
+      setRevealed(shown!.id);
+      if (maskShowing(record.id, true)) setPeek(true);
+    };
     else if (matches(e, 'watch.full')) act = toggleFull;
     else if (matches(e, 'watch.anki') && ankiReady) act = toAnki;
     if (!act) return;
@@ -273,7 +285,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
     const el = e.target as Element;
     const inList = !!el.closest?.('[data-watch-list]'); // the list is beside the picture, not on it
     const top = !inList && (e.clientY < TOP_ZONE || !!el.closest?.('header'));
-    const hold = def.word !== null || !!el.closest?.('[data-watch-line]');
+    const hold = def.word !== null || !!el.closest?.('[data-watch-line], [data-subtitle-mask]'); // the mask: reaching its lower edge mustn't bring the bar over it
     setNear(n => {
       const bottom = hold ? n.bottom : !inList && (e.clientY > window.innerHeight - BOTTOM_ZONE || !!el.closest?.('footer'));
       return n.top === top && n.bottom === bottom ? n : { top, bottom };
@@ -343,17 +355,18 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
       <video ref={videoRef} crossOrigin="anonymous" src={videoSrcFromPath(record.videoPath!)} className="absolute inset-0 w-full h-full object-contain"
         onLoadedMetadata={onLoaded} onTimeUpdate={onTime} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={onEnded}
         onError={() => setFailed(true)} onClick={togglePlay} />
+      <SubtitleMask videoId={record.id} media={videoRef} onTap={togglePlay} />
 
       {failed && <p className="absolute inset-0 flex items-center justify-center px-8 text-center text-white/80 text-sm pointer-events-none">{t('watch.videoFailed')}</p>}
       {!failed && !playing && !recording && !summary && def.word === null && (
         <button type="button" onClick={togglePlay} aria-label={t('transport.playSpace')}
-          className="press absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent text-white w-16 h-16 flex items-center justify-center">
+          className="press absolute z-20 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent text-white w-16 h-16 flex items-center justify-center">
           <Play size={26} fill="currentColor" className="ml-1" />
         </button>
       )}
 
       {/* Back, on the traffic lights' centre line like the practice page */}
-      <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 flex items-center transition-opacity ${showTop ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} data-tauri-drag-region="deep">
+      <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 flex items-center [&>*]:relative [&>*]:z-20 transition-opacity ${showTop ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} data-tauri-drag-region="deep">
         <button type="button" onClick={leave} disabled={recording} title={t('studio.backToVideos')} aria-label={t('studio.backToVideos')}
           className="h-10 pl-3 pr-4 flex items-center gap-1.5 min-w-0 max-w-[60%] rounded-full bg-page border border-line text-ink text-[13px] hover:bg-shade disabled:opacity-60">
           <ArrowLeft size={16} className="shrink-0" /><span className="truncate">{record.displayName}</span>
@@ -369,14 +382,14 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
 
       {/* The subtitle rides above the controls while they show */}
       {shown && (
-        <div data-watch-line className="absolute inset-x-0 px-6 flex justify-center text-center transition-[bottom] duration-200" style={{ bottom: showBottom ? 132 : 44 }}>
+        <div data-watch-line className="absolute z-20 inset-x-0 px-6 flex justify-center pointer-events-none [&>*]:pointer-events-auto text-center transition-[bottom] duration-200" style={{ bottom: showBottom ? 132 : 44 }}>
           <WatchLine key={shown.id} videoId={record.id} ja={dictLang === 'ja'} text={shown.text} subs={prefs.subs} revealed={revealed === shown.id}
             onReveal={() => setRevealed(shown.id)} onWord={w => onWord(w, shown)} onPress={pauseForLookup} onCancel={unpause} />
         </div>
       )}
 
       {/* Controls */}
-      <footer className={`absolute inset-x-4 lg:inset-x-6 bottom-4 lg:bottom-6 px-4 pt-2.5 pb-2 rounded-2xl bg-page shadow-card transition-opacity ${showBottom ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      <footer className={`absolute z-20 inset-x-4 lg:inset-x-6 bottom-4 lg:bottom-6 px-4 pt-2.5 pb-2 rounded-2xl bg-page shadow-card transition-opacity ${showBottom ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
         <div className="h-4 flex items-center cursor-pointer" onPointerDown={scrub} onPointerMove={scrub} role="slider" aria-label={t('transport.seek')}
           aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(time)}>
           <div className="relative w-full h-1 rounded-full bg-line">
@@ -408,6 +421,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
               { label: onOff(t('watch.list'), prefs.list), onClick: () => setPrefs({ list: !prefs.list }) },
               { label: onOff(t('watch.pin'), prefs.pin), onClick: () => setPrefs({ pin: !prefs.pin }) },
               ...(ankiReady ? [{ label: t('transport.sendToAnki'), title: key('anki'), disabled: ankiStatus !== 'idle' || !target, onClick: toAnki }] : []),
+              ...maskItems,
               'divider',
             ]} trigger={(open, toggle) => (
               <Btn square size="sm" flat onClick={toggle} title={t('home.more')} aria-label={t('home.more')} className={open ? '!bg-shade !text-ink' : ''}><MoreHorizontal size={18} /></Btn>
@@ -420,7 +434,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
             }>
               <div className="px-2.5 py-2 flex flex-col gap-2">
                 <span className="text-xs text-mute">{t('transport.speed')}</span>
-                <Seg<number> size="sm" className="w-full [&>button]:flex-1 [&>button]:px-0" value={speed} onChange={setSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
+                <Seg<number> size="sm" className="w-full [&>button]:flex-1 [&>button]:px-0" value={speed} onChange={setSpeed} options={SPEEDS.watch.map(s => ({ value: s, label: `${s}×` }))} />
                 <span className="text-xs text-mute">{withKey(t('watch.keySubs'), key('subs'))}</span>
                 <Seg size="sm" className="w-full [&>button]:flex-1" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey) }))} />
               </div>

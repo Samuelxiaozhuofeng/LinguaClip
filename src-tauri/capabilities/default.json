@@ -49,6 +49,9 @@
           "url": "https://*.ts.net/*"
         },
         {
+          "url": "http://*.ts.net:*/*"
+        },
+        {
           "url": "https://*/*"
         }
       ]

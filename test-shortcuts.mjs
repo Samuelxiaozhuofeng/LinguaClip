@@ -68,7 +68,7 @@ assert.equal(takenBy('watch.save', k('ArrowUp', true), defaults), 'watch.prev', 
 assert.equal(takenBy('watch.save', k('ArrowLeft', true), defaults), 'watch.prev', '⌘← too');
 assert.equal(takenBy('watch.save', k('ArrowUp', true), { ...defaults, 'watch.prev': k('KeyJ') }), null, 'hidden keys go once prev is changed');
 assert.equal(takenBy('watch.prev', k('ArrowLeft'), { ...defaults, 'watch.prev': k('KeyJ'), 'watch.save': k('ArrowUp', true) }), 'watch.save', 'back to ← brings ⌘↑ back: clash');
-assert.equal(takenBy('dict.prev', k('KeyI', true), { ...defaults, 'watch.save': k('KeyI', true) }), 'watch.save', 'dictation prev is a hidden watch key');
+assert.equal(takenBy('dict.prev', k('KeyO', true), { ...defaults, 'watch.save': k('KeyO', true) }), 'watch.save', 'dictation prev is a hidden watch key');
 assert.ok(!zonesShare('dict.play', 'blank.jump') && !zonesShare('watch.peek', 'watch.drillShow'), 'meant to share');
 
 // Reading back: unknown ids and keys a page can't take are dropped.

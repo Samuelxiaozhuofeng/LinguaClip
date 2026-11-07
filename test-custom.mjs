@@ -108,4 +108,51 @@ assert.throws(() => parseLevelResponse('sorry', 1));
   assert.match(p, /长度必须等于 2/);
 }
 
+// 10. A click on the card goes on the last way (components/CustomPanel.tsx resumeChoice,
+// docs/watch.md 点视频直接开播), including reading. `@pro` is a stub whose Reader / Listen
+// are switched per case, so "no Pro reader" is checked too.
+{
+  const store = {};
+  globalThis.localStorage = { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } };
+  globalThis.__pro = { Reader: null, Listen: null };
+  const out2 = join(tmpdir(), `custom-resume-${process.pid}.mjs`);
+  await build({
+    stdin: { contents: "export { resumeChoice } from './components/CustomPanel'; export { getLastWay, setLastWay } from './utils/storage';", resolveDir: '.', loader: 'ts' },
+    bundle: true, format: 'esm', outfile: out2, platform: 'node', jsx: 'automatic', logLevel: 'error',
+    plugins: [{
+      name: 'stubs',
+      setup(b) {
+        b.onResolve({ filter: /^@pro$|^@tauri-apps\/plugin-http$/ }, a => ({ path: a.path, namespace: 'stub' }));
+        b.onLoad({ filter: /.*/, namespace: 'stub' }, a => ({
+          contents: a.path === '@pro'
+            ? 'export const Reader = globalThis.__pro.Reader, Listen = globalThis.__pro.Listen, cancelTrans = async () => {};'
+            : 'export const fetch = globalThis.fetch;',
+        }));
+      },
+    }],
+  });
+  const load = async (pro) => { globalThis.__pro = pro; return import(`${out2}?${Math.random()}`); };
+  const rec = { id: 'v1', subtitleText: '1\n00:00:01,000 --> 00:00:02,000\nhi\n', videoPath: '/a.mp4' };
+  const withReader = await load({ Reader: () => null, Listen: null });
+  const { resumeChoice, getLastWay, setLastWay } = withReader;
+
+  assert.equal(await resumeChoice(rec, 'dictation'), null, 'never started: the panel asks');
+  setLastWay('v1', 'read');
+  assert.equal(getLastWay('v1'), 'read', 'read is kept');
+  assert.deepEqual(await resumeChoice(rec, 'dictation'), { kind: 'read', by: 'all' }, 'last read: reading again, the saved way to read');
+  store.linguaclip_watch_prefs = JSON.stringify({ readBy: 'section' });
+  assert.deepEqual(await resumeChoice(rec, 'dictation'), { kind: 'read', by: 'section' }, 'reads by section when that was chosen');
+  assert.deepEqual(await resumeChoice(rec, 'dictation', true), { kind: 'all' }, '"practise with dictation / blur": section by section, not the reader');
+  setLastWay('v1', 'watch');
+  assert.deepEqual(await resumeChoice(rec, 'dictation'), { kind: 'watch' }, 'watch still watches');
+  setLastWay('v1', 'all');
+  assert.deepEqual(await resumeChoice(rec, 'dictation'), { kind: 'all' }, 'a practice picked after reading replaces read');
+  store.linguaclip_last_way = JSON.stringify({ v1: 'bogus' });
+  assert.equal(getLastWay('v1'), null, 'an unknown way = never started');
+
+  const noReader = await load({ Reader: null, Listen: null });
+  noReader.setLastWay('v1', 'read');
+  assert.equal(await noReader.resumeChoice(rec, 'dictation'), null, 'last read but no Pro reader: the panel asks');
+}
+
 console.log('test-custom: all passed');

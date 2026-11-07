@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Subtitle, PracticeMode, LearningMode, BlurPlaybackMode } from '../types';
 import { playSpan } from '../utils/wordTimes';
 import { loopMore, pageLoopHeld, LOOP_GAP_MS } from '../utils/loop';
+import { useSpeed } from '../utils/speedPref';
 
 export interface UseVideoPlayerParams {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -56,7 +57,7 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [playbackSpeed, setPlaybackSpeed] = useSpeed('dictation');
   const [progress, setProgress] = useState(0);
   const requestRef = useRef<number | undefined>(undefined);
   const blurAutoAdvanceRef = useRef(false);
@@ -178,7 +179,12 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
 
   // Volume and speed apart: a volume change while an Anki clip records at 1× must not put the speed back.
   useEffect(() => { if (videoRef.current) videoRef.current.volume = volume; }, [volume, videoRef]);
-  useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = playbackSpeed; }, [playbackSpeed, videoRef]);
+  // Each practice mounts a new <video> while this hook lives on: the speed goes onto whichever element
+  // is there. Checked against defaultPlaybackRate, which the Anki recorder's 1× leaves alone.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v && v.defaultPlaybackRate !== playbackSpeed) v.defaultPlaybackRate = v.playbackRate = playbackSpeed;
+  });
 
   // Seek + autoplay when the line changes. Deliberately not keyed on isPlaying:
   // otherwise the end-of-line pause flips isPlaying and this would restart the video.

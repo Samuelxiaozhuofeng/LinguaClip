@@ -38,7 +38,9 @@ export const tokenizeText = (text: string): Token[] => {
   // \p{L} matches any Unicode letter (including ñ, ó, á, é, í, ú, ü, etc.)
   // \p{N} matches any Unicode number
   // Supports apostrophes within words, straight or curly (don't, don’t, it's)
-  const pattern = /([\p{L}\p{N}]+(?:['’][\p{L}]+)?)|([^\p{L}\p{N}\s])|(\s+)/gu;
+  // A combining accent (U+0300–036F: a decomposed é, from an NFD subtitle) stays on its letter,
+  // so token values still spell the line exactly; other marks split as before.
+  const pattern = /((?:[\p{L}\p{N}][\u0300-\u036f]*)+(?:['’](?:\p{L}[\u0300-\u036f]*)+)?)|([^\p{L}\p{N}\s])|(\s+)/gu;
 
   let match;
   while ((match = pattern.exec(text)) !== null) {
@@ -79,8 +81,9 @@ export const getWordTokens = (tokens: Token[]): Token[] => {
 /**
  * Check if input matches target (case-insensitive)
  */
-// A keyboard types ' where subtitles often have ’; both count.
-const foldQuote = (s: string) => s.trim().replace(/’/g, "'");
+// A keyboard types ' where subtitles often have ’; both count. A composed é and e + ◌́ are
+// the same letter (NFC), whichever the keyboard or the subtitle file used.
+const foldQuote = (s: string) => s.trim().normalize('NFC').replace(/’/g, "'");
 
 export const isInputCorrect = (input: string, target: string): boolean => {
   return foldQuote(input).toLowerCase() === foldQuote(target).toLowerCase();
@@ -89,14 +92,17 @@ export const isInputCorrect = (input: string, target: string): boolean => {
 /**
  * Check if input matches target with flexible first letter case
  * First letter can be different case, but rest must match exactly
- * @param input - User input word
- * @param target - Target word
- * @returns true if words match with flexible first letter case
+ * lenient (宽松判对, docs/dictation-judge.md): punctuation at either end is dropped and
+ * case is ignored for the whole word.
  */
-export const isInputCorrectFlexibleCase = (input: string, target: string, reading?: string): boolean => {
+export const isInputCorrectFlexibleCase = (input: string, target: string, reading?: string, lenient = false): boolean => {
   if (reading !== undefined && input.trim()) {
     const typed = kanaFold(input);
     if (typed === kanaFold(target) || typed === kanaFold(reading)) return true;
+  }
+  if (lenient) {
+    const a = looseForm(input);
+    return !!a && a === looseForm(target);
   }
   const trimmedInput = foldQuote(input);
   const trimmedTarget = foldQuote(target);
@@ -120,6 +126,61 @@ export const isInputCorrectFlexibleCase = (input: string, target: string, readin
   }
 
   return true;
+};
+
+// --- 宽松判对 and 差一点 (docs/dictation-judge.md) ---
+
+const looseForm = (s: string) => foldQuote(s).replace(/^[\p{P}\p{S}\s]+|[\p{P}\p{S}\s]+$/gu, '').toLowerCase();
+const stripMarks = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '');
+// A word's letters: each base character with the accents on it (NFC é, or NFD e + ◌́).
+export const letters = (s: string): string[] => s.match(/\P{M}\p{M}*/gu) ?? [];
+const looseLetters = (s: string) => letters(looseForm(s));
+const accentOnly = (a: string[], b: string[]) => a.length === b.length && a.every((x, k) => stripMarks(x) === stripMarks(b[k]));
+const ENDINGS = ['s', 'es', 'ed', 'd'];
+// One word is the other plus an English ending; the shorter has at least 3 letters (not a / as).
+const endingOnly = (a: string[], b: string[]) => {
+  const [s, l] = a.length < b.length ? [a, b] : [b, a];
+  return s.length >= 3 && l.slice(0, s.length).join('') === s.join('') && ENDINGS.includes(l.slice(s.length).join(''));
+};
+// Exactly one letter added, dropped or changed.
+const oneEdit = (a: string[], b: string[]) => {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1).join('') === b.slice(i + 1).join('');
+  return a.length > b.length ? a.slice(i + 1).join('') === b.slice(i).join('') : a.slice(i).join('') === b.slice(i + 1).join('');
+};
+
+export type Verdict = 'right' | 'near' | 'wrong';
+
+// right: the box is right. near (only when lenient): wrong, but only by accents, an English
+// ending, or one letter of a word of 6+ letters. Japanese boxes are never near.
+export const judgeWord = (input: string, target: string, reading?: string, lenient = false): Verdict => {
+  if (isInputCorrectFlexibleCase(input, target, reading, lenient)) return 'right';
+  if (!lenient || reading !== undefined || hasKana(target)) return 'wrong';
+  const a = looseLetters(input), b = looseLetters(target);
+  if (!a.length) return 'wrong';
+  return nearKind(a, b) ? 'near' : 'wrong';
+};
+
+// Which rule makes a and b a near miss, if any (the rules in docs/dictation-judge.md).
+const nearKind = (a: string[], b: string[]): 'accent' | 'ending' | 'edit' | null =>
+  accentOnly(a, b) ? 'accent' : endingOnly(a, b) ? 'ending' : b.length >= 6 && oneEdit(a, b) ? 'edit' : null;
+
+// Which letters of a near-miss target differ from what was typed, one flag per letter of
+// the target (letters()), each rule lined up its own way: accents letter by letter at the
+// same place (résumé / resume → both é; réel / reél → é and e); an ending → its letters
+// (walk / walked → e, d); one edit → the letter changed or left out. None set when the
+// typed word only has letters added. null when not a near miss.
+export const nearMarks = (input: string, target: string): boolean[] | null => {
+  const a = looseLetters(input), b = looseLetters(target);
+  const kind = nearKind(a, b);
+  if (!kind || b.length !== letters(target).length) return null;
+  if (kind === 'accent') return b.map((x, k) => x !== a[k]);
+  if (kind === 'ending') return b.map((_, k) => k >= a.length);
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  return b.map((_, k) => k === p && a.length <= b.length);
 };
 
 /**
@@ -157,7 +218,7 @@ export const areAllWordsCorrect = (tokens: Token[], wordInputs: string[]): boole
  * Check if all words are correctly filled with flexible case matching
  * First letter case-insensitive, rest case-sensitive
  */
-export const areAllWordsCorrectFlexibleCase = (tokens: Token[], wordInputs: string[]): boolean => {
+export const areAllWordsCorrectFlexibleCase = (tokens: Token[], wordInputs: string[], lenient = false): boolean => {
   const wordTokens = getWordTokens(tokens);
 
   if (wordInputs.length !== wordTokens.length) {
@@ -166,7 +227,7 @@ export const areAllWordsCorrectFlexibleCase = (tokens: Token[], wordInputs: stri
 
   return wordTokens.every((token, index) => {
     const input = wordInputs[index];
-    return input && isInputCorrectFlexibleCase(input, token.value, token.reading);
+    return input && isInputCorrectFlexibleCase(input, token.value, token.reading, lenient);
   });
 };
 
@@ -177,6 +238,7 @@ export interface WordComparisonResult {
   targetWord: string;
   inputWord: string;
   isCorrect: boolean;
+  near: boolean; // wrong, but only just (docs/dictation-judge.md)
   tokenIndex: number; // Index in the full token array
 }
 
@@ -187,19 +249,20 @@ export interface WordComparisonResult {
  * @param wordInputs - User inputs for word tokens only
  * @returns Array of comparison results for each word
  */
-export const compareWords = (tokens: Token[], wordInputs: string[]): WordComparisonResult[] => {
+export const compareWords = (tokens: Token[], wordInputs: string[], lenient = false): WordComparisonResult[] => {
   const wordTokens = getWordTokens(tokens);
   const results: WordComparisonResult[] = [];
 
   for (let i = 0; i < wordTokens.length; i++) {
     const targetWord = wordTokens[i].value;
     const inputWord = wordInputs[i] || '';
-    const isCorrect = inputWord && isInputCorrectFlexibleCase(inputWord, targetWord, wordTokens[i].reading);
+    const verdict = inputWord ? judgeWord(inputWord, targetWord, wordTokens[i].reading, lenient) : 'wrong';
 
     results.push({
       targetWord,
       inputWord,
-      isCorrect,
+      isCorrect: verdict === 'right',
+      near: verdict === 'near',
       tokenIndex: wordTokens[i].index
     });
   }
@@ -212,7 +275,7 @@ export const compareWords = (tokens: Token[], wordInputs: string[]): WordCompari
 // and punctuation; else (Japanese) every group the word overlaps; else the group
 // looked up as it (諦めた → 諦める). Not in the line: none, so nothing is marked wrongly.
 export const targetWords = (words: string[], word: string): number[] => {
-  const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}'’-]/gu, '');
+  const norm = (w: string) => w.normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}'’-]/gu, ''); // NFC: a decomposed accent is not dropped
   // A phrase (figure it out): its words in a row — before single words, or "can not" would find "cannot".
   const parts = getWordTokens(tokenizeText(word)).map(t => norm(t.value));
   if (parts.length > 1) {

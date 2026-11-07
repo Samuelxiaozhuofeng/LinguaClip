@@ -112,6 +112,8 @@ assert.equal(R.wordIndexIn(['Hello', 'there'], 'the'), 0);
 assert.deepEqual(R.wordBoxes(['今日は', 'いい天気', 'ですね'], '天気ですね'), [1, 2]);
 assert.deepEqual(R.wordBoxes(['今日は', 'いい', '天気ですね'], '今日はいい天気ですね'), [0, 1, 2], 'an older whole-line card blanks the whole line');
 assert.deepEqual(R.wordBoxes(['Hello', 'there,', 'friend.'], 'friend'), [2]);
+assert.deepEqual(R.wordBoxes(['Mon', 'résumé'.normalize('NFD'), 'est'], 'résumé'), [1], 'a word kept composed (NFC) finds its decomposed (NFD) box');
+assert.deepEqual(R.wordBoxes(['Mon', 'résumé', 'est'], 'résumé'.normalize('NFD')), [1], 'and the other way');
 
 // Old bookmarks find their line by file name + text, nearest mm:ss wins.
 const srt = '1\n00:00:01,000 --> 00:00:02,000\nYeah.\n\n2\n00:01:05,000 --> 00:01:07,500\nYeah.\n\n3\n00:01:10,000 --> 00:01:12,000\nOther line.\n';

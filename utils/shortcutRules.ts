@@ -1,4 +1,4 @@
-import { ACTION, ACTIONS, maySharePair, type Combo } from './shortcutActions';
+import { ACTION, ACTIONS, isLive, maySharePair, type Combo } from './shortcutActions';
 
 // Which keys an action may take, and which other action already holds one.
 // Pages where you type (dictation, the blank) take ⌘ combos or keys that print
@@ -53,7 +53,7 @@ export const zonesOf = (id: string, c: Combo) => {
 export function effective(table: Table): Live[] {
   const at = (id: string) => table[id] ?? ACTION.get(id)!.def;
   const isDef = (id: string) => sameCombo(at(id), ACTION.get(id)!.def);
-  const out: Live[] = ACTIONS.map(a => ({ id: a.id, src: a.id, combo: at(a.id), zones: zonesOf(a.id, at(a.id)) }));
+  const out: Live[] = ACTIONS.filter(isLive).map(a => ({ id: a.id, src: a.id, combo: at(a.id), zones: zonesOf(a.id, at(a.id)) }));
   for (const dir of ['prev', 'next'] as const) {
     const id = `watch.${dir}`, z = ACTION.get(id)!.zones as string[];
     if (!isDef(id)) continue;

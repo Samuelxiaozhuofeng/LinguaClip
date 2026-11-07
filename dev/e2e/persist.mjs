@@ -1,8 +1,9 @@
 // What outlives the page: records and cards after a reload, and what deleting the video takes with it.
-import { readFileSync } from 'node:fs';
 
 const NAME = 'Me at the zoo [jNQXAC9IVRw].mp4';
-const firstLine = sample => readFileSync(`${sample}.srt`, 'utf8').split(/\r?\n/)[2].trim();
+// The sample's first line has 18 words: on import it is cut after "are," (docs/import.md「自带字幕自动切长句」),
+// so the clip has 4 lines and line 1 is this.
+const firstLine = () => 'Alright, so here we are,';
 
 export default [
   {

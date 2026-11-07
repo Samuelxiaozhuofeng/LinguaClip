@@ -1,13 +1,13 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Play, Pause, SkipBack, SkipForward, RotateCcw, Repeat, Bookmark, PlusCircle, Volume2, VolumeX, Mic, Check, X, Loader2, MoreHorizontal, Keyboard } from 'lucide-react';
 import { usePracticeContext } from '../hooks/usePracticeContext';
 import { Btn, Menu, MenuItem, Seg } from './ui';
 import { useT } from '../utils/i18n';
-import { formatCombo, useShortcuts } from '../utils/shortcuts';
+import { formatCombo, matches, useShortcuts } from '../utils/shortcuts';
 import { useLoop, setLoopTimes, LOOP_TIMES } from '../utils/loop';
 import { LearningMode, BlurPlaybackMode } from '../types';
-
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+import { SPEEDS } from '../utils/speedPref';
+import { useMaskMenu } from './SubtitleMask';
 
 // The remote along the bottom of the practice sheet: save / Anki / mute on the left,
 // the play controls in the middle, a "…" on the right for the rarer settings (speed,
@@ -36,12 +36,28 @@ const Transport: React.FC<{ menuItems: MenuItem[]; menuPanel?: React.ReactNode; 
   const af = ankiFace();
   const combos = useShortcuts();
   const withKey = (label: string, id: string) => `${label} (${formatCombo(combos[`dict.${id}`])})`;
-  const items: MenuItem[] = [...menuItems, { label: <><Keyboard size={15} /> {pinned ? t('keys.hide') : t('keys.show')}</>, onClick: onTogglePinned }];
+  const maskItems = useMaskMenu(practice.videoId, 'dict.mask');
+  const items: MenuItem[] = [...menuItems, ...maskItems, { label: <><Keyboard size={15} /> {pinned ? t('keys.hide') : t('keys.show')}</>, onClick: onTogglePinned }];
+
+  // dict.save = the bookmark button, typing or not (docs/shortcuts.md B3). Same guard as BlurLine's
+  // dict.revealLine: not while composing, recording or under a done overlay; review and dialogs stop it first.
+  const keysOn = !practice.showSectionComplete && !practice.showComplete && !recording;
+  const toggleSave = actions.onToggleSaveCurrent;
+  useEffect(() => {
+    if (!keysOn) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || e.keyCode === 229 || !matches(e, 'dict.save')) return;
+      e.preventDefault();
+      toggleSave();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [keysOn, toggleSave]);
 
   return (
     <footer className={`relative shrink-0 h-[76px] px-6 lg:px-24 flex items-center text-mute transition-colors ${recording ? 'bg-accent-soft' : ''}`}>
       <div className="flex-1 min-w-0 flex items-center gap-0.5 -ml-2">
-        <Btn square size="sm" flat onClick={actions.onToggleSaveCurrent} title={isCurrentSaved ? t('transport.unsaveLine') : t('transport.saveLine')} className={isCurrentSaved ? '!text-accent' : ''}>
+        <Btn square size="sm" flat onClick={actions.onToggleSaveCurrent} title={withKey(isCurrentSaved ? t('transport.unsaveLine') : t('transport.saveLine'), 'save')} className={isCurrentSaved ? '!text-accent' : ''}>
           <Bookmark size={17} fill={isCurrentSaved ? 'currentColor' : 'none'} />
         </Btn>
         {ankiReady && (
@@ -81,7 +97,7 @@ const Transport: React.FC<{ menuItems: MenuItem[]; menuPanel?: React.ReactNode; 
         )}>
           <div className="px-2.5 py-2 flex flex-col gap-2">
             <span className="text-xs text-mute">{t('transport.speed')}</span>
-            <Seg size="sm" className="w-full [&>button]:flex-1 [&>button]:px-0" value={playbackSpeed} onChange={actions.onSetPlaybackSpeed} options={SPEEDS.map(s => ({ value: s, label: `${s}×` }))} />
+            <Seg size="sm" className="w-full [&>button]:flex-1 [&>button]:px-0" value={playbackSpeed} onChange={actions.onSetPlaybackSpeed} options={SPEEDS.dictation.map(s => ({ value: s, label: `${s}×` }))} />
           </div>
           <div className="px-2.5 py-2 flex flex-col gap-2">
             <span className="text-xs text-mute">{t('transport.loopTimes')}</span>

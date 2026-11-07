@@ -16,6 +16,7 @@ import { settleSplits } from '../utils/jaSegments';
 import { videoSrcFromPath } from '../utils/desktop';
 import { getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos, type WatchSubs } from '../utils/storage';
 import { LOOP_GAP_MS, loopMore, setLoopOn, useLoop } from '../utils/loop';
+import { useSpeed } from '../utils/speedPref';
 import { lineKey, loose, matches } from '../utils/shortcuts';
 import { IS_WINDOWS } from '../utils/platform';
 import { useT, type DictKey } from '../utils/i18n';
@@ -57,7 +58,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useSpeed('listen');
   const [mode, setModeState] = useState<WatchSubs>(() => getWatchPrefs().listenSubs);
   const setMode = (m: WatchSubs) => { setModeState(m); saveWatchPrefs({ listenSubs: m }); };
   const [autoPause, setAutoPause] = useState(() => getWatchPrefs().autoPause);

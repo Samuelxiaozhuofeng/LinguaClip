@@ -86,7 +86,8 @@ assert.deepEqual(words('提出しなければなりません'), ['提出', 'し�
 // 7. English is untouched.
 assert.deepEqual(words("Don't stop, Mary."), ["Don't", 'stop', 'Mary']);
 assert.ok(isInputCorrectFlexibleCase('mary', 'Mary'));
-assert.ok(!isInputCorrectFlexibleCase('MARY', 'Mary'));
+assert.ok(!isInputCorrectFlexibleCase('MARY', 'Mary'), 'strict: only the first letter may differ in case');
+assert.ok(isInputCorrectFlexibleCase('MARY', 'Mary', undefined, true), 'lenient (宽松判对): case ignored for the whole word');
 
 // --- what a clicked group is looked up as ---
 for (const [group, lemma] of [['食べました', '食べる'], ['お茶を', 'お茶'], ['今日は', '今日'], ['行きたくない', '行く'],

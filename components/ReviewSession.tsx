@@ -30,6 +30,8 @@ import { hasKana, jaReady, useJaVersion } from '../utils/japanese';
 import { settleSplits } from '../utils/jaSegments';
 import { loadWords, playSpan, useTimedWords } from '../utils/wordTimes';
 import { locateWord, type WordSpot } from '../utils/wordAudio';
+import SubtitleMask from './SubtitleMask';
+import { maskShowing, setPeek, togglePeek } from '../utils/subtitleMask';
 
 // A review round: one card at a time over the whole window (clip on top, a white
 // sheet below, like the practice page). A sentence card is dictated, a word card is
@@ -64,6 +66,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
   const writes = useRef<Promise<unknown>[]>([]);
   const clip = useClip();
   const rootRef = useRef<HTMLDivElement>(null);
+  const shotRef = useRef<HTMLImageElement>(null);
 
   usePracticeClock();
   const card = queue[idx] as ReviewCard | undefined;
@@ -312,8 +315,10 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
   const defOpen = def.word !== null;
   const front0 = isWord && !turned && !!path && splitsReady && !done;
   const canRemove = !!card && !done;
-  const keys = useRef({ quit, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord });
-  keys.current = { quit, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord };
+  const maskId = done || path === null || front0 ? null : card?.videoId; // the mask shows on this card's picture (docs/subtitle-mask.md)
+  useEffect(() => setPeek(false), [card?.id, idx]); // lifted for one card only (idx: "Again" on the last card re-queues the same id)
+  const keys = useRef({ quit, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord, maskId });
+  keys.current = { quit, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord, maskId };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return; // Esc / Enter inside a Japanese input method
@@ -324,6 +329,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
       const on = (id: string) => matches(e, id) && !(typing && !getCombo(id).mod && e.code !== 'Escape');
       if (on('review.close') || (loose(e, 'review.close', typing ? 'reviewBlank' : 'reviewOut') && e.code === 'Escape')) { e.preventDefault(); e.stopPropagation(); if (k.defOpen) k.closeDef(); else k.quit(); return; }
       if (!k.done && !k.defOpen && on('review.loop')) { e.preventDefault(); e.stopPropagation(); k.toggleLoop(); return; }
+      if (!k.done && !k.defOpen && maskShowing(k.maskId) && on('review.mask')) { e.preventDefault(); e.stopPropagation(); togglePeek(); return; }
       if (!typing && !k.done && !k.defOpen) {
         const hit = (run: () => void) => { e.preventDefault(); e.stopPropagation(); run(); };
         if (k.front0 && on('review.flip')) return hit(k.turn);
@@ -350,7 +356,8 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
       <div className="relative min-h-0 flex items-center justify-center" style={{ flex: isWord && turned ? '45 1 0' : '60 1 0' }}>
         {clip.video(`block w-full h-full object-contain ${hidden ? 'invisible' : ''}`)}
         {/* A sound-only clip: its still stands in for the picture. */}
-        {!hidden && source?.image && <img src={videoSrcFromPath(source.image)} alt="" className="absolute inset-0 w-full h-full object-contain" />}
+        {!hidden && source?.image && <img ref={shotRef} src={videoSrcFromPath(source.image)} alt="" className="absolute inset-0 w-full h-full object-contain" />}
+        {!hidden && card && <SubtitleMask videoId={card.videoId} media={source?.image ? shotRef : clip.ref} edit={false} />}
         {front0 && <p className="absolute text-[13px] text-mute">{t('review.hidden')}</p>}
         <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 lg:pr-6 flex items-center justify-between gap-3 text-[13px]`} data-tauri-drag-region="deep">
           <button type="button" onClick={quit} className="press h-[42px] pl-3.5 pr-4 rounded-full bg-page border border-line text-ink flex items-center gap-1.5"><X size={15} /> {t('session.quit')}</button>
