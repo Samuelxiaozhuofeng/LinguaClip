@@ -170,7 +170,7 @@ try {
   await page.keyboard.type('HELLO');
   await page.waitForTimeout(300);
   ok((await focusedBox()) === 0, '严格：整词大写「HELLO」不判对、不跳格');
-  await page.keyboard.press('Meta+KeyA');
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+KeyA' : 'Control+KeyA');
   await page.keyboard.type('Hello');
   ok((await focusedBox()) === 1, '严格：Hello 照旧判对跳格');
   await page.keyboard.type('I');
@@ -195,6 +195,45 @@ try {
   await page.getByRole('radio', { name: '快捷键', exact: true }).click();
   await see(page.getByText('收藏这句'), '设置 → 快捷键「听写」页有「收藏这句」');
   await shot('S2-settings-keys');
+
+  console.log('B1 乱序填词：跳过已填对的格 + 补齐最后一处空缺自动过关 + 200ms 内回车立即过关');
+  await page.evaluate(async () => {
+    await (await import('/utils/fileSystemAccess.ts')).updateVideoInDB('zoo', r => ({ ...r, currentSubtitleIndex: 0, currentSectionIndex: 0, completionRate: 0 }));
+  });
+  await start();
+  await waitBoxes(6);
+  await boxes.nth(2).click();
+  await page.keyboard.type('walked');
+  ok((await focusedBox()) === 3, '先填第 3 格 walked → 跳到第 4 格');
+  await boxes.nth(0).click();
+  await page.keyboard.type('Hello');
+  ok((await focusedBox()) === 1, '从头填第 1 格 Hello → 跳到第 2 格');
+  await page.keyboard.type('I');
+  ok((await focusedBox()) === 3, '填对第 2 格 I → 自动跳过已填对的第 3 格，落进第 4 格');
+  await boxes.nth(4).click();
+  await page.keyboard.type('the');
+  await page.keyboard.type('zoo');
+  await page.waitForTimeout(300);
+  ok((await boxes.count()) === 6, '末尾填完但中间第 4 格还空着：不提前交卷');
+  await boxes.nth(3).click();
+  await page.keyboard.type('to');
+  await see(page.getByText('6 个词对了 6 个'), '回头补齐中间最后一个空缺词 to → 自动过关（6 个词对了 6 个）', 3000);
+  console.log('  ✓ 回头补齐中间最后一个空缺词自动过关');
+  await shot('B1-out-of-order');
+
+  await page.keyboard.press('Enter');
+  await waitBoxes(3);
+  await boxes.nth(2).click();
+  await page.keyboard.type('home');
+  await boxes.nth(0).click();
+  await page.keyboard.type("I'm");
+  ok((await focusedBox()) === 1, "先填末格 home 再填首格 I'm → 跳到中间第 2 格");
+  await page.keyboard.type('going');
+  await page.keyboard.press('Enter');
+  await see(page.getByText('3 个词对了 3 个'), '中间格补齐整句后立即按 Enter → 直接交卷过关');
+  await page.waitForTimeout(300);
+  await see(page.getByText('3 个词对了 3 个'), '200ms 定时器已清，不会二次触发跳到下一句');
+  console.log('  ✓ 中间格补齐后 200ms 内按 Enter 立即过关且不二次换句');
 
   if (t.errors.length) throw new Error('页面报错：' + t.errors.join(' / '));
   console.log('全部通过，截图在 ' + t.out);

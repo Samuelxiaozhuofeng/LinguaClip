@@ -95,6 +95,12 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     }
     return -1;
   };
+  const nextOpenBlank = (from: number, list: string[]) => {
+    for (let i = from + 1; i < wordTokens.length; i++) {
+      if (isBlank(i) && !isInputCorrectFlexibleCase(list[i] ?? '', wordTokens[i].value, wordTokens[i].reading, lenient)) return i;
+    }
+    return -1;
+  };
   const firstBlank = () => {
     for (let i = 0; i < wordTokens.length; i++) if (isBlank(i)) return i;
     return 0;
@@ -157,16 +163,18 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
 
   const settle = (i: number, next: string[]) => {
     if (!isInputCorrectFlexibleCase(next[i] ?? '', wordTokens[i].value, wordTokens[i].reading, lenient)) return;
-    const nxt = stepBlank(i, 1);
-    if (nxt >= 0) {
-      autoNext.current = nxt;
-      // Now, inside this keystroke: a fast typist's next letter must land in the next blank (docs/shortcuts.md B1).
-      refs.current[nxt]?.focus();
-    } else if (areAllWordsCorrectFlexibleCase(tokens, next, lenient)) {
+    if (areAllWordsCorrectFlexibleCase(tokens, next, lenient)) {
       report(true);
       clearReplay();
       // All right: replay once and show the answer, then wait for Enter so words can be looked up.
       replayTimer.current = window.setTimeout(() => { onReplay(false); onComplete(true); }, 200);
+      return;
+    }
+    const nxt = nextOpenBlank(i, next);
+    if (nxt >= 0) {
+      autoNext.current = nxt;
+      // Now, inside this keystroke: a fast typist's next letter must land in the next blank (docs/shortcuts.md B1).
+      refs.current[nxt]?.focus();
     }
   };
 
@@ -205,7 +213,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     if (loose(e, 'blank.jump', zone) || loose(e, 'blank.submit', zone)) {
       e.preventDefault();
       autoNext.current = -1;
-      const nxt = stepBlank(i, 1);
+      const nxt = areAllWordsCorrectFlexibleCase(tokens, inputs, lenient) ? -1 : stepBlank(i, 1);
       if (nxt >= 0) refs.current[nxt]?.focus(); else submit();
     } else if ((loose(e, 'blank.back', zone) && at('Backspace', inputs[i] === '')) || (loose(e, 'blank.backLeft', zone) && at('ArrowLeft', caret === 0))) {
       const prev = stepBlank(i, -1);
