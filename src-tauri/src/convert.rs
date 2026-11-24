@@ -33,6 +33,13 @@ const FFMPEG: Asset = Asset {
   sha256: "e2aaeaa0fdbc397d4794828086424d4aaa2102cef1fb6874f6ffd29c0b88b673",
   urls: &["https://github.com/GyanD/codexffmpeg/releases/download/8.0.1/ffmpeg-8.0.1-essentials_build.zip"],
 };
+#[cfg(not(any(target_os = "macos", windows)))]
+const FFMPEG: Asset = Asset {
+  name: "",
+  size: 0,
+  sha256: "",
+  urls: &[],
+};
 // Where the zip keeps it; moved up to tool_dir()/ffmpeg(.exe) after unpacking.
 #[cfg(windows)]
 const IN_ZIP: &str = "ffmpeg-8.0.1-essentials_build/bin/ffmpeg.exe";
@@ -76,6 +83,9 @@ pub(crate) fn ensure(on_pct: impl FnMut(u32)) -> Result<PathBuf, String> {
 }
 
 fn download(dir: &Path, mut on_pct: impl FnMut(u32)) -> Result<PathBuf, String> {
+  if FFMPEG.urls.is_empty() {
+    return Err("convertSetup:unsupported".into());
+  }
   std::fs::create_dir_all(dir).map_err(|e| format!("setup:{e}"))?;
   let mut last = None;
   tauri::async_runtime::block_on(fetch(&FFMPEG, dir, |got| {

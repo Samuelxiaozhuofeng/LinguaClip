@@ -46,3 +46,11 @@ export const deleteCacheTexts = (id: string): Promise<void> => deleteCache(id);
 
 // The Japanese splitting dictionary: Cache Storage instead of files on disk.
 export { jaDictStatus, installJaDict, removeJaDict, onJaDictProgress, readBinaryFile, type JaDictStatus } from './jaDict';
+
+// Android-only native clip / desktop-zip backup & restore hooks (no-ops on web/PWA).
+export const resolveCardClipSrc = async (_clipFile: string): Promise<string | null> => null;
+export const exportAndroidBackupZip = async (_includeKeys: boolean): Promise<{ videos: number; cards: number; path: string } | null> => null;
+export const pickAndroidBackup = async (): Promise<{ kind: 'zip'; manifest: unknown; data: unknown; stagedZip: string; appVersion: string } | { kind: 'json'; text: string } | null> => null;
+export const unpackAndroidZip = async (_stagedZip: string): Promise<number> => 0;
+export const cleanupAndroidStagedZip = async (): Promise<void> => {};
+export const prepareAndroidRestore = async (): Promise<void> => {};

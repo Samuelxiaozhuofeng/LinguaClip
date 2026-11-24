@@ -27,7 +27,8 @@ const parse = async (path: string, version: string) => {
   const raw = await backupRead(path).catch(e => { throw new RestoreError('bad', String(e)); });
   let manifest: unknown, data: unknown;
   try { manifest = JSON.parse(raw.manifest); data = JSON.parse(raw.data); } catch { throw new RestoreError('bad', 'json'); }
-  const problem: Problem = checkBackup(manifest, data, version);
+  const isCross = (manifest as { platform?: string } | null)?.platform === 'android';
+  const problem: Problem = checkBackup(manifest, data, version, isCross ? { crossPlatform: true } : undefined);
   if (problem) throw new RestoreError(problem.newer ? 'newer' : 'bad', problem.why);
   return { manifest: manifest as Manifest, data: data as Data };
 };
@@ -88,7 +89,11 @@ async function run(p: Pending): Promise<void> {
   await replaceAll(data.cards.map(move).map(c => (Array.isArray(c.reasons) ? c : { ...c, reasons: [] })), data.reviewMeta);
   const current: Record<string, string> = {};
   for (const k of Object.keys(localStorage)) current[k] = localStorage.getItem(k) ?? '';
-  const plan = planLocalStorage(current, data.localStorage);
+  const plan = planLocalStorage(
+    current,
+    data.localStorage,
+    manifest.platform === 'android' ? { crossPlatform: true, target: 'desktop' } : undefined,
+  );
   for (const [k, v] of plan.set) localStorage.setItem(k, v);
   for (const k of plan.remove) localStorage.removeItem(k);
   localStorage.removeItem(PENDING_KEY);

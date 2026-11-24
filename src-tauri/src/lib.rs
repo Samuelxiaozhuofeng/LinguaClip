@@ -1,3 +1,6 @@
+mod android_asr_cmds;
+mod android_cmds;
+mod android_podcast_cmds;
 mod anki;
 mod backup;
 mod bailian;
@@ -28,15 +31,31 @@ mod word_order;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+  #[allow(unused_mut)]
+  let mut builder = tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
     .plugin(tauri_plugin_http::init())
-    .plugin(tauri_plugin_opener::init())
+    .plugin(tauri_plugin_opener::init());
+  #[cfg(not(mobile))]
+  {
     // One-click update from linguaclipapp.com (docs/update.md); only the official build shows it.
-    .plugin(tauri_plugin_updater::Builder::new().build())
-    .plugin(tauri_plugin_process::init())
+    builder = builder
+      .plugin(tauri_plugin_updater::Builder::new().build())
+      .plugin(tauri_plugin_process::init());
+  }
+  builder
     .setup(|app| {
+      #[cfg(target_os = "android")]
+      {
+        use tauri::Manager;
+        let dir = app.path().app_local_data_dir()?.join("files");
+        let _ = std::fs::create_dir_all(&dir);
+        for sub in ["media", "clips", "backups", "tmp"] {
+          let _ = std::fs::create_dir_all(dir.join(sub));
+        }
+        paths::init_data_dir(dir);
+      }
       dicts::sweep();
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -83,6 +102,18 @@ pub fn run() {
       dicts::dict_move,
       dicts::dict_remove,
       dicts::dict_lookup,
+      android_cmds::android_paths,
+      android_cmds::plan_wav_cuts,
+      android_cmds::transcribe_prepared_pieces,
+      android_cmds::download_podcast_audio,
+      android_asr_cmds::android_cancel_job,
+      android_asr_cmds::android_reset_job,
+      android_asr_cmds::transcribe_plan,
+      android_asr_cmds::transcribe_piece,
+      android_asr_cmds::transcribe_finalize,
+      android_podcast_cmds::download_podcast_audio_stream,
+      android_podcast_cmds::android_purge_files,
+      android_podcast_cmds::android_sweep_orphans,
       trash_file
     ])
     .run(tauri::generate_context!())
@@ -95,7 +126,16 @@ fn trash_file(path: String) -> Result<(), String> {
   if !std::path::Path::new(&path).is_file() {
     return Err("not a file".into());
   }
-  #[cfg(not(windows))]
+  #[cfg(target_os = "android")]
+  {
+    let own = paths::own_dir()?.canonicalize().map_err(|e| e.to_string())?;
+    let target = std::path::Path::new(&path).canonicalize().map_err(|e| e.to_string())?;
+    if !target.starts_with(&own) {
+      return Err("outside own dir".into());
+    }
+    return std::fs::remove_file(&target).map_err(|e| e.to_string());
+  }
+  #[cfg(all(not(windows), not(target_os = "android")))]
   let out = paths::command("/usr/bin/trash").arg(&path).output();
   // The path travels in an env var, never spliced into the script. USB sticks and
   // network shares have no Recycle Bin: there DeleteFile would delete for good,
@@ -110,10 +150,13 @@ fn trash_file(path: String) -> Result<(), String> {
     ])
     .env("LC_TRASH_PATH", &path)
     .output();
-  let out = out.map_err(|e| e.to_string())?;
-  if out.status.success() {
-    Ok(())
-  } else {
-    Err(String::from_utf8_lossy(&out.stderr).into_owned())
+  #[cfg(not(target_os = "android"))]
+  {
+    let out = out.map_err(|e| e.to_string())?;
+    if out.status.success() {
+      Ok(())
+    } else {
+      Err(String::from_utf8_lossy(&out.stderr).into_owned())
+    }
   }
 }

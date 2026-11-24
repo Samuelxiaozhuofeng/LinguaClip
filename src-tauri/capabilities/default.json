@@ -56,8 +56,6 @@
         }
       ]
     },
-    "opener:default",
-    "updater:default",
-    "process:allow-restart"
+    "opener:default"
   ]
 }

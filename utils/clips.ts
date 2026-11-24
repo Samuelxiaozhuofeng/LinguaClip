@@ -18,6 +18,9 @@ import { getPracticeConfig } from './storage';
 
 // Room around the line, so the lead-in / tail padding (up to 1s) still fits.
 const MARGIN = 1.5;
+// A cut that failed for its own line (ffmpeg: / clip: / missing:) rather than the cutting tool.
+// Android's cutClip rejects with an Error ("Error: clip:…" as a string), the desktop's with the bare message.
+export const lineFault = (e: unknown) => /^(ffmpeg|clip|missing):/.test(e instanceof Error ? e.message : String(e));
 export const clipKey = (c: Pick<ReviewCard, 'videoId' | 'start'>) => `${c.videoId}_${c.start.toFixed(2)}`;
 export const clipSpan = (c: Pick<ReviewCard, 'start' | 'end'>): [number, number] => [Math.max(0, c.start - MARGIN), c.end + MARGIN];
 
@@ -80,7 +83,7 @@ const settleLine = async (key: string, line: ReviewCard[], kind: 'video' | 'audi
     set({ error: null });
   } catch (e) {
     set({ error: String(e) });
-    if (!/^(ffmpeg|clip|missing):/.test(String(e))) return 'stop'; // not this line's fault
+    if (!lineFault(e)) return 'stop'; // not this line's fault
     failed.add(key);
   }
 };

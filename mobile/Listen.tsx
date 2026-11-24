@@ -1,7 +1,8 @@
 // The phone's listening page (design Listen.dc.html / Lookup.dc.html): playback and the
 // steps are useListen, the pieces ListenParts, the lines with words to tap LineView, a
-// word's meaning WordSheet. This file: the audio element, the layout and its big buttons,
-// the lock screen, translations ("中"), stars, and what the summary sends to review.
+// word's meaning WordSheet. This file: the layout and its big buttons, platform audio/lockscreen
+// binding (Web <audio> + mediaSession, or Android native Media3), translations ("中"), stars,
+// and what the summary sends to review.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Subtitle, VideoRecord } from '../types';
 import { useT } from '../utils/i18n';
@@ -12,9 +13,9 @@ import { addLooked, lookedKey } from '../utils/readLooked';
 import { addLine, addWord } from '../utils/review';
 import { useSavedLines } from '../hooks/useSavedLines';
 import { useListenText } from '../pro/useListenText';
-import { prepareSrc, videoSrcFromPath } from './platform/desktop';
+import { AUDIO_ENGINE_PLATFORM } from './platform/audioEngine';
 import { useListen } from './useListen';
-import { useMediaSession } from './mediaSession';
+import { useMediaSession, type MediaActions } from './mediaSession';
 import { useWordLookup, firstFields, type Keep } from './useWordLookup';
 import { Blind, DrillBar, HeardAsk, PassSheet, StepBar, Summary } from './ListenParts';
 import { LineCard, Transcript } from './LineView';
@@ -32,6 +33,16 @@ const JaBanner: React.FC = () => {
   );
 };
 
+// Web/PWA only: Android native owns MediaSession in PlaybackService.kt and must never touch navigator.mediaSession.
+const WebMediaSession: React.FC<{
+  meta: { title: string; artist: string; image?: string };
+  actions: MediaActions;
+  playing: boolean;
+}> = ({ meta, actions, playing }) => {
+  useMediaSession(meta, actions, playing);
+  return null;
+};
+
 const Icon: React.FC<{ d: string; fill?: boolean; size?: number }> = ({ d, fill, size = 26 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill={fill ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
 );
@@ -39,23 +50,26 @@ const round = 'w-[52px] h-[52px] flex items-center justify-center';
 
 type Word = { word: string; key: string; line: Subtitle; fields: Keep | null; kept: boolean };
 
-export const Listen: React.FC<{ record: VideoRecord; onBack: () => void }> = ({ record, onBack }) => {
+export const Listen: React.FC<{
+  record: VideoRecord;
+  onBack: () => void;
+  embedded?: boolean;
+  startSec?: number;
+  onPos?: (sec: number) => void;
+  onLine?: (n: number, total: number) => void;
+}> = ({ record, onBack, embedded = false, startSec, onPos, onLine }) => {
   const t = useT();
-  const L = useListen(record);
-  const { lines, section, cur, sec, audio } = L;
-  const [src, setSrc] = useState<string | null>(null);
-  const [failed, setFailed] = useState('');
-  const path = record.videoPath ?? '';
-  useEffect(() => {
-    prepareSrc(path).then(() => setSrc(videoSrcFromPath(path)), (e: unknown) => setFailed(errText(e instanceof Error ? e.message : String(e))));
-  }, [path]);
+  const L = useListen(record, embedded ? { startSec, onPos, onLine } : undefined);
+  const { lines, section, cur, sec } = L;
+  const failed = L.errorCode ? (L.errorCode === 'listen.failed' ? t('listen.failed') : errText(L.errorCode)) : '';
+  const handleBack = () => { L.leavePage(); onBack(); };
 
   const lang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
   const ja = lang === 'ja';
   useEffect(() => { if (ja) { void loadJa(); settleSplits(record.id, lines.map(l => l.text)).catch(() => {}); } }, [ja, record.id, lines]);
 
   const effMode = L.free ? L.mode : L.queue ? (L.shown ? 'show' : 'hide') : L.pass === 2 ? 'show' : 'hide';
-  const { scroller, follow, setFollow, leave, hasTrans, trans, transBusy, openT, onTrans } = useListenText(record, lines, audio, cur?.id ?? null, effMode, sec, L.playing);
+  const { scroller, follow, setFollow, leave, hasTrans, trans, transBusy, openT, onTrans } = useListenText(record, lines, L.pausedRef, cur?.id ?? null, effMode, sec, L.playing);
   const transOf = (l: Subtitle) => (openT.has(l.id) ? trans?.[L.indexOf.get(l.id)!] ?? (transBusy ? null : t('reader.transFailed')) : undefined);
   const { savedIds, savedItems, toggleSave } = useSavedLines({ videoId: record.id, fullSubtitles: lines, videoFileName: record.videoFileName });
   const ref = { videoId: record.id, videoName: record.videoFileName };
@@ -102,8 +116,6 @@ export const Listen: React.FC<{ record: VideoRecord; onBack: () => void }> = ({ 
 
   // --- Buttons, the same for the page and the lock screen ---
   const nextBtn = L.inDrill ? L.drillNext : L.next;
-  useMediaSession({ title: record.displayName, artist: record.podcast?.show ?? '', image: record.podcast?.image },
-    { play: L.playOn, pause: L.pauseNow, prev: L.prev, next: nextBtn }, L.playing);
   const markNow = () => { if (cur) L.flipMark(cur.id, t('listen.marked'), t('listen.unmarked')); };
   const markPrev = () => { const i = L.markPrevIndex(); if (i < 0) L.say(t('listen.noPrev')); else L.flipMark(lines[i].id, t('listen.markedPrev'), t('listen.unmarked')); };
   const marked = useMemo(() => new Set(L.marks.keys()), [L.marks]);
@@ -130,28 +142,46 @@ export const Listen: React.FC<{ record: VideoRecord; onBack: () => void }> = ({ 
       onPlay={l => { setFollow(true); L.seek(l.startTime, true); }} onScroll={leave} />;
 
   return (
-    <div className="fixed inset-0 bg-paper flex flex-col pt-[env(safe-area-inset-top)]">
-      <audio ref={audio} preload="auto" src={src ?? undefined} onLoadedMetadata={L.onLoaded} onTimeUpdate={L.onTime}
-        onPlay={() => L.setPlaying(true)} onPause={() => L.setPlaying(false)} onEnded={L.onEnded} onError={() => { if (src) setFailed(t('listen.failed')); }} />
-      <div className="pt-2 px-3 pb-1 flex items-center gap-1">
-        <button aria-label={t('m.back')} onClick={onBack} className="w-11 h-11 shrink-0 flex items-center justify-center text-2xl">‹</button>
-        <div className="flex-1 min-w-0 flex flex-col">
-          <span className="text-[15px] font-semibold truncate">{record.displayName}</span>
-          {L.sections.length > 1 && <span className="text-xs text-mute">{t('listen.sectionOf', { n: sec + 1, total: L.sections.length })}</span>}
+    <div className={embedded ? 'flex-1 min-h-0 flex flex-col bg-paper' : 'fixed inset-0 bg-paper flex flex-col pt-[env(safe-area-inset-top)]'}>
+      {AUDIO_ENGINE_PLATFORM === 'web' && (
+        <>
+          <audio ref={L.bindAudio} preload="auto" />
+          <WebMediaSession
+            meta={{ title: record.displayName, artist: record.podcast?.show ?? '', image: record.podcast?.image }}
+            actions={{ play: L.playOn, pause: L.pauseNow, prev: L.prev, next: nextBtn }}
+            playing={L.playing}
+          />
+        </>
+      )}
+      {!embedded && (
+        <div className="pt-2 px-3 pb-1 flex items-center gap-1">
+          <button aria-label={t('m.back')} onClick={handleBack} className="w-11 h-11 shrink-0 flex items-center justify-center text-2xl">‹</button>
+          <div className="flex-1 min-w-0 flex flex-col">
+            <span className="text-[15px] font-semibold truncate">{record.displayName}</span>
+            {L.sections.length > 1 && <span className="text-xs text-mute">{t('listen.sectionOf', { n: sec + 1, total: L.sections.length })}</span>}
+          </div>
+          <button onClick={() => L.goFree(!L.free)} className="min-h-[44px] px-2.5 text-[13px] text-mute">{t(L.free ? 'listen.route' : 'listen.free')}</button>
         </div>
-        <button onClick={() => L.goFree(!L.free)} className="min-h-[44px] px-2.5 text-[13px] text-mute">{t(L.free ? 'listen.route' : 'listen.free')}</button>
-      </div>
+      )}
       {ja && <JaBanner />}
       {L.free ? (
         <div className="mx-5 mt-1 flex gap-2 flex-wrap">
+          {embedded && <button onClick={() => L.goFree(false)} className="min-h-[44px] px-3.5 rounded-full text-[13px] bg-page shadow-card text-mute">{t('listen.route')}</button>}
           {(['hide', 'show'] as const).map(m => <button key={m} aria-pressed={L.mode === m} onClick={() => L.setMode(m)} className={`min-h-[44px] px-3.5 rounded-full text-[13px] ${L.mode === m ? 'bg-ink text-white' : 'bg-page shadow-card text-mute'}`}>{t(`listen.mode_${m}`)}</button>)}
           <button aria-pressed={L.throughPref} onClick={L.toggleThrough} className={`min-h-[44px] px-3.5 rounded-full text-[13px] ${L.throughPref ? 'bg-accent-soft text-accent' : 'bg-page shadow-card text-mute'}`}>{t('listen.through')}</button>
+          <button aria-pressed={L.loopLine} onClick={L.toggleLoopLine} className={`min-h-[44px] px-3.5 rounded-full text-[13px] ${L.loopLine ? 'bg-accent-soft text-accent' : 'bg-page shadow-card text-mute'}`}>{t(L.loopLine ? 'm.loopOff' : 'm.loopOn')}</button>
+          <button aria-pressed={L.autoPause} onClick={L.toggleAutoPause} className={`min-h-[44px] px-3.5 rounded-full text-[13px] ${L.autoPause ? 'bg-accent-soft text-accent' : 'bg-page shadow-card text-mute'}`}>{t('m.autoPause')}</button>
           <button onClick={() => L.goStep(3)} className="min-h-[44px] px-3.5 rounded-full text-[13px] bg-page shadow-card">{t('listen.done')}</button>
+        </div>
+      ) : embedded ? (
+        <div className="mx-5 mt-1 flex items-center gap-2">
+          <StepBar step={step} onStep={L.goStep} className="flex-1" />
+          <button onClick={() => L.goFree(true)} className="min-h-[44px] px-2 text-xs text-mute shrink-0">{t('listen.free')}</button>
         </div>
       ) : <StepBar step={step} onStep={L.goStep} />}
 
       <div className="flex-1 min-h-0 overflow-y-auto relative">{body}</div>
-      {toast && <p role="status" className="fixed left-1/2 -translate-x-1/2 top-[calc(env(safe-area-inset-top)+64px)] z-20 px-4 py-2 rounded-full bg-ink text-white text-sm">{toast}</p>}
+      {toast && <p role="status" className={`fixed left-1/2 -translate-x-1/2 ${embedded ? 'top-[calc(env(safe-area-inset-top)+112px)]' : 'top-[calc(env(safe-area-inset-top)+64px)]'} z-20 px-4 py-2 rounded-full bg-ink text-white text-sm`}>{toast}</p>}
 
       <div className="px-5 pt-3 flex flex-col gap-2.5">
         {L.inDrill ? <DrillBar n={L.qAt + 1} total={L.queue!.length} play={L.play} tries={L.tries} shown={L.shown} onShow={L.drillShow} onNext={L.drillNext} />
@@ -168,7 +198,7 @@ export const Listen: React.FC<{ record: VideoRecord; onBack: () => void }> = ({ 
       <div className="px-7 pt-3 pb-[max(20px,env(safe-area-inset-bottom))] flex items-center justify-between">
         <button className={`${round} text-[13px] text-mute`} onClick={L.cycleSpeed} aria-label={t('m.speed')}>{L.speed === 1 ? '1.0' : L.speed}×</button>
         <button className={round} aria-label={t('m.prevLine')} onClick={L.prev}><Icon d="M15 18l-6-6 6-6M6 6v12" /></button>
-        <button className="w-[72px] h-[72px] rounded-full bg-ink text-white flex items-center justify-center" aria-label={t(L.playing ? 'm.pause' : 'm.play')} onClick={L.toggle} disabled={!src}>
+        <button className="w-[72px] h-[72px] rounded-full bg-ink text-white flex items-center justify-center" aria-label={t(L.playing ? 'm.pause' : 'm.play')} onClick={L.toggle} disabled={!L.ready || !!failed}>
           {L.playing ? <Icon d="M9 6v12M15 6v12" /> : <Icon d="M7 4l13 8-13 8z" fill />}
         </button>
         <button className={round} aria-label={t('m.nextLine')} onClick={nextBtn}><Icon d="M9 18l6-6-6-6M18 6v12" /></button>
@@ -184,9 +214,9 @@ export const Listen: React.FC<{ record: VideoRecord; onBack: () => void }> = ({ 
         <Summary key={`${sec}-${L.summary.ended}`} title={L.summary.ended || L.lastSec ? t('listen.allDone') : t('listen.sectionDone', { n: sec + 1 })}
           missed={sumMissed} saved={sumSaved} words={words.map(w => ({ word: w.word, key: w.key, kept: w.kept, can: !!w.fields }))}
           busy={busy} fail={fail} added={added} onward={!L.summary.ended && !L.lastSec}
-          onAdd={p => { void addMissed(p); }} onKeep={keepWord} onAgain={() => L.goSection(sec)} onNext={() => L.goSection(sec + 1)} onHome={onBack} onClose={() => L.setSummary(null)} />
+          onAdd={p => { void addMissed(p); }} onKeep={keepWord} onAgain={() => L.goSection(sec)} onNext={() => L.goSection(sec + 1)} onHome={handleBack} onClose={() => L.setSummary(null)} />
       )}
-      {def && <WordSheet key={`${def.word}|${def.line.id}`} def={def} onClose={closeDef} onExplain={explain} onKeep={k => keep(k, ref)} />}
+      {def && <WordSheet key={`${def.word}|${def.line.id}`} def={def} onClose={closeDef} onExplain={explain} onKeep={k => keep(k, ref)} onPlayLine={L.playLine} />}
     </div>
   );
 };

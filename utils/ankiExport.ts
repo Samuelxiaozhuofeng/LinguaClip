@@ -3,7 +3,7 @@ import { addNote, getAnkiConfig, invokeAnki, withAiBlock } from './anki';
 import { clean } from './cleanHtml';
 import { cardLangs, type LangSource } from './deckLang';
 import { getAllVideosFromDB } from './fileSystemAccess';
-import { clipKey, findSource } from './clips';
+import { clipKey, findSource, lineFault } from './clips';
 import { cutClip } from './desktop';
 import { formatTimeCode, getAudioPaddingConfig, getWordVoice } from './storage';
 import { wordVoiceB64 } from './wordVoice';
@@ -27,7 +27,7 @@ export const cutSpan = (c: Pick<ReviewCard, 'start' | 'end'>, offset: number, pa
   [Math.max(0, c.start - pad.startPadding / 1000 - offset), c.end + pad.endPadding / 1000 - offset];
 
 // A cut that failed for its own line (ffmpeg: / clip: / missing:) vs the cutting tool itself missing (same as settleLine).
-export const toolMissing = (e: unknown) => !/^(ffmpeg|clip|missing):/.test(String(e));
+export const toolMissing = (e: unknown) => !lineFault(e);
 
 export interface Media { audio?: string; ext?: string; image?: string; word?: string; wordExt?: string; silent: boolean } // base64; word = the word's own sound (m4a, or mp3 when read aloud)
 export interface Steps {

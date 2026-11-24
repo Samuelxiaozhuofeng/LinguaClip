@@ -1,0 +1,13 @@
+{
+  "build": {
+    "frontendDist": "../dist-android",
+    "devUrl": "http://localhost:3001",
+    "beforeDevCommand": "npm run dev:android",
+    "beforeBuildCommand": "npm run build:android"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' asset: http://asset.localhost https://asset.localhost data: https:; media-src 'self' asset: http://asset.localhost https://asset.localhost blob: https:; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost https:; object-src 'none'; base-uri 'self'; frame-src 'none'; form-action 'none'"
+    }
+  }
+}

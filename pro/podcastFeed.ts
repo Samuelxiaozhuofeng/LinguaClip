@@ -94,7 +94,7 @@ export function parseFeed(xml: string, feed: string): Show {
   }
   // Newest first; a feed without dates keeps its own order.
   episodes.sort((a, b) => (b.date ?? 0) - (a.date ?? 0));
-  return { feed, title: text(kid(channel, 'title')) || feed, image: /^https?:\/\//i.test(image) ? image : undefined, lang: asrLang(text(kid(channel, 'language'))), episodes };
+  return { feed, title: text(kid(channel, 'title')) || feed, image: /^https?:\/\//i.test(image) ? image.replace(/^http:\/\//i, 'https://') : undefined, lang: asrLang(text(kid(channel, 'language'))), episodes };
 }
 
 // The ready-made starter episodes' list (docs/starter.md; shown by Starter.tsx).

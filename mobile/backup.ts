@@ -3,7 +3,10 @@
 // which settings go in / are replaced, which audio files a backup still points at, and
 // the restore marker. Records and cards are checked with the desktop's own rules
 // (utils/backup.ts checkBackup). Reading / writing is in mobile/restore.ts.
-import { SECRET_KEYS, checkBackup, inBackup, planLocalStorage } from '../utils/backup';
+import {
+  FORMAT, LICENSE_KEY, SECRET_KEYS, backupKeys, checkBackup, clipFiles, inBackup, planLocalStorage,
+  type Data, type Manifest,
+} from '../utils/backup';
 import type { ReviewCard } from '../utils/review';
 
 export const V = 1;
@@ -26,8 +29,80 @@ export class BackupProblem extends Error {
 // Settings a phone backup carries and a restore replaces: the desktop's range minus the keys.
 export const keepLocal = (k: string) => inBackup(k) && !SECRET_KEYS.includes(k);
 export const pickLocal = (all: Record<string, string>) => Object.fromEntries(Object.entries(all).filter(([k]) => keepLocal(k)));
-// Backup's settings first, then the ones in range it lacks go; keys / LOCAL_ONLY never touched.
-export const planLocal = (current: Record<string, string>, backup: Record<string, string>) => planLocalStorage(current, pickLocal(backup));
+// Backup's settings first, then the ones in range it lacks go; keys / LOCAL_ONLY never touched
+// for PWA JSON backups. Android .zip restores pass includeKeys (same-platform) or crossPlatform.
+export const planLocal = (
+  current: Record<string, string>,
+  backup: Record<string, string>,
+  opts?: { crossPlatform?: boolean; target?: 'android' | 'desktop'; includeKeys?: boolean },
+) => (opts?.crossPlatform || opts?.includeKeys
+  ? planLocalStorage(current, backup, opts?.crossPlatform ? { crossPlatform: true, target: opts.target } : undefined)
+  : planLocalStorage(current, pickLocal(backup)));
+
+// Builds a desktop-compatible manifest + data payload for Android native .zip export.
+export function buildAndroidZipPayload(opts: {
+  videos: Record<string, unknown>[];
+  cards: ReviewCard[];
+  meta: Record<string, unknown>[];
+  local: Record<string, string>;
+  appVersion: string;
+  ownDir: string;
+  includeKeys: boolean;
+  createdAt: number;
+}): { manifest: Manifest; data: Data } {
+  const ls: Record<string, string> = {};
+  for (const k of backupKeys(Object.keys(opts.local))) {
+    if (!opts.includeKeys && SECRET_KEYS.includes(k)) continue;
+    ls[k] = opts.local[k];
+  }
+  const manifest: Manifest = {
+    format: FORMAT,
+    app: opts.appVersion,
+    createdAt: opts.createdAt,
+    platform: 'android',
+    ownDir: opts.ownDir,
+    videos: opts.videos.length,
+    cards: opts.cards.length,
+    hadLicense: opts.local[LICENSE_KEY] != null,
+    files: true,
+    clips: clipFiles(opts.cards),
+  };
+  const data: Data = {
+    videos: opts.videos,
+    cards: opts.cards,
+    reviewMeta: opts.meta,
+    localStorage: ls,
+  };
+  const p = checkBackup(manifest, data, opts.appVersion);
+  if (p) throw new BackupProblem('bad', p.why);
+  return { manifest, data };
+}
+
+export function fromDesktopBackup(
+  manifest: unknown,
+  data: unknown,
+  appVersion: string,
+  opts?: { crossPlatform?: boolean },
+): MobileBackup {
+  const p = checkBackup(manifest, data, appVersion, opts?.crossPlatform === false ? undefined : { crossPlatform: true });
+  if (p) throw new BackupProblem(p.newer ? 'newer' : 'bad', p.why);
+  const m = manifest as { createdAt: number };
+  const d = data as {
+    videos: Record<string, unknown>[];
+    cards: ReviewCard[];
+    reviewMeta: Record<string, unknown>[];
+    localStorage: Record<string, string>;
+  };
+  return {
+    v: V,
+    platform: 'mobile',
+    at: m.createdAt,
+    videos: d.videos,
+    review: { cards: d.cards, meta: d.reviewMeta },
+    local: d.localStorage,
+    cache: {},
+  };
+}
 
 export const makeBackup = (p: { videos: Record<string, unknown>[]; cards: ReviewCard[]; meta: Record<string, unknown>[]; local: Record<string, string>; cache: Record<string, string> }, at: number): MobileBackup =>
   ({ v: V, platform: 'mobile', at, videos: p.videos, review: { cards: p.cards, meta: p.meta }, local: pickLocal(p.local), cache: p.cache });
@@ -85,11 +160,15 @@ export const orphanAudio = (keys: string[], videos: Record<string, unknown>[], c
 };
 
 // localStorage linguaclip_restore_pending: which copy is being restored, and how many tries started.
-export interface Pending { use: 'staged' | 'pre'; tries: number }
+export interface Pending { use: 'staged' | 'pre'; tries: number; zip?: string; cross?: boolean }
 export const readPending = (raw: string | null): Pending | null | 'unreadable' => {
   if (raw === null) return null;
   try {
     const p = JSON.parse(raw);
-    return isObj(p) && (p.use === 'staged' || p.use === 'pre') && typeof p.tries === 'number' ? { use: p.use, tries: p.tries } : 'unreadable';
+    if (!isObj(p) || (p.use !== 'staged' && p.use !== 'pre') || typeof p.tries !== 'number') return 'unreadable';
+    const out: Pending = { use: p.use, tries: p.tries };
+    if (typeof p.zip === 'string' && p.zip) out.zip = p.zip;
+    if (p.cross === true) out.cross = true;
+    return out;
   } catch { return 'unreadable'; }
 };

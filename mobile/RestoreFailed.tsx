@@ -21,7 +21,7 @@ export const RestoreFailed: React.FC<{ pending: Pending | null; error: string | 
   };
   return (
     <div role="alertdialog" aria-label={t('restore.failedTitle')}
-      className="min-h-[100dvh] flex flex-col justify-center gap-4 px-6 pt-[env(safe-area-inset-top)] pb-[max(20px,env(safe-area-inset-bottom))]">
+      className="min-h-[100vh] supports-[height:1dvh]:min-h-[100dvh] flex flex-col justify-center gap-4 px-6 pt-[env(safe-area-inset-top)] pb-[max(20px,env(safe-area-inset-bottom))]">
       <h1 className="text-[22px] font-semibold">{t('restore.failedTitle')}</h1>
       <p className="text-[15px] text-mute whitespace-pre-line">{why ? t('restore.failedBody', { why }) : t('restore.interrupted')}</p>
       <p className="text-[13px] text-mute">{t('restore.halfDone')}</p>

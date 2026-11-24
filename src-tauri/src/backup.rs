@@ -121,7 +121,13 @@ fn name_for(kind: &str) -> Result<String, String> {
 
 fn write_in(own: &Path, dest: Option<String>, kind: &str, manifest: &str, data: &str, files: bool) -> Result<PathBuf, String> {
   let dest = match dest {
-    Some(d) => PathBuf::from(d),
+    Some(d) => {
+      let p = PathBuf::from(d);
+      if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+      }
+      p
+    }
     None => {
       let dir = backups_dir(own);
       fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

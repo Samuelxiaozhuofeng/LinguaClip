@@ -18,14 +18,22 @@ pub fn device_info() -> Result<DeviceInfo, String> {
   Ok(DeviceInfo { id, name: computer_name() })
 }
 
+#[cfg(not(target_os = "android"))]
 fn run(program: &str, args: &[&str]) -> Option<String> {
   let out = paths::command(program).args(args).output().ok()?;
   out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "android")))]
 fn hardware_uuid() -> Option<String> {
   parse_ioreg(&run("/usr/sbin/ioreg", &["-rd1", "-c", "IOPlatformExpertDevice"])?)
+}
+
+#[cfg(target_os = "android")]
+fn hardware_uuid() -> Option<String> {
+  let path = paths::own_dir().ok()?.join(".android_device_id");
+  let v = std::fs::read_to_string(path).ok()?.trim().to_string();
+  (v.len() >= 8).then_some(v)
 }
 
 #[cfg(windows)]
@@ -33,12 +41,22 @@ fn hardware_uuid() -> Option<String> {
   parse_reg(&run("reg", &["query", r"HKLM\SOFTWARE\Microsoft\Cryptography", "/v", "MachineGuid"])?)
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "android")))]
 fn computer_name() -> String {
   run("/usr/sbin/scutil", &["--get", "ComputerName"])
     .map(|s| s.trim().to_string())
     .filter(|s| !s.is_empty())
     .unwrap_or_else(|| "Mac".into())
+}
+
+#[cfg(target_os = "android")]
+fn computer_name() -> String {
+  paths::own_dir()
+    .ok()
+    .and_then(|d| std::fs::read_to_string(d.join(".android_device_name")).ok())
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| "Android".into())
 }
 
 #[cfg(windows)]

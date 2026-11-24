@@ -7,11 +7,12 @@ import type { Subtitle } from '../types';
 import { useT, type DictKey } from '../utils/i18n';
 import type { Heard, Way } from '../pro/listenLevel';
 import { btnPlain, btnPrimary } from './ui';
+import { useBackClose } from './backClose';
 
-export const StepBar: React.FC<{ step: number; onStep: (n: number) => void }> = ({ step, onStep }) => {
+export const StepBar: React.FC<{ step: number; onStep: (n: number) => void; className?: string }> = ({ step, onStep, className = 'mx-5 mt-1' }) => {
   const t = useT();
   return (
-    <div className="mx-5 mt-1 grid grid-cols-3 gap-1.5">
+    <div className={`${className} grid grid-cols-3 gap-1.5`}>
       {[1, 2, 3].map(n => (
         <button key={n} onClick={() => onStep(n)} aria-current={n === step ? 'step' : undefined} className="min-h-[44px] flex flex-col justify-center gap-1.5 text-left">
           <span className={`h-1 rounded ${n <= step ? 'bg-accent' : 'bg-line'}`} />
@@ -54,10 +55,11 @@ export const DrillBar: React.FC<{ n: number; total: number; play: number; tries:
 
 const Sheet: React.FC<{ label: string; onClose: () => void; children: React.ReactNode }> = ({ label, onClose, children }) => {
   const t = useT();
+  useBackClose(true, onClose);
   return (
     <div className="fixed inset-0 z-30 flex flex-col justify-end" role="dialog" aria-label={label}>
       <button aria-label={t('m.close')} className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative max-h-[88dvh] overflow-y-auto bg-page rounded-t-[22px] shadow-lift px-5 pt-5 pb-[max(24px,env(safe-area-inset-bottom))] flex flex-col gap-4">
+      <div className="relative max-h-[88vh] supports-[height:1dvh]:max-h-[88dvh] overflow-y-auto bg-page rounded-t-[22px] shadow-lift px-5 pt-5 pb-[max(24px,env(safe-area-inset-bottom))] flex flex-col gap-4">
         <h2 className="text-xl font-semibold">{label}</h2>
         {children}
       </div>

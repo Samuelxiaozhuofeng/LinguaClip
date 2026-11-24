@@ -4,11 +4,17 @@
 // resumed `.part` would be two files glued together. Follows redirects from the
 // original link (the redirected ones are signed and expire); stops between chunks
 // when the card is deleted.
+use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::pin::pin;
+use std::time::{Duration, Instant};
 
 const STALL: Duration = Duration::from_secs(30);
+// Poll cancel check every 500ms while waiting on network I/O so cancelling aborts promptly.
+const CANCEL_POLL: Duration = Duration::from_millis(500);
+// Throttle progress updates when Content-Length is absent or bytes trickle in.
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 // Some hosts turn away clients that don't look like a browser.
 const UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
 // What plays without converting (convert.rs plays_natively agrees).
@@ -52,13 +58,33 @@ pub(crate) fn download(
   dir: &Path,
   stem: &str,
   check: impl Fn() -> Result<(), String>,
-  on_pct: impl FnMut(u32),
+  mut on_pct: impl FnMut(u32),
+) -> Result<PathBuf, String> {
+  let mut last = None;
+  download_with_progress(url, dir, stem, check, move |pct, _| {
+    if let Some(p) = pct {
+      if last != Some(p) {
+        last = Some(p);
+        on_pct(p);
+      }
+    }
+  })
+}
+
+// Same as `download`, but reports `(Option<u32> percent, u64 bytes)` roughly every second
+// or whenever whole-percent progress advances, and polls `check` every 500ms while waiting on I/O.
+pub(crate) fn download_with_progress(
+  url: &str,
+  dir: &Path,
+  stem: &str,
+  check: impl Fn() -> Result<(), String>,
+  on_progress: impl FnMut(Option<u32>, u64),
 ) -> Result<PathBuf, String> {
   if let Some(done) = EXTS.iter().map(|e| dir.join(format!("{stem}.{e}"))).find(|p| p.is_file()) {
     return Ok(done);
   }
   let part = dir.join(format!("{stem}.part"));
-  let result = tauri::async_runtime::block_on(fetch(url, &part, &check, on_pct));
+  let result = tauri::async_runtime::block_on(fetch(url, &part, &check, on_progress));
   match result {
     Ok(ext) => {
       let done = dir.join(format!("{stem}.{ext}"));
@@ -72,15 +98,54 @@ pub(crate) fn download(
   }
 }
 
-async fn fetch(url: &str, part: &Path, check: &impl Fn() -> Result<(), String>, mut on_pct: impl FnMut(u32)) -> Result<&'static str, String> {
-  let client = reqwest::Client::builder()
+// Polls `check()` every CANCEL_POLL while awaiting `fut` up to `stall`, so cancellation
+// interrupts a stalled HTTP send or chunk read within ~0.5s instead of waiting 30s.
+async fn await_with_cancel<F, T>(
+  fut: F,
+  stall: Duration,
+  check: &impl Fn() -> Result<(), String>,
+) -> Result<T, String>
+where
+  F: Future<Output = T>,
+{
+  let mut fut = pin!(fut);
+  let started = Instant::now();
+  loop {
+    check()?;
+    let remaining = stall.saturating_sub(started.elapsed());
+    if remaining.is_zero() {
+      return Err("download:stalled".to_string());
+    }
+    let step = remaining.min(CANCEL_POLL);
+    match tokio::time::timeout(step, &mut fut).await {
+      Ok(val) => return Ok(val),
+      Err(_) => {
+        check()?;
+        if started.elapsed() >= stall {
+          return Err("download:stalled".to_string());
+        }
+      }
+    }
+  }
+}
+
+async fn fetch(
+  url: &str,
+  part: &Path,
+  check: &impl Fn() -> Result<(), String>,
+  mut on_progress: impl FnMut(Option<u32>, u64),
+) -> Result<&'static str, String> {
+  #[allow(unused_mut)]
+  let mut builder = reqwest::Client::builder()
     .user_agent(UA)
-    .connect_timeout(Duration::from_secs(15))
-    .build()
-    .map_err(|e| format!("download:{e}"))?;
-  let mut res = tokio::time::timeout(STALL, client.get(url).send())
-    .await
-    .map_err(|_| "download:stalled".to_string())?
+    .connect_timeout(Duration::from_secs(15));
+  #[cfg(test)]
+  if url.starts_with("http://127.0.0.1:") {
+    builder = builder.no_proxy();
+  }
+  let client = builder.build().map_err(|e| format!("download:{e}"))?;
+  let mut res = await_with_cancel(client.get(url).send(), STALL, check)
+    .await?
     .map_err(|e| format!("download:{e}"))?;
   let status = res.status();
   if !status.is_success() {
@@ -91,22 +156,23 @@ async fn fetch(url: &str, part: &Path, check: &impl Fn() -> Result<(), String>, 
   let total = res.content_length();
   let mut have = 0u64;
   let mut file = std::fs::File::create(part).map_err(|e| format!("download:{e}"))?;
-  let mut last = None;
+  let mut last_pct: Option<u32> = None;
+  let mut last_emit: Option<Instant> = None;
   loop {
     check()?;
-    let chunk = tokio::time::timeout(STALL, res.chunk())
-      .await
-      .map_err(|_| "download:stalled".to_string())?
+    let chunk = await_with_cancel(res.chunk(), STALL, check)
+      .await?
       .map_err(|e| format!("download:{e}"))?;
     let Some(chunk) = chunk else { break };
     file.write_all(&chunk).map_err(|e| format!("download:{e}"))?;
     have += chunk.len() as u64;
-    if let Some(total) = total {
-      let pct = (have * 100 / total.max(1)).min(99) as u32;
-      if last != Some(pct) {
-        last = Some(pct);
-        on_pct(pct);
-      }
+    let pct = total.map(|t| (have * 100 / t.max(1)).min(99) as u32);
+    let pct_changed = pct.is_some() && pct != last_pct;
+    let interval_due = last_emit.map_or(true, |prev| prev.elapsed() >= PROGRESS_INTERVAL);
+    if pct_changed || interval_due {
+      last_pct = pct;
+      last_emit = Some(Instant::now());
+      on_progress(pct, have);
     }
   }
   file.flush().map_err(|e| format!("download:{e}"))?;
@@ -119,6 +185,10 @@ async fn fetch(url: &str, part: &Path, check: &impl Fn() -> Result<(), String>, 
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::io::Read;
+  use std::net::TcpListener;
+  use std::sync::atomic::{AtomicBool, Ordering};
+  use std::sync::Arc;
 
   #[test]
   fn stems_cannot_leave_the_folder() {
@@ -140,6 +210,161 @@ mod tests {
     assert_eq!(ext_for(None, &["https://cdn/episode.M4A#t=1"]), Some("m4a"));
     assert_eq!(ext_for(Some("audio/ogg"), &["https://cdn/x.ogg"]), None);
     assert_eq!(ext_for(Some("audio/wav"), &["https://cdn/x.wav"]), None);
+  }
+
+  #[tokio::test]
+  async fn await_with_cancel_aborts_promptly() {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let flag = cancelled.clone();
+    tokio::spawn(async move {
+      tokio::time::sleep(Duration::from_millis(120)).await;
+      flag.store(true, Ordering::SeqCst);
+    });
+    let started = Instant::now();
+    let res: Result<(), String> = await_with_cancel(std::future::pending::<()>(), STALL, &|| {
+      if cancelled.load(Ordering::SeqCst) {
+        Err(crate::import_queue::CANCELLED.to_string())
+      } else {
+        Ok(())
+      }
+    })
+    .await;
+    assert_eq!(res.unwrap_err(), crate::import_queue::CANCELLED);
+    assert!(started.elapsed() < Duration::from_secs(2), "cancel took too long: {:?}", started.elapsed());
+  }
+
+  #[tokio::test]
+  async fn await_with_cancel_times_out_when_stalled() {
+    let res: Result<(), String> = await_with_cancel(
+      std::future::pending::<()>(),
+      Duration::from_millis(120),
+      &|| Ok(()),
+    )
+    .await;
+    assert_eq!(res.unwrap_err(), "download:stalled");
+  }
+
+  #[test]
+  fn download_with_progress_handles_known_length_chunked_and_fast_cancel() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let stop_server = Arc::new(AtomicBool::new(false));
+    let server_stop = stop_server.clone();
+
+    let server = std::thread::spawn(move || {
+      let _ = listener.set_nonblocking(true);
+      while !server_stop.load(Ordering::SeqCst) {
+        let Ok((mut stream, _)) = listener.accept() else {
+          std::thread::sleep(Duration::from_millis(10));
+          continue;
+        };
+        let _ = stream.set_nonblocking(false);
+        std::thread::spawn(move || {
+          let mut buf = [0u8; 1024];
+          let n = stream.read(&mut buf).unwrap_or(0);
+          let req = String::from_utf8_lossy(&buf[..n]);
+          let path = req.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("/");
+          match path {
+            "/known.mp3" => {
+              let body = vec![b'A'; 4096];
+              let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+              );
+              let _ = stream.write_all(head.as_bytes());
+              let _ = stream.write_all(&body[..2048]);
+              let _ = stream.flush();
+              std::thread::sleep(Duration::from_millis(30));
+              let _ = stream.write_all(&body[2048..]);
+            }
+            "/chunked.mp3" => {
+              let head = "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
+              let _ = stream.write_all(head.as_bytes());
+              let chunk = vec![b'B'; 1024];
+              let frame = format!("{:x}\r\n", chunk.len());
+              let _ = stream.write_all(frame.as_bytes());
+              let _ = stream.write_all(&chunk);
+              let _ = stream.write_all(b"\r\n0\r\n\r\n");
+            }
+            "/slow.mp3" => {
+              let head = "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\nContent-Length: 100000\r\nConnection: close\r\n\r\n";
+              let _ = stream.write_all(head.as_bytes());
+              let _ = stream.write_all(b"partial");
+              let _ = stream.flush();
+              std::thread::sleep(Duration::from_secs(5));
+            }
+            _ => {
+              let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+            }
+          }
+        });
+      }
+    });
+
+    let dir = std::env::temp_dir().join(format!("lc-pod-local-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // 1. Known Content-Length: reports percent + bytes and reuses finished file.
+    let mut events = Vec::new();
+    let p1 = download_with_progress(
+      &format!("http://{addr}/known.mp3"),
+      &dir,
+      "ep-known",
+      || Ok(()),
+      |pct, bytes| events.push((pct, bytes)),
+    )
+    .unwrap();
+    assert_eq!(p1, dir.join("ep-known.mp3"));
+    assert_eq!(std::fs::metadata(&p1).unwrap().len(), 4096);
+    assert!(events.iter().any(|(pct, bytes)| pct.is_some() && *bytes > 0));
+    assert_eq!(
+      download(&format!("http://{addr}/known.mp3"), &dir, "ep-known", || Err("should reuse".into()), |_| {}).unwrap(),
+      p1
+    );
+
+    // 2. Chunked (no Content-Length): reports None percent + bytes.
+    let mut chunk_events = Vec::new();
+    let p2 = download_with_progress(
+      &format!("http://{addr}/chunked.mp3"),
+      &dir,
+      "ep-chunked",
+      || Ok(()),
+      |pct, bytes| chunk_events.push((pct, bytes)),
+    )
+    .unwrap();
+    assert_eq!(p2, dir.join("ep-chunked.mp3"));
+    assert_eq!(std::fs::metadata(&p2).unwrap().len(), 1024);
+    assert!(chunk_events.iter().any(|(pct, bytes)| pct.is_none() && *bytes > 0));
+
+    // 3. Stalled mid-stream: cancel aborts within ~0.5s and removes .part.
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancel_trigger = cancelled.clone();
+    std::thread::spawn(move || {
+      std::thread::sleep(Duration::from_millis(150));
+      cancel_trigger.store(true, Ordering::SeqCst);
+    });
+    let started = Instant::now();
+    let err = download_with_progress(
+      &format!("http://{addr}/slow.mp3"),
+      &dir,
+      "ep-slow",
+      || {
+        if cancelled.load(Ordering::SeqCst) {
+          Err(crate::import_queue::CANCELLED.to_string())
+        } else {
+          Ok(())
+        }
+      },
+      |_, _| {},
+    )
+    .unwrap_err();
+    assert_eq!(err, crate::import_queue::CANCELLED);
+    assert!(started.elapsed() < Duration::from_secs(2), "cancel took too long: {:?}", started.elapsed());
+    assert!(!dir.join("ep-slow.part").exists(), ".part must be removed on cancel");
+
+    stop_server.store(true, Ordering::SeqCst);
+    let _ = server.join();
+    let _ = std::fs::remove_dir_all(&dir);
   }
 
   // Real network: cargo test --manifest-path src-tauri/Cargo.toml -- --ignored downloads_episode --nocapture

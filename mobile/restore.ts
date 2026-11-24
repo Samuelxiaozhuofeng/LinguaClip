@@ -10,7 +10,9 @@ import { getAllVideosFromDB, replaceAllVideos } from '../utils/fileSystemAccess'
 import { readAll, replaceAll } from '../utils/review';
 import { PENDING_KEY } from '../utils/backup';
 import { t } from '../utils/i18n';
-import { BackupProblem, checkMobile, makeBackup, parseBackup, planLocal, readPending, type MobileBackup, type Pending } from './backup';
+import { BackupProblem, checkMobile, fromDesktopBackup, makeBackup, parseBackup, planLocal, readPending, type MobileBackup, type Pending } from './backup';
+import { isAndroidNative } from './platform/androidBridge';
+import { cleanupAndroidStagedZip, exportAndroidBackupZip, pickAndroidBackup, prepareAndroidRestore, unpackAndroidZip } from './platform/desktop';
 import { RESTORE_LOCK, deleteCopy, getCopy, putCopy, readAllCache, replaceAllCache } from './store';
 
 const LOCK = RESTORE_LOCK;
@@ -34,7 +36,12 @@ export async function snapshot(): Promise<MobileBackup> {
 }
 
 // Share sheet (iPhone: "Save to Files") when it takes files, else a download.
-export async function exportBackup(): Promise<{ videos: number; cards: number } | null> {
+// On Android native, writes a desktop-compatible .zip (with optional API keys + clips) and opens system share.
+export async function exportBackup(opts?: { includeKeys?: boolean }): Promise<{ videos: number; cards: number } | null> {
+  if (isAndroidNative()) {
+    const res = await exportAndroidBackupZip(opts?.includeKeys ?? true);
+    return res ? { videos: res.videos, cards: res.cards } : null;
+  }
   const b = await snapshot();
   const date = new Date(b.at).toLocaleDateString('sv-SE'); // this phone's date, YYYY-MM-DD
   const file = new File([JSON.stringify(b)], t('m.bkFileName', { date }), { type: 'application/json' });
@@ -58,16 +65,45 @@ export async function exportBackup(): Promise<{ videos: number; cards: number } 
 // A picked file → a checked backup (BackupProblem when not one). Touches no data.
 export const readBackupFile = async (f: File) => parseBackup(await f.text());
 
+export interface PickedBackup {
+  backup: MobileBackup;
+  zip?: string;
+  cross?: boolean;
+}
+
+// Android native picker accepting desktop/Android `.zip` and PWA `.json` backups.
+export async function pickAndReadAndroidBackup(): Promise<PickedBackup | null> {
+  const picked = await pickAndroidBackup();
+  if (!picked) return null;
+  if (picked.kind === 'json') {
+    return { backup: parseBackup(picked.text) };
+  }
+  const cross = (picked.manifest as { platform?: string } | null)?.platform !== 'android';
+  try {
+    const backup = fromDesktopBackup(picked.manifest, picked.data, picked.appVersion, { crossPlatform: cross });
+    return { backup, zip: picked.stagedZip, cross };
+  } catch (e) {
+    await cleanupAndroidStagedZip().catch(console.error);
+    throw e;
+  }
+}
+
+export const discardAndroidStagedZip = (): Promise<void> => cleanupAndroidStagedZip();
+
 // The user said yes: keep the current state, stage the backup, then reload into the restore.
 // Either copy failing to save = nothing restored, nothing changed. Another window already
 // restoring (its marker is there) = its copies are left alone, this one just reloads.
-export const startRestore = (b: MobileBackup): Promise<void> => locked(async () => {
+export const startRestore = (b: MobileBackup, opts?: { zip?: string; cross?: boolean }): Promise<void> => locked(async () => {
   if (localStorage.getItem(PENDING_KEY) !== null) return reloading();
+  await prepareAndroidRestore().catch(console.error);
   const why = (e: unknown) => new BackupProblem('pre', e instanceof Error ? e.message : String(e));
   const now = await snapshot().catch(e => { throw why(e); });
   await putCopy('pre', now).catch(e => { throw why(e); });
   await putCopy('staged', b).catch(e => { throw why(e); });
-  localStorage.setItem(PENDING_KEY, JSON.stringify({ use: 'staged', tries: 0 } satisfies Pending));
+  const pending: Pending = { use: 'staged', tries: 0 };
+  if (opts?.zip) pending.zip = opts.zip;
+  if (opts?.cross) pending.cross = true;
+  localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
   return reloading(); // the lock goes with the page
 });
 
@@ -80,14 +116,22 @@ async function run(p: Pending): Promise<void> {
   const problem = checkMobile(raw);
   if (problem) throw new BackupProblem(problem.code, problem.why);
   const b = raw as MobileBackup;
+  if (p.use === 'staged' && p.zip) {
+    await unpackAndroidZip(p.zip);
+  }
   await replaceAllVideos(b.videos);
   await replaceAll(b.review.cards.map(c => (Array.isArray(c.reasons) ? c : { ...c, reasons: [] })), b.review.meta);
-  const plan = planLocal(allLocal(), b.local);
+  const plan = planLocal(
+    allLocal(),
+    b.local,
+    p.cross ? { crossPlatform: true, target: 'android' } : p.zip ? { includeKeys: true } : undefined,
+  );
   for (const [k, v] of plan.set) localStorage.setItem(k, v);
   for (const k of plan.remove) localStorage.removeItem(k);
   await replaceAllCache(b.cache);
   localStorage.removeItem(PENDING_KEY);
   await deleteCopy('staged').catch(console.error);
+  if (p.zip) await cleanupAndroidStagedZip().catch(console.error);
   location.reload();
 }
 
@@ -143,11 +187,13 @@ export const retryRestore = () => locked(async () => {
 });
 export const restorePre = () => locked(async () => {
   if (localStorage.getItem(PENDING_KEY) === null) return reloading();
+  await cleanupAndroidStagedZip().catch(console.error);
   await run({ use: 'pre', tries: 0 });
   return never();
 });
 export const abandonRestore = () => locked(async () => {
   localStorage.removeItem(PENDING_KEY);
   await deleteCopy('staged').catch(console.error);
+  await cleanupAndroidStagedZip().catch(console.error);
   return reloading();
 });

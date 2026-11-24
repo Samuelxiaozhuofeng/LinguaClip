@@ -181,6 +181,12 @@ export interface VideoRecord {
     trashOriginal?: boolean;
     // The mp4 a conversion made; a retry starts from it instead of converting again.
     converted?: string;
+    // Android Phase 1: selected audio track index, extracted private audio path, and chunked ASR progress.
+    trackIndex?: number;
+    extractedPath?: string;
+    pieceDone?: number;
+    pieceTotal?: number;
+    downloadBytes?: number;
   };
 }
 

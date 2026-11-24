@@ -11,12 +11,20 @@ import { parseSRT } from '../utils/srtParser';
 import { getLang, useLang, useT } from '../utils/i18n';
 import { epKey, episodeName, parseStarter, type StarterItem } from '../pro/podcastFeed';
 import { writeTransCache } from '../pro/transPrep';
+import { fetch as httpFetch } from '@tauri-apps/plugin-http';
 import { LangBar, btnSmall, btnSoft, sheet } from './ui';
+import { isAndroidNative } from './platform/androidBridge';
 
-// Our site's files by path, so dev / preview (proxied) and the real site all read them same-origin.
-const local = (u: string) => { const x = new URL(u, location.href); return x.hostname === 'linguaclipapp.com' ? x.pathname + x.search : u; };
+// On web/PWA: same-origin paths so dev/preview and linguaclipapp.com/app/ avoid CORS.
+// On Android native (tauri.localhost): full https://linguaclipapp.com URLs via Rust plugin-http.
+const SITE = 'https://linguaclipapp.com';
+const local = (u: string) => {
+  if (isAndroidNative()) return new URL(u, SITE).href;
+  const x = new URL(u, location.href);
+  return x.hostname === 'linguaclipapp.com' ? x.pathname + x.search : u;
+};
 const get = async (url: string) => {
-  const res = await fetch(local(url), { signal: AbortSignal.timeout(20_000) });
+  const res = await httpFetch(local(url), { signal: AbortSignal.timeout(20_000) });
   if (!res.ok) throw new Error(`${res.status} ${url}`);
   return res.text();
 };

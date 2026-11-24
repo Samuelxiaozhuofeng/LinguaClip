@@ -54,8 +54,33 @@ export const heardPct = (r: VideoRecord): number => {
 export const sourceOf = (r: VideoRecord) =>
   r.podcast?.feed === STARTER_FEED ? t('m.srcStarter') : r.podcast ? t('m.srcPodcast') : t('m.srcFile');
 
-// Error codes from importAudio.ts / transcribe.ts → a sentence.
+function shortCodecName(raw: string): string {
+  const m = raw.trim().toLowerCase();
+  if (!m) return 'AUDIO';
+  if (m.includes('eac3') || m.includes('ec-3') || m.includes('e-ac-3')) return 'E-AC-3';
+  if (m.includes('ac3') || m.includes('ac-3')) return 'AC-3';
+  if (m.includes('dts')) return 'DTS';
+  if (m.includes('mp4a')) return 'AAC';
+  if (m.includes('mpeg')) return 'MP3';
+  if (m.includes('opus')) return 'Opus';
+  if (m.includes('vorbis')) return 'Vorbis';
+  if (m.includes('flac')) return 'FLAC';
+  if (m.includes('raw') || m.includes('pcm')) return 'WAV';
+  return raw.trim().replace(/^audio\//i, '').toUpperCase() || 'AUDIO';
+}
+
+// Error codes from importAudio.ts / transcribe.ts / importAndroid.ts → a sentence.
 export function errText(code: string): string {
+  if (code.startsWith('audio:unsupported_codec:')) {
+    return t('m.errUnsupportedCodec', { codec: shortCodecName(code.slice('audio:unsupported_codec:'.length)) });
+  }
+  if (code === 'audio:no_track') return t('m.errNoTrack');
+  if (code === 'audio:reimport') return t('m.errReimportFile');
+  if (code === 'cloud:missing-url') return t('m.errCustomUrl');
+  if (code === 'cancelled') return t('m.errCancelled');
+  if (code === 'srt:empty') return t('m.srtEmpty');
+  if (code === 'podcast:format') return t('m.errNoMedia');
+  if (code.startsWith('download:')) return t('m.errDownload', { msg: code.slice('download:'.length).trim().slice(0, 120) });
   if (code === 'file:toolarge') return t('m.errTooBig');
   if (code === 'cloud:nokey') return t('m.errNoKey');
   if (code === 'interrupted') return t('m.errInterrupted');

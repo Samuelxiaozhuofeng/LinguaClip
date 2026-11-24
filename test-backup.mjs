@@ -184,4 +184,84 @@ assert.equal(B.lastAuto([entry('pre', 50)]), null);
 assert.deepEqual(B.clipFiles([card(), card({ clip: { kind: 'audio', file: 'b.m4a', image: 'b.jpg', from: 0 } }), card({ clip: undefined }), card()]),
   ['v1_1.00.mp4', 'b.m4a', 'b.jpg']);
 
+// --- cross-platform migration (desktop → android) ---
+{
+  // Android & desktop share the same app version from tauri.conf.json, so version guard stays active.
+  assert.equal(B.checkBackup(make({ m: { app: '0.10.0', platform: 'mac' } }).manifest, make().data, '0.10.0'), null);
+  assert.deepEqual(B.checkBackup(make({ m: { app: '0.11.0', platform: 'mac' } }).manifest, make().data, '0.10.0'), { newer: true, why: 'app 0.11.0' });
+  assert.deepEqual(B.checkBackup(make({ m: { format: 2, app: '0.10.0' } }).manifest, make().data, '0.10.0'), { newer: true, why: 'format' });
+  // Cross-platform planLocalStorage skips DEVICE_ONLY keys in both set and remove, and downgrades desktop-only choices.
+  const currentPhone = {
+    linguaclip_android_battery_dismissed: '1',
+    linguaclip_lang: 'en',
+    linguaclip_old: 'x',
+  };
+  const desktopBackup = {
+    linguaclip_lang: 'zh',
+    linguaclip_keys: '{"studio":{}}',
+    linguaclip_transcribe_config: JSON.stringify({ mode: 'local', gpu: true, groqKey: 'gsk_1', bailianKey: '' }),
+    linguaclip_dict_sources: JSON.stringify({ online: false, local: true, localFirst: true }),
+  };
+  const plan = B.planLocalStorage(currentPhone, desktopBackup, { crossPlatform: true, target: 'android' });
+  const setObj = Object.fromEntries(plan.set);
+  assert.equal(setObj.linguaclip_lang, 'zh');
+  assert.equal('linguaclip_keys' in setObj, false, 'desktop shortcuts are not imported to android');
+  assert.equal(JSON.parse(setObj.linguaclip_transcribe_config).mode, 'cloud', 'local whisper downgrades to cloud');
+  assert.equal(JSON.parse(setObj.linguaclip_transcribe_config).gpu, false);
+  assert.equal(JSON.parse(setObj.linguaclip_dict_sources).online, true, 'local-only dict falls back to online enabled');
+  assert.deepEqual(plan.remove, ['linguaclip_old'], 'android-only keys stay untouched');
+  // If desktop backup had bailianKey without groqKey, local downgrades to bailian.
+  const bPlan = B.planLocalStorage({}, { linguaclip_transcribe_config: JSON.stringify({ mode: 'local', groqKey: '', bailianKey: 'sk-b' }) }, { crossPlatform: true, target: 'android' });
+  assert.equal(JSON.parse(Object.fromEntries(bPlan.set).linguaclip_transcribe_config).mode, 'bailian');
+}
+
+// --- cross-platform migration (android → desktop) ---
+{
+  const androidManifest = make({ m: { app: '0.12.0', platform: 'android' } }).manifest;
+  assert.equal(B.checkBackup(androidManifest, make().data, '0.10.0', { crossPlatform: true }), null,
+    'crossPlatform accepts higher app version');
+  assert.deepEqual(
+    B.checkBackup({ ...androidManifest, format: 2 }, make().data, '0.10.0', { crossPlatform: true }),
+    { newer: true, why: 'format' },
+    'crossPlatform still rejects format: 2',
+  );
+  const currentDesktop = {
+    linguaclip_keys: '{"studio":{"play":"Space"}}',
+    linguaclip_shortcuts: '{"a":1}',
+    linguaclip_keys_pinned: '1',
+    linguaclip_lang: 'en',
+    linguaclip_old: 'stale',
+  };
+  const androidBackup = {
+    linguaclip_lang: 'zh',
+    linguaclip_android_battery_dismissed: '1',
+    linguaclip_podcast_wifi_only: '1',
+    linguaclip_transcribe_config: JSON.stringify({
+      mode: 'custom',
+      customUrl: 'https://my.asr.example/v1',
+      customKey: 'sk-custom',
+      customModel: 'whisper-large-v3',
+      groqKey: '',
+    }),
+  };
+  const plan = B.planLocalStorage(currentDesktop, androidBackup, { crossPlatform: true, target: 'desktop' });
+  const setObj = Object.fromEntries(plan.set);
+  assert.equal(setObj.linguaclip_lang, 'zh');
+  assert.equal('linguaclip_android_battery_dismissed' in setObj, false, 'android battery flag skipped on desktop');
+  assert.equal('linguaclip_podcast_wifi_only' in setObj, false, 'android wifi-only flag skipped on desktop');
+  assert.deepEqual(plan.remove, ['linguaclip_old'], 'desktop shortcut keys preserved and not removed');
+  const tr = JSON.parse(setObj.linguaclip_transcribe_config);
+  assert.equal(tr.mode, 'local', 'android custom mode safely downgraded to local on desktop');
+  assert.equal(tr.customUrl, 'https://my.asr.example/v1');
+  assert.equal(tr.customKey, 'sk-custom');
+  assert.equal(tr.customModel, 'whisper-large-v3');
+  // Existing desktop transcribe config is never overwritten even on cross-platform restore.
+  const keepPlan = B.planLocalStorage(
+    { ...currentDesktop, linguaclip_transcribe_config: '{"mode":"cloud","groqKey":"gsk_mine"}' },
+    androidBackup,
+    { crossPlatform: true, target: 'desktop' },
+  );
+  assert.equal('linguaclip_transcribe_config' in Object.fromEntries(keepPlan.set), false);
+}
+
 console.log('test-backup: all passed');

@@ -14,6 +14,19 @@ export const LICENSE_KEY = 'linguaclip_pro_license';
 export const SECRET_KEYS = ['linguaclip_ai_config', 'linguaclip_transcribe_config'];
 // This computer's own state: never in a backup, never overwritten or removed by a restore.
 const LOCAL_ONLY = [LICENSE_KEY, 'linguaclip_anki_tpl', 'linguaclip_today', 'linguaclip_days', PENDING_KEY];
+// Platform-specific keys: kept in same-platform backups, skipped during cross-platform migration
+// so desktop shortcuts and mobile hints never overwrite or wipe each other.
+export const DEVICE_ONLY = [
+  'linguaclip_keys',
+  'linguaclip_shortcuts',
+  'linguaclip_keys_pinned',
+  'linguaclip_install_hint_closed',
+  'linguaclip_android_battery_dismissed',
+  'linguaclip_podcast_wifi_only',
+  'linguaclip_phone_ways_off',
+  'linguaclip_phone_last_way',
+  'linguaclip_native_pos_ts',
+];
 const EXTRA = ['import_lang', 'import_trash_original'];
 
 export const inBackup = (key: string) => (key.startsWith('linguaclip_') || EXTRA.includes(key)) && !LOCAL_ONLY.includes(key);
@@ -128,13 +141,18 @@ const listProblem = (list: unknown[], name: string, rules: Record<string, Rule>)
 };
 
 // Everything the app start and the restore will rely on. Any failure rejects the whole backup.
-export const checkBackup = (manifest: unknown, data: unknown, appVersion: string): Problem => {
+export const checkBackup = (
+  manifest: unknown,
+  data: unknown,
+  appVersion: string,
+  opts?: { crossPlatform?: boolean },
+): Problem => {
   const bad = (why: string): Problem => ({ newer: false, why });
   if (!isObj(manifest)) return bad('manifest');
   if (!num(manifest.format) || (manifest.format as number) < 1) return bad('manifest.format');
   if ((manifest.format as number) > FORMAT) return { newer: true, why: 'format' };
   if (!str(manifest.app)) return bad('manifest.app');
-  if (compareVersions(manifest.app as string, appVersion) > 0) return { newer: true, why: `app ${manifest.app}` };
+  if (!opts?.crossPlatform && compareVersions(manifest.app as string, appVersion) > 0) return { newer: true, why: `app ${manifest.app}` };
   if (!num(manifest.createdAt) || !str(manifest.ownDir) || !num(manifest.videos) || !num(manifest.cards)) return bad('manifest');
   if (typeof manifest.files !== 'boolean' || typeof manifest.hadLicense !== 'boolean') return bad('manifest');
   if (!Array.isArray(manifest.clips) || !manifest.clips.every(plainName)) return bad('manifest.clips');
@@ -152,10 +170,63 @@ export const checkBackup = (manifest: unknown, data: unknown, appVersion: string
 
 // Backup's settings first, then the ones in range it doesn't have go. The AI / transcription
 // settings already on this computer are never touched: only a computer without them takes the backup's.
-export const planLocalStorage = (current: Record<string, string>, backup: Record<string, string>) => ({
-  set: Object.entries(backup).filter(([k]) => inBackup(k) && !(SECRET_KEYS.includes(k) && k in current)),
-  remove: Object.keys(current).filter(k => inBackup(k) && !(k in backup) && !SECRET_KEYS.includes(k)),
-});
+export const planLocalStorage = (
+  current: Record<string, string>,
+  backup: Record<string, string>,
+  opts?: { crossPlatform?: boolean; target?: 'android' | 'desktop' },
+) => {
+  const skip = (k: string) => !!opts?.crossPlatform && DEVICE_ONLY.includes(k);
+  const rawSet = Object.entries(backup).filter(([k]) => inBackup(k) && !skip(k) && !(SECRET_KEYS.includes(k) && k in current));
+  const set = opts?.target === 'android'
+    ? adaptSettingsForAndroid(rawSet)
+    : opts?.target === 'desktop'
+      ? adaptSettingsForDesktop(rawSet)
+      : rawSet;
+  return {
+    set,
+    remove: Object.keys(current).filter(k => inBackup(k) && !skip(k) && !(k in backup) && !SECRET_KEYS.includes(k)),
+  };
+};
+
+// Downgrades Android-only choices (e.g., custom cloud ASR mode) when restoring onto desktop
+// while keeping custom fields intact in case the backup moves back to Android later.
+export const adaptSettingsForDesktop = (entries: [string, string][]): [string, string][] =>
+  entries.map(([k, v]) => {
+    if (k === 'linguaclip_transcribe_config') {
+      try {
+        const cfg = JSON.parse(v);
+        if (cfg && typeof cfg === 'object' && cfg.mode === 'custom') {
+          return [k, JSON.stringify({ ...cfg, mode: 'local' })];
+        }
+      } catch { /* keep raw */ }
+    }
+    return [k, v];
+  });
+
+// Downgrades desktop-only choices when migrating a desktop backup onto Android so the phone
+// never gets stuck on a local whisper engine or an empty local-only dictionary setting.
+export const adaptSettingsForAndroid = (entries: [string, string][]): [string, string][] =>
+  entries.map(([k, v]) => {
+    if (k === 'linguaclip_transcribe_config') {
+      try {
+        const cfg = JSON.parse(v);
+        if (cfg && typeof cfg === 'object' && cfg.mode === 'local') {
+          const hasBailian = typeof cfg.bailianKey === 'string' && cfg.bailianKey.trim() !== '';
+          const hasGroq = typeof cfg.groqKey === 'string' && cfg.groqKey.trim() !== '';
+          return [k, JSON.stringify({ ...cfg, mode: hasBailian && !hasGroq ? 'bailian' : 'cloud', gpu: false })];
+        }
+      } catch { /* keep raw */ }
+    }
+    if (k === 'linguaclip_dict_sources') {
+      try {
+        const cfg = JSON.parse(v);
+        if (cfg && typeof cfg === 'object' && cfg.online === false && cfg.local === true) {
+          return [k, JSON.stringify({ ...cfg, online: true })];
+        }
+      } catch { /* keep raw */ }
+    }
+    return [k, v];
+  });
 
 // --- Automatic ones ---
 

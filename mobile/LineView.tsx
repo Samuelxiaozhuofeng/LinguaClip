@@ -1,12 +1,14 @@
 // Lines with their text up on the listening page (design Lookup.dc.html): words to tap
-// for their meaning (Japanese split into groups once the dictionary is in), "see this
-// line" — the line in a card between its neighbours, with listen again / ☆ / 中 — and the
-// whole section's transcript for step 2 and free listening.
+// for their meaning (Japanese split into groups once the dictionary is in), long-press drag
+// to select & look up a phrase (usePhrasePick, M2.3), "see this line" — the line in a card
+// between its neighbours, with listen again / ☆ / 中 — and the whole section's transcript.
 import React, { useMemo } from 'react';
 import type { Subtitle } from '../types';
 import { TokenType, tokenizeText } from '../utils/textTokenizer';
 import { useJaVersion } from '../utils/japanese';
 import { useT } from '../utils/i18n';
+import type { PickToken } from './reader/phrasePick';
+import { PickHandleDot, usePhrasePick } from './reader/usePhrasePick';
 
 export type LineProps = {
   saved: Set<number>; trans: (l: Subtitle) => string | null | undefined; // undefined: closed
@@ -14,14 +16,55 @@ export type LineProps = {
 };
 
 export const Words: React.FC<{ line: Subtitle; onWord: (w: string, l: Subtitle) => void; className?: string }> = ({ line, onWord, className }) => {
+  const t = useT();
   const v = useJaVersion();
   const tokens = useMemo(() => tokenizeText(line.text), [line.text, v]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickTokens: PickToken[] = useMemo(
+    () => tokens.map(x => ({ text: x.value, isWord: x.type === TokenType.WORD })),
+    [tokens],
+  );
+  const pick = usePhrasePick({
+    tokens: pickTokens,
+    onWord: w => onWord(w, line),
+    onPhrase: phrase => onWord(phrase, line),
+  });
+
   return (
-    <p className={className} data-split={tokens.filter(x => x.type === TokenType.WORD).length}>
-      {tokens.map(x => x.type === TokenType.WORD
-        ? <button key={x.index} onClick={() => onWord(x.value, line)} className="rounded active:bg-accent-soft">{x.value}</button>
-        : <span key={x.index}>{x.value}</span>)}
-    </p>
+    <div>
+      <p
+        {...pick.containerProps}
+        className={`${className ?? ''} select-none`.trim()}
+        data-split={tokens.filter(x => x.type === TokenType.WORD).length}
+      >
+        {tokens.map((x, idx) => {
+          const selected = pick.inRange(idx);
+          if (x.type !== TokenType.WORD) {
+            return (
+              <span key={x.index} className={selected ? 'bg-accent/20 text-ink' : undefined}>
+                {x.value}
+              </span>
+            );
+          }
+          const startEdge = pick.isStart(idx);
+          const endEdge = pick.isEnd(idx);
+          return (
+            <button
+              key={x.index}
+              type="button"
+              {...pick.bindWord(idx, x.value)}
+              className={`relative inline rounded active:bg-accent-soft ${
+                selected ? 'bg-accent/20 text-ink' : ''
+              }`}
+            >
+              {startEdge && <PickHandleDot side="start" bind={pick.bindHandle('start')} />}
+              {x.value}
+              {endEdge && <PickHandleDot side="end" bind={pick.bindHandle('end')} />}
+            </button>
+          );
+        })}
+      </p>
+      {pick.selecting && <p className="mt-1 text-xs text-accent" role="status">{t('m.phraseHint')}</p>}
+    </div>
   );
 };
 

@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import './utils/polyfills';
 import '@fontsource/source-serif-4/400.css';
 import '@fontsource/source-serif-4/400-italic.css';
 import '@fontsource/source-serif-4/500.css';

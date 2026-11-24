@@ -340,6 +340,25 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
     case 'plugin:process|restart':
       location.reload();
       return null;
+    case 'android_paths':
+      return { ownDir: OWN, mediaDir: `${OWN}/media`, clipsDir: `${OWN}/clips`, tmpDir: `${OWN}/tmp` };
+    case 'plan_wav_cuts':
+      return [{ index: 0, fromSample: 0, toSample: 16000, offsetMs: 0 }];
+    case 'transcribe_prepared_pieces':
+    case 'transcribe_finalize':
+      return { subtitleText: '1\n00:00:00,000 --> 00:00:01,000\nMock line\n', words: [] };
+    case 'transcribe_plan':
+      return { planId: 'mock-plan', lang: args.lang ?? 'en', pieceSecs: 3600, wavSamples: 16000, pieces: [{ index: 0, fromSample: 0, toSample: 16000, offsetMs: 0 }], doneIndices: [] };
+    case 'transcribe_piece':
+      return true;
+    case 'download_podcast_audio':
+    case 'download_podcast_audio_stream':
+      return `${OWN}/media/${args.id ?? 'mock'}.mp3`;
+    case 'android_cancel_job':
+      return null;
+    case 'android_purge_files':
+    case 'android_sweep_orphans':
+      return 0;
     default:
       // start_import, open_youtube_login, window chrome… nothing to do in a browser
       return null;

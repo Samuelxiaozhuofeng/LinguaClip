@@ -69,10 +69,19 @@ export const countLine = () => bump(0, 1);
 let holders = 0;
 let timer: number | undefined;
 let lastInput = 0;
+// Optional external playback probe (e.g. Android native Media3 player outside DOM <audio>).
+let playingProbe: (() => boolean) | null = null;
+export const setPlayingProbe = (fn: (() => boolean) | null) => { playingProbe = fn; };
+/** Drop the probe only if it is still this one (the next page may have set its own). */
+export const clearPlayingProbe = (fn: () => boolean) => { if (playingProbe === fn) playingProbe = null; };
+const isProbePlaying = () => {
+  if (!playingProbe) return false;
+  try { return !!playingProbe(); } catch { return false; }
+};
 const onInput = () => { lastInput = Date.now(); };
 const tick = () => {
   const since = Date.now() - lastInput;
-  const playing = Array.from(document.querySelectorAll<HTMLMediaElement>('video, audio')).some(v => !v.paused);
+  const playing = Array.from(document.querySelectorAll<HTMLMediaElement>('video, audio')).some(v => !v.paused) || isProbePlaying();
   if (document.hasFocus() && (since < IDLE || (playing && since < PLAY_IDLE))) bump(TICK, 0);
 };
 

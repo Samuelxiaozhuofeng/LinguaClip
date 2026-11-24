@@ -10,11 +10,18 @@ struct Line {
   // Waiting or running, in order; the first one runs.
   ids: Vec<String>,
   cancelled: Vec<String>,
+  // Permanently deleted jobs: never allowed to re-enter the queue until cleared.
+  tombstones: Vec<String>,
   // The running import's current tool (yt-dlp / ffmpeg / whisper-cli).
   child: Option<(String, Arc<Mutex<Child>>)>,
 }
 
-static LINE: Mutex<Line> = Mutex::new(Line { ids: Vec::new(), cancelled: Vec::new(), child: None });
+static LINE: Mutex<Line> = Mutex::new(Line {
+  ids: Vec::new(),
+  cancelled: Vec::new(),
+  tombstones: Vec::new(),
+  child: None,
+});
 static TURN: Condvar = Condvar::new();
 
 thread_local! {
@@ -49,6 +56,9 @@ impl Drop for Turn {
 // when someone is ahead (the card shows "queued").
 pub(crate) fn wait_turn(id: &str, on_wait: impl FnOnce()) -> Result<Turn, String> {
   let mut line = line();
+  if line.tombstones.iter().any(|x| x == id) {
+    return Err(CANCELLED.into());
+  }
   line.ids.push(id.to_string());
   if line.ids[0] != id {
     drop(line); // the event goes out without holding up cancel / check
@@ -56,7 +66,7 @@ pub(crate) fn wait_turn(id: &str, on_wait: impl FnOnce()) -> Result<Turn, String
     line = self::line();
   }
   loop {
-    if line.cancelled.iter().any(|x| x == id) {
+    if line.cancelled.iter().any(|x| x == id) || line.tombstones.iter().any(|x| x == id) {
       drop(line); // Turn's drop takes the lock
       drop(Turn(id.to_string()));
       return Err(CANCELLED.into());
@@ -73,7 +83,12 @@ pub(crate) fn wait_turn(id: &str, on_wait: impl FnOnce()) -> Result<Turn, String
 
 // Between steps: stop here if the card was deleted meanwhile.
 pub(crate) fn check() -> Result<(), String> {
-  if CURRENT.with(|c| c.borrow().as_ref().is_some_and(|id| line().cancelled.contains(id))) {
+  if CURRENT.with(|c| {
+    c.borrow().as_ref().is_some_and(|id| {
+      let l = line();
+      l.cancelled.contains(id) || l.tombstones.contains(id)
+    })
+  }) {
     return Err(CANCELLED.into());
   }
   Ok(())
@@ -95,7 +110,7 @@ pub(crate) fn watch(child: &Arc<Mutex<Child>>) {
 // The tool and anything it started (run_streaming gives it its own process group).
 pub(crate) fn kill(child: &Arc<Mutex<Child>>) {
   let mut child = child.lock().unwrap_or_else(PoisonError::into_inner);
-  #[cfg(unix)]
+  #[cfg(all(unix, not(target_os = "android")))]
   {
     let _ = std::process::Command::new("/bin/kill").args(["-KILL", "--", &format!("-{}", child.id())]).status();
   }
@@ -126,6 +141,28 @@ pub(crate) fn cancel(id: &str) {
   if let Some(child) = running {
     kill(&child);
   }
+}
+
+// Permanently cancels a deleted record's job and blocks any late piece/finalize call from resuming it.
+pub(crate) fn tombstone(id: &str) {
+  {
+    let mut l = line();
+    if !l.tombstones.iter().any(|x| x == id) {
+      l.tombstones.push(id.to_string());
+    }
+  }
+  cancel(id);
+}
+
+#[allow(dead_code)]
+pub(crate) fn clear_tombstone(id: &str) {
+  let mut l = line();
+  l.tombstones.retain(|x| x != id);
+}
+
+#[allow(dead_code)]
+pub(crate) fn is_tombstoned(id: &str) -> bool {
+  line().tombstones.iter().any(|x| x == id)
 }
 
 #[cfg(test)]
@@ -167,6 +204,24 @@ mod tests {
     #[cfg(unix)]
     cancel_stops_run_streaming();
     crate::cloud_pieces::tests::cancel_drops_pieces_in_flight();
+    tombstone_blocks_wait_turn_and_clears();
+  }
+
+  fn tombstone_blocks_wait_turn_and_clears() {
+    let id = "tomb-a";
+    assert!(!is_tombstoned(id));
+    tombstone(id);
+    assert!(is_tombstoned(id));
+    let err = wait_turn(id, || panic!("tombstoned job must not queue")).err().unwrap();
+    assert_eq!(err, CANCELLED);
+    clear_tombstone(id);
+    assert!(!is_tombstoned(id));
+    let turn = wait_turn(id, || panic!("nobody ahead")).unwrap();
+    tombstone(id);
+    assert_eq!(check(), Err(CANCELLED.to_string()));
+    drop(turn);
+    clear_tombstone(id);
+    assert!(!is_tombstoned(id));
   }
 
   // The real path: an import thread's tool, read line by line, stops within moments.

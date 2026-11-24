@@ -163,6 +163,9 @@ fn home() -> PathBuf {
 // folder whose name that code page cannot spell (e.g. a Chinese name on English
 // Windows) breaks the model path. Move parts to an ASCII folder if users hit it.
 pub fn parts_dir() -> PathBuf {
+  if cfg!(target_os = "android") {
+    return crate::paths::own_dir().unwrap_or_default().join("whisper");
+  }
   if cfg!(windows) {
     let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
     local.unwrap_or_else(|| home().join("AppData/Local")).join("com.linguaclip.app/whisper")

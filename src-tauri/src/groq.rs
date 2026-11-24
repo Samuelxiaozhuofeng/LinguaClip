@@ -11,11 +11,22 @@ pub(crate) async fn send(
   client: &reqwest::Client,
   api_key: &str,
   lang: &str,
+  audio: (Vec<u8>, &str, &str),
+) -> Result<Resp, String> {
+  send_to(client, URL, MODEL, api_key, lang, audio).await
+}
+
+pub(crate) async fn send_to(
+  client: &reqwest::Client,
+  url: &str,
+  model: &str,
+  api_key: &str,
+  lang: &str,
   (audio, name, mime): (Vec<u8>, &str, &str),
 ) -> Result<Resp, String> {
   let boundary = format!("lc{}", uuid::Uuid::new_v4().simple());
   let mut fields = vec![
-    ("model", MODEL),
+    ("model", model),
     ("response_format", "verbose_json"),
     ("timestamp_granularities[]", "word"),
     ("timestamp_granularities[]", "segment"),
@@ -27,7 +38,7 @@ pub(crate) async fn send(
   let body = form_body(&boundary, &fields, (&audio, name, mime));
 
   let res = client
-    .post(URL)
+    .post(url)
     .bearer_auth(api_key)
     .header("Content-Type", format!("multipart/form-data; boundary={boundary}"))
     .body(body)

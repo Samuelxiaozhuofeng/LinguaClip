@@ -26,6 +26,10 @@ assert.equal(toolMissing('ffmpeg: bad input'), false);
 assert.equal(toolMissing('clip: too long'), false);
 assert.equal(toolMissing('missing:ffmpeg'), false);
 assert.equal(toolMissing('download failed'), true);
+// Android's cutClip rejects with Error objects: a bad line must not stop the whole batch.
+assert.equal(toolMissing(new Error('clip:audio:empty_remux')), false);
+assert.equal(toolMissing(new Error('missing:video')), false);
+assert.equal(toolMissing(new Error('android:unavailable')), true);
 
 // --- a batch ---
 const card = (id, more = {}) => ({ id, deck: 'line', videoId: 'v', start: 1, end: 2, text: id, ...more });

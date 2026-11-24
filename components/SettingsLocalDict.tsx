@@ -4,16 +4,19 @@ import { Btn } from './ui';
 import { useLang, useT, type DictKey } from '../utils/i18n';
 import type { DictLang } from '../utils/dictionary';
 import {
-  dictLabel, downloadDict, importDictFile, isInstalled, loadLocalDicts, moveDict, recommendedFor, removeDict,
+  downloadDict, importDictFile, loadLocalDicts, moveDict, removeDict,
   setDictEnabled, setDictLang, useLocalDicts,
 } from '../utils/localDict';
+import {
+  DICT_ERRORS, DICT_LANGS, dictLabel, formatMb, isInstalled, recommendedFor,
+} from '../utils/dictRecommend';
 
 // Settings → Look up → local dictionaries (docs/yomitan.md): the installed ones
 // (on/off, language, order, remove), import a zip, or download a recommended one.
 
-const LANGS: DictLang[] = ['en', 'es', 'fr', 'de', 'ja'];
-const mb = (b: number) => `${Math.max(1, Math.round(b / 1e6))} MB`;
-const ERRORS = ['badZip', 'nested', 'badIndex', 'badRow', 'tooBig', 'noTerms', 'busy', 'already', 'sameName', 'net', 'disk', 'gone'];
+const LANGS: DictLang[] = DICT_LANGS;
+const mb = formatMb;
+const ERRORS: readonly string[] = DICT_ERRORS;
 
 const SettingsLocalDict: React.FC = () => {
   const t = useT();
