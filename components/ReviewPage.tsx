@@ -51,12 +51,14 @@ const loadLang = (): DeckLang | 'all' => {
   try { const v = localStorage.getItem(LANG_KEY) as DeckLang | null; return v && DECK_LANGS.includes(v) ? v : 'all'; } catch { return 'all'; }
 };
 
-// One library per deck: start the due ones, the week ahead, then every card (CardsPage).
-const ReviewPage: React.FC<{ deck: Deck; onResume?: (r: VideoRecord) => void }> = ({ deck, onResume }) => {
+// Combined review hub: start due lines + words in one queue, switch deck tabs with 7-day forecast below.
+const ReviewPage: React.FC<{ initialDeck?: Deck; onResume?: (record: VideoRecord) => void }> = ({ initialDeck = 'line', onResume }) => {
   const t = useT();
   const cards = useCards();
   const records = useRecords(cards);
-  const [session, setSession] = useState<ReviewCard[] | null>(null);
+  const [deck, setDeck] = useState<Deck>(initialDeck);
+  useEffect(() => { setDeck(initialDeck); }, [initialDeck]);
+  const [session, setSession] = useState<{ cards: ReviewCard[]; deck: Deck | 'all' } | null>(null);
   const [picked, setPicked] = useState(loadLang);
   const pickLang = (v: DeckLang | 'all') => {
     setPicked(v);
@@ -94,17 +96,23 @@ const ReviewPage: React.FC<{ deck: Deck; onResume?: (r: VideoRecord) => void }> 
 
   const langs = useMemo(() => cards && records ? cardLangs(cards, records) : null, [cards, records]);
   const langOf = (c: ReviewCard) => langs?.get(c.id) ?? cardLangs([c], records ?? []).get(c.id)!;
-  const inDeck = (cards ?? []).filter(c => c.deck === deck);
-  // Languages this deck has, in a fixed order; the switch shows once there are two.
-  const present = DECK_LANGS.filter(l => langs && inDeck.some(c => langs.get(c.id) === l));
-  // A picked language this deck has no cards in (or can't be told apart) shows everything.
+  const allCards = cards ?? [];
+  // Languages across the whole library (lines + words), in a fixed order; shown once there are two.
+  const present = DECK_LANGS.filter(l => langs && allCards.some(c => langs.get(c.id) === l));
+  // A picked language the library has no cards in (or can't be told apart) shows everything.
   const lang = present.length > 1 && picked !== 'all' && present.includes(picked) ? picked : 'all';
-  const all = lang === 'all' ? (cards ?? []) : (cards ?? []).filter(c => langOf(c) === lang);
-  const n = deckCounts(all)[deck];
+  const all = lang === 'all' ? allCards : allCards.filter(c => langOf(c) === lang);
+  const counts = deckCounts(all);
+  const totalDue = counts.line.due + counts.word.due;
+  const totalAll = counts.line.total + counts.word.total;
   const now = Date.now();
-  const isLine = deck === 'line';
 
-  // This deck's cards (with audio) coming up on each of the next 7 days; today includes overdue.
+  const startSession = (d: Deck | 'all') => {
+    const q = dueQueue(all, d);
+    if (q.length) setSession({ cards: q, deck: d });
+  };
+
+  // Current tab's cards (with audio) coming up on each of the next 7 days; today includes overdue.
   const week = Array.from({ length: 7 }, (_, i) => {
     const day = dayStart(now, i), end = dayStart(now, i + 1);
     const count = all.filter(c => c.deck === deck && inReview(c) && (i === 0 ? c.fsrs.due < end : c.fsrs.due >= day && c.fsrs.due < end)).length;
@@ -114,26 +122,35 @@ const ReviewPage: React.FC<{ deck: Deck; onResume?: (r: VideoRecord) => void }> 
 
   return (
     <div>
-      <section className="pt-4 pb-7 border-b border-line grid grid-cols-1 md:grid-cols-[1fr_300px] gap-8 md:gap-12 items-end">
-        <div>
-          <h1 className="text-[34px] font-semibold tracking-[-0.02em] leading-tight">{isLine ? t('nav.saved') : t('nav.cards')}</h1>
-          <p className="mt-2 text-sm text-mute">{isLine ? t('review.deckLineHint') : t('review.deckWordHint')}</p>
-          {present.length > 1 && (
-            <Seg<DeckLang | 'all'> size="sm" className="mt-5" value={lang} onChange={pickLang} options={[
-              { value: 'all', label: t('cards.all') },
-              ...present.map(l => ({ value: l, label: <>{langName(l, getLang(), t('deck.unsorted'))} <span className="text-mute tabular-nums">{inDeck.filter(c => langs!.get(c.id) === l).length}</span></> })),
-            ]} />
+      <section className="pt-4 pb-7 border-b border-line">
+        <h1 className="text-[34px] font-semibold tracking-[-0.02em] leading-tight">{t('review.title')}</h1>
+        <p className="mt-2 text-sm text-mute">{t('review.hubHint')}</p>
+        {present.length > 1 && (
+          <Seg<DeckLang | 'all'> size="sm" className="mt-5" value={lang} onChange={pickLang} options={[
+            { value: 'all', label: t('cards.all') },
+            ...present.map(l => ({ value: l, label: <>{langName(l, getLang(), t('deck.unsorted'))} <span className="text-mute tabular-nums">{allCards.filter(c => langs!.get(c.id) === l).length}</span></> })),
+          ]} />
+        )}
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <Btn tone="accent" size="lg" disabled={totalDue === 0} onClick={() => startSession('all')}>
+            {totalDue === 0 ? t('review.nothingDue') : <><Play size={15} fill="currentColor" /> {t('review.start')} · {totalDue}</>}
+          </Btn>
+          {counts.line.due > 0 && counts.word.due > 0 && (
+            <>
+              <Btn size="sm" flat onClick={() => startSession('line')}>{t('review.onlyLines', { n: counts.line.due })}</Btn>
+              <Btn size="sm" flat onClick={() => startSession('word')}>{t('review.onlyWords', { n: counts.word.due })}</Btn>
+            </>
           )}
-          <div className="mt-5 flex items-center gap-4">
-            {n.due === 0 ? <span className="text-sm text-mute">{t('review.nothingDue')}</span> : (
-              <Btn tone="accent" size="lg" onClick={() => setSession(dueQueue(all, deck))}>
-                <Play size={15} fill="currentColor" /> {t('review.start')} · {n.due}
-              </Btn>
-            )}
-            <span className="text-sm text-mute">{t('review.total', { n: n.total })}</span>
-          </div>
+          <span className="text-sm text-mute">{t('review.total', { n: totalAll })}</span>
         </div>
-        {n.total > 0 && <div>
+      </section>
+
+      <div className="pt-6 pb-2 flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <Seg<Deck> value={deck} onChange={setDeck} options={[
+          { value: 'line', label: <>{t('review.deckLine')} <span className="text-mute tabular-nums">{counts.line.total}</span></> },
+          { value: 'word', label: <>{t('review.deckWord')} <span className="text-mute tabular-nums">{counts.word.total}</span></> },
+        ]} />
+        {counts[deck].total > 0 && <div className="w-full md:w-[300px]">
           <h3 className="text-xs text-mute mb-2.5">{t('review.week')}</h3>
           <div className="flex items-end gap-2.5 h-[84px]">
             {week.map((d, i) => (
@@ -145,14 +162,14 @@ const ReviewPage: React.FC<{ deck: Deck; onResume?: (r: VideoRecord) => void }> 
             ))}
           </div>
         </div>}
-      </section>
+      </div>
 
-      <CardsPage deck={deck} cards={cards && all} />
+      <CardsPage key={deck} deck={deck} cards={cards && all} />
 
       {session && (
         <ReviewSession
-          cards={session}
-          deck={deck}
+          cards={session.cards}
+          deck={session.deck}
           onClose={() => setSession(null)}
           langOf={langs ? langOf : undefined}
           lang={lang}

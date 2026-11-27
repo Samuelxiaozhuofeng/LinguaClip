@@ -12,9 +12,9 @@ export default [
       await page.reload();
       await see(page.getByText(NAME), '刷新后首页卡片');
       await see(page.getByText(/看到 \d\d:\d\d · 继续看剧/), '刷新后卡片仍是「继续看剧」');
-      await nav('句子');
-      await see(page.getByText(firstLine(sample)), '刷新后「句子」页的卡');
-      await nav('视频');
+      await nav('复习');
+      await see(page.getByText(firstLine(sample)), '刷新后「复习」页的卡');
+      await nav('学习');
     },
   },
   {
@@ -29,9 +29,9 @@ export default [
       await file.getByRole('button', { name: '只删记录，保留文件' }).click();
       await see(page.getByText('这里还空着'), '首页变成「这里还空着」');
       await gone(page.getByText(NAME), '首页视频卡片');
-      await nav('句子');
-      await see(page.getByText('共 0 个'), '「句子」页「共 0 个」');
-      await gone(page.getByText(firstLine(sample)), '「句子」页里这张卡');
+      await nav('复习');
+      await see(page.getByText('共 0 个'), '「复习」页「共 0 个」');
+      await gone(page.getByText(firstLine(sample)), '「复习」页里这张卡');
       // Nothing left behind: stays on Video Home, no leftover-cards question after a reload.
       await page.reload();
       await see(page.getByText('这里还空着'), '空库刷新后停在视频首页');

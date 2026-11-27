@@ -7,7 +7,7 @@ import Shell from './components/Shell';
 import Studio from './components/Studio';
 import WatchPage from './components/WatchPage';
 import CustomPanel, { PanelChoice, nextPick, paceOf, resumeChoice } from './components/CustomPanel';
-import { Listen, PodcastPicker, ProHost, Reader, StarterHost, podcastRate } from '@pro';
+import { Listen, PodcastPicker, ProHost, Reader, StarterHost } from '@pro';
 import SyncHost from './components/SyncHost';
 import { DialogHost, dialog } from './components/Dialog';
 import { UpdateDialog } from './components/UpdateUI';
@@ -27,7 +27,7 @@ import { parseSRT } from './utils/srtParser';
 import { t, useLang } from './utils/i18n';
 import { markInterruptedJobs, startImportListener } from './utils/importJob';
 import { isDefault, loose, matches } from './utils/shortcuts';
-import { getLoop, setLoopOn, useLoop } from './utils/loop';
+import { getLoop, pageLoopHeld, setLoopOn, useLoop } from './utils/loop';
 import { countLine } from './utils/today';
 import { deleteCards, keepOrphans, orphanCards } from './utils/review';
 import { startClips } from './utils/clips';
@@ -75,12 +75,10 @@ export default function App() {
   }, []);
 
   const [appState, setAppState] = useState<AppState>(AppState.UPLOAD);
-  // Which shelf a page returns to: the videos, or the podcast tab.
-  const homeRef = useRef<AppState.UPLOAD | AppState.PODCASTS>(AppState.UPLOAD);
-  if (appState === AppState.UPLOAD || appState === AppState.PODCASTS) homeRef.current = appState;
-  const goHome = () => { ++launchRef.current; setAppState(homeRef.current); };
-  const [homeEmpty, setHomeEmpty] = useState(false); // no videos yet: the top bar drops its add button
-  const [addAsked, setAddAsked] = useState(false); // the top bar's "+": Home opens its add dialog
+  const goHome = () => { ++launchRef.current; setAppState(AppState.UPLOAD); };
+  const [homeEmpty, setHomeEmpty] = useState(false); // library is empty: the top bar drops its add menu
+  const [addAsked, setAddAsked] = useState(false); // top bar "+ Add → local file": Home opens AddVideo
+  const [podcastAsked, setPodcastAsked] = useState(false); // top bar "+ Add → Find podcasts": Home opens PodcastPicker
   const [videoFileName, setVideoFileName] = useState<string | null>(null);
   const [videoLang, setVideoLang] = useState<DictLang | undefined>(undefined);
   const [learningMode, setLearningMode] = useState<LearningMode>(LearningMode.DICTATION);
@@ -226,7 +224,7 @@ export default function App() {
   const launchRef = useRef(0);
   // Every way into practice lands here. A podcast episode goes straight to intensive listening, a video
   // started before starts the same way again (docs/watch.md); else the panel asks ("…" → another way opens it).
-  const handleResume = (record: VideoRecord, lm: LearningMode, practiceOnly = false) => {
+  const handleResume = (record: VideoRecord, lm: LearningMode = record.learningMode ?? LearningMode.DICTATION, practiceOnly = false) => {
     if (record.importJob) return;
     if (record.podcast && Listen) return void openPractice(record, lm, { kind: 'listen' }).catch(console.error);
     const launch = ++launchRef.current;
@@ -423,6 +421,7 @@ export default function App() {
   const currentSub = subtitles[currentSubtitleIndex];
   const practiceAnchor = currentSub?.startTime ?? videoRef.current?.currentTime ?? 0;
 
+  const isLearn = appState === AppState.UPLOAD || appState === AppState.PODCASTS;
   const page = appState === AppState.WATCH && watching ? (
     <WatchPage key={watching.record.id} record={watching.record} startSec={watching.startSec} hasReader={!!Reader} hasListen={!!Listen}
       onSwitchWay={(w, sec) => switchWay(watching.record, w, sec)} onExit={() => { setWatching(null); goHome(); }} />
@@ -430,25 +429,21 @@ export default function App() {
     <Listen key={listening.record.id} record={listening.record} startSec={listening.startSec} hasReader={!!Reader}
       onSwitchWay={(w, sec) => switchWay(listening.record, w, sec)} onExit={() => { setListening(null); goHome(); }}
       onPractice={() => { setListening(null); goHome(); setPanel({ record: listening.record, lm: listening.lm }); }}
-      onOpen={r => { setListening(null); goHome(); handleResume(r, r.learningMode ?? LearningMode.DICTATION); }} />
+      onOpen={r => { setListening(null); goHome(); handleResume(r); }} />
   ) : appState === AppState.READ && reading && Reader ? (
     // Done reading: back to the panel to pick how to practise.
     <Reader key={reading.record.id} record={reading.record} by={reading.by} startSec={reading.startSec} hasListen={!!Listen}
       onSwitchWay={(w, sec) => switchWay(reading.record, w, sec)}
       onExit={n => { setReading(null); goHome(); setPanel({ record: reading.record, lm: reading.lm, read: n }); }} />
   ) : appState !== AppState.PRACTICE ? (
-    <Shell active={appState} onNav={setAppState} podcasts={!!PodcastPicker} hideAdd={appState === homeRef.current && homeEmpty} onAdd={() => { setAppState(appState === AppState.PODCASTS ? AppState.PODCASTS : AppState.UPLOAD); setAddAsked(true); }}>
+    <Shell active={appState} onNav={setAppState} hideAdd={isLearn && homeEmpty}
+      onAddLocal={() => { setAppState(AppState.UPLOAD); setAddAsked(true); }}
+      onAddPodcast={PodcastPicker ? () => { setAppState(AppState.UPLOAD); setPodcastAsked(true); } : undefined}>
       {appState === AppState.SETTINGS ? <Settings /> :
-       appState === AppState.LIBRARY ? <ReviewPage key="line" deck="line" onResume={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} /> :
-       appState === AppState.CARDS ? <ReviewPage key="word" deck="word" onResume={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} /> :
-       appState === AppState.PODCASTS && PodcastPicker ? (
-        <Home key="podcasts" onResume={handleResume} onOtherWay={otherWay} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} podcasts={{
-          empty: <PodcastPicker onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
-          add: close => <PodcastPicker onClose={close} onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
-          rate: podcastRate,
-        }} />
-       ) :
-       <Home key="videos" onResume={handleResume} onOtherWay={otherWay} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} />}
+       appState === AppState.LIBRARY || appState === AppState.CARDS ? <ReviewPage initialDeck={appState === AppState.CARDS ? 'word' : 'line'} onResume={handleResume} /> :
+       <Home onResume={handleResume} onOtherWay={otherWay} onEmptyChange={setHomeEmpty}
+         addAsked={addAsked} onAddHandled={() => setAddAsked(false)}
+         podcastAsked={podcastAsked} onPodcastHandled={() => setPodcastAsked(false)} />}
     </Shell>
   ) : (
     <PracticeProvider
@@ -491,7 +486,7 @@ export default function App() {
           onCancel={() => setPanel(null)} onStart={choice => { setPanel(null); openPractice(panel.record, panel.lm, choice); }} />
       )}
       {ProHost && <ProHost />}
-      {StarterHost && <StarterHost here={appState === AppState.UPLOAD || appState === AppState.PODCASTS} onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />}
+      {StarterHost && <StarterHost here={isLearn} onOpen={r => { if (!pageLoopHeld()) handleResume(r); }} />}
       <SyncHost busy={appState === AppState.PRACTICE || appState === AppState.WATCH || appState === AppState.LISTEN || appState === AppState.READ} />
       <UpdateDialog />
       <DialogHost />

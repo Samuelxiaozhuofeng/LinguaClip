@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import * as AI from '../utils/ai';
 import { Btn, Field, Group, inputCls } from './ui';
+import SettingsFold from './SettingsFold';
 import { useT } from '../utils/i18n';
 import { AIConfig } from '../types';
 import { AiKind, LIMIT_DEFAULTS, LIMIT_MAX } from '../utils/aiLimit';
@@ -41,10 +42,11 @@ const NeedAi: React.FC<{ goAI: () => void }> = ({ goAI }) => {
   );
 };
 
-// Settings → Import & transcribe: what the AI does with a fresh transcript.
+// Settings → Import & AI: what the AI does with a fresh transcript.
 export const AiAfterImport: React.FC<{
   aiReady: boolean;
   goAI: () => void;
+  cachedModels?: string[];
   segmentModel: string;
   setSegmentModel: (v: string) => void;
   autoBreakdown: boolean;
@@ -59,56 +61,57 @@ export const AiAfterImport: React.FC<{
   setAutoPhrases: (v: boolean) => void;
   jaCheck: boolean;
   setJaCheck: (v: boolean) => void;
-}> = ({ aiReady, goAI, segmentModel, setSegmentModel, autoBreakdown, setAutoBreakdown, breakdownSounds, setBreakdownSounds, autoCloze, setAutoCloze, autoKeywords, setAutoKeywords, autoPhrases, setAutoPhrases, jaCheck, setJaCheck }) => {
+}> = ({ aiReady, goAI, cachedModels, segmentModel, setSegmentModel, autoBreakdown, setAutoBreakdown, breakdownSounds, setBreakdownSounds, autoCloze, setAutoCloze, autoKeywords, setAutoKeywords, autoPhrases, setAutoPhrases, jaCheck, setJaCheck }) => {
   const t = useT();
+  const models = cachedModels ?? AI.getCachedModels();
   return (
-    <Group title={t('settings.group.aiTidy')}>
-      <Field label={t('settingsAI.segmentModel')} hint={t('settingsAI.segmentModelHint')}>
-        <ModelPicker value={segmentModel} onChange={setSegmentModel} models={AI.getCachedModels()} emptyLabel={t('settingsAI.segmentModelPlaceholder')} />
-      </Field>
+    <div id="settings-ai-tidy" className="scroll-mt-6">
+      <Group title={t('settings.group.aiTidy')}>
+        <Field label={t('settingsAI.segmentModel')} hint={t('settingsAI.segmentModelHint')}>
+          <ModelPicker value={segmentModel} onChange={setSegmentModel} models={models} emptyLabel={t('settingsAI.segmentModelPlaceholder')} />
+        </Field>
 
-      <div>
-        <span className="block text-sm font-medium mb-2.5">{t('settingsAI.afterImport')}</span>
-        <div className="space-y-2">
-          <Check checked={autoBreakdown} onChange={setAutoBreakdown} disabled={!aiReady} label={t('settingsAI.autoBreakdown')} />
-          <Check checked={autoCloze} onChange={setAutoCloze} disabled={!aiReady} label={t('settingsAI.autoCloze')} />
-          <Check checked={autoKeywords} onChange={setAutoKeywords} disabled={!aiReady} label={t('settingsAI.autoKeywords')} />
+        <div>
+          <span className="block text-sm font-medium mb-2.5">{t('settingsAI.afterImport')}</span>
+          <div className="space-y-2">
+            <Check checked={autoBreakdown} onChange={setAutoBreakdown} disabled={!aiReady} label={t('settingsAI.autoBreakdown')} />
+            <Check checked={autoCloze} onChange={setAutoCloze} disabled={!aiReady} label={t('settingsAI.autoCloze')} />
+            <Check checked={autoKeywords} onChange={setAutoKeywords} disabled={!aiReady} label={t('settingsAI.autoKeywords')} />
+          </div>
+          {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.afterImportHint')}</span> : <NeedAi goAI={goAI} />}
         </div>
-        {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.afterImportHint')}</span> : <NeedAi goAI={goAI} />}
-      </div>
 
-      <div>
-        <Check checked={autoPhrases} onChange={setAutoPhrases} disabled={!aiReady} label={t('settingsAI.autoPhrases')} />
-        {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.autoPhrasesHint')}</span> : <NeedAi goAI={goAI} />}
-      </div>
+        <div>
+          <Check checked={autoPhrases} onChange={setAutoPhrases} disabled={!aiReady} label={t('settingsAI.autoPhrases')} />
+          {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.autoPhrasesHint')}</span> : <NeedAi goAI={goAI} />}
+        </div>
 
-      <div>
-        <Check checked={breakdownSounds} onChange={setBreakdownSounds} disabled={!aiReady} label={t('settingsAI.breakdownSounds')} />
-        {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.breakdownSoundsHint')}</span> : <NeedAi goAI={goAI} />}
-      </div>
+        <div>
+          <Check checked={breakdownSounds} onChange={setBreakdownSounds} disabled={!aiReady} label={t('settingsAI.breakdownSounds')} />
+          {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.breakdownSoundsHint')}</span> : <NeedAi goAI={goAI} />}
+        </div>
 
-      <div>
-        <Check checked={jaCheck} onChange={setJaCheck} disabled={!aiReady} label={t('settingsAI.jaCheck')} />
-        {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.jaCheckHint')}</span> : <NeedAi goAI={goAI} />}
-      </div>
-    </Group>
+        <div>
+          <Check checked={jaCheck} onChange={setJaCheck} disabled={!aiReady} label={t('settingsAI.jaCheck')} />
+          {aiReady ? <span className="block mt-1.5 text-xs text-mute leading-relaxed">{t('settingsAI.jaCheckHint')}</span> : <NeedAi goAI={goAI} />}
+        </div>
+      </Group>
+    </div>
   );
 };
 
-// Settings → Look up: the prompt used when the dictionary has no entry.
-// Settings → Look up → ③ AI: the prompt stays folded — most never change it.
+// Settings → Practice → Look up → AI: the prompt stays folded — most never change it.
 export const AiPrompt: React.FC<{ aiReady: boolean; goAI: () => void; prompt: string; setPrompt: (v: string) => void }> = ({ aiReady, goAI, prompt, setPrompt }) => {
   const t = useT();
-  const [open, setOpen] = useState(false);
   return (
-    <>
+    <div className="space-y-3">
       {!aiReady && (
         <span className="flex items-center gap-2 text-xs text-mute">
           {t('settings.promptNeedAi')}
           <Btn type="button" size="sm" flat onClick={goAI}>{t('settings.goAi')}</Btn>
         </span>
       )}
-      {open ? (
+      <SettingsFold title={t('settingsAI.editPrompt')} summary={t('settings.advanced')}>
         <Field
           label={t('settingsAI.promptTemplate')}
           right={<Btn type="button" size="sm" flat onClick={() => setPrompt(AI.DEFAULT_PROMPT)}>{t('settingsAI.reset')}</Btn>}
@@ -116,10 +119,8 @@ export const AiPrompt: React.FC<{ aiReady: boolean; goAI: () => void; prompt: st
         >
           <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} className={`${inputCls} min-h-32 font-mono`} placeholder={t('settingsAI.promptPlaceholder')} />
         </Field>
-      ) : (
-        <Btn type="button" size="sm" flat onClick={() => setOpen(true)}>{t('settingsAI.editPrompt')}</Btn>
-      )}
-    </>
+      </SettingsFold>
+    </div>
   );
 };
 
@@ -134,12 +135,14 @@ interface SettingsAIProps {
   setAiBaseUrl: (value: string) => void;
   aiLimits: Limits;
   setAiLimits: (value: Limits) => void;
-  goTab: (tab: 'lookup' | 'import') => void;
+  goLookup: () => void;
+  goImport: () => void;
+  onModelsFetched?: (models: string[]) => void;
 }
 
-// Settings → AI: only "connect to an AI"; the features that use it live on their own tabs.
+// Settings → Import & AI: connect to an AI, concurrency limits, and jump links to features using it.
 const SettingsAI: React.FC<SettingsAIProps> = ({
-  aiModel, setAiModel, aiTemperature, setAiTemperature, aiApiKey, setAiApiKey, aiBaseUrl, setAiBaseUrl, aiLimits, setAiLimits, goTab,
+  aiModel, setAiModel, aiTemperature, setAiTemperature, aiApiKey, setAiApiKey, aiBaseUrl, setAiBaseUrl, aiLimits, setAiLimits, goLookup, goImport, onModelsFetched,
 }) => {
   const t = useT();
   const [models, setModels] = useState<string[]>(() => AI.getCachedModels());
@@ -152,9 +155,10 @@ const SettingsAI: React.FC<SettingsAIProps> = ({
     setFetching(true);
     setFetchError('');
     try {
-      setModels(await AI.listModels(aiBaseUrl, aiApiKey));
+      const list = await AI.listModels(aiBaseUrl, aiApiKey);
+      setModels(list);
+      onModelsFetched?.(list);
     } catch (e) {
-      setModels([]);
       setFetchError(e instanceof Error ? e.message : String(e));
     } finally {
       setFetching(false);
@@ -162,7 +166,7 @@ const SettingsAI: React.FC<SettingsAIProps> = ({
   };
 
   return (
-    <div className="space-y-10">
+    <div id="settings-ai-connect" className="space-y-10 scroll-mt-6">
       {!aiReady && (
         <div className="rounded-2xl bg-shade px-5 py-4 space-y-1.5">
           <p className="text-sm font-semibold">{t('settingsAI.unlockTitle')}</p>
@@ -263,12 +267,14 @@ const SettingsAI: React.FC<SettingsAIProps> = ({
 
       <Group title={t('settings.group.aiUsedBy')}>
         <div className="space-y-2 text-sm">
-          {([['lookup', 'settings.aiUsedByLookup', 'settings.lookup'], ['import', 'settings.aiUsedByImport', 'settings.import']] as const).map(([tab, what, where]) => (
-            <p key={tab} className="flex items-center justify-between gap-3">
-              <span>{t(what)}</span>
-              <Btn type="button" size="sm" flat onClick={() => goTab(tab)}>{t(where)} →</Btn>
-            </p>
-          ))}
+          <p className="flex items-center justify-between gap-3">
+            <span>{t('settings.aiUsedByLookup')}</span>
+            <Btn type="button" size="sm" flat onClick={goLookup}>{t('settings.goLookup')}</Btn>
+          </p>
+          <p className="flex items-center justify-between gap-3">
+            <span>{t('settings.aiUsedByImport')}</span>
+            <Btn type="button" size="sm" flat onClick={goImport}>{t('settings.goImport')}</Btn>
+          </p>
           <p className="text-mute">{t('settings.aiUsedByPractice')}</p>
         </div>
       </Group>

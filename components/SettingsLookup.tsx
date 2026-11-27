@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { Btn, Card, Field, Seg } from './ui';
+import React, { useEffect, useState } from 'react';
+import { Btn, Card, Field, Group, Seg } from './ui';
 import { useT, useLang } from '../utils/i18n';
 import { DictLang, DictSources, dictOptions, getDictChoice, getDictSources, saveDictChoice, saveDictSources } from '../utils/dictionary';
+import { loadLocalDicts, useLocalDicts } from '../utils/localDict';
 import SettingsLocalDict from './SettingsLocalDict';
+import SettingsFold from './SettingsFold';
 
 type AutoMode = 'off' | 'many' | 'always';
 
@@ -61,45 +63,80 @@ const SettingsLookup: React.FC<{ onSaved: () => void; aiReady: boolean; goAI: ()
   const t = useT();
   const ui = useLang();
   const [src, setSrc] = useState<DictSources>(() => getDictSources(ui));
+  const { list: localDicts } = useLocalDicts();
+  useEffect(() => { loadLocalDicts(); }, []);
   const set = (patch: Partial<DictSources>) => { saveDictSources(patch); setSrc(getDictSources(ui)); onSaved(); };
 
-  const online = { key: 'online', title: t('lookup.online'), sub: t('lookup.onlineSub'), on: src.online, setOn: (v: boolean) => set({ online: v }), body: <DictionaryPicker onSaved={onSaved} /> };
-  const local = { key: 'local', title: t('localDict.label'), sub: t('lookup.localSub'), on: src.local, setOn: (v: boolean) => set({ local: v }), body: <SettingsLocalDict /> };
-  const dicts = src.localFirst ? [local, online] : [online, local];
+  const order = src.localFirst ? (['local', 'online'] as const) : (['online', 'local'] as const);
+  const enabledKeys = order.filter(k => (k === 'online' ? src.online : src.local));
   // Only what is on gets a number, so the line and the cards count 1, 2, 3 without gaps.
-  const steps = [...dicts.filter(d => d.on).map(d => d.key), 'ai'];
-  const flow = [...dicts.filter(d => d.on).map(d => d.title), 'AI'].map((x, i) => `${NUM[i]} ${x}`);
+  const steps = [...enabledKeys, 'ai'];
+  const titleOf = (k: 'online' | 'local') => (k === 'online' ? t('lookup.online') : t('localDict.label'));
+  const flow = [...enabledKeys.map(titleOf), 'AI'].map((x, i) => `${NUM[i]} ${x}`);
+
+  const localSummary = src.local
+    ? (localDicts.length > 0 ? `${t('lookup.localSub')} · ${t('localDict.installed')} ${localDicts.length}` : t('lookup.localSub'))
+    : t('lookup.offNote');
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-4 flex-wrap">
-        <p className="flex-1 text-sm text-mute">{[t('lookup.click'), ...flow].join(' → ')}</p>
-        {/* Up here, not in a card: flipping it swaps the cards below, and it stays put under the mouse. */}
-        <label className="flex items-center gap-2 text-sm cursor-pointer" title={t('lookup.localFirstHint')}>
-          <input type="checkbox" checked={src.localFirst} onChange={e => set({ localFirst: e.target.checked })} />
-          {t('lookup.localFirst')}
-        </label>
-      </div>
-      {!src.online && !src.local && (
-        <p className="flex items-center gap-2 text-sm text-accent">
-          {t(aiReady ? 'lookup.allOff' : 'lookup.allOffNoAi')}
-          {!aiReady && <Btn type="button" size="sm" flat onClick={goAI}>{t('settings.goAi')}</Btn>}
-        </p>
-      )}
-      {dicts.map(d => <Step key={d.key} n={steps.indexOf(d.key)} title={d.title} sub={d.sub} on={d.on} setOn={d.setOn}>{d.body}</Step>)}
-      <Step n={steps.length - 1} title="AI" sub={t('lookup.aiSub')}>
-        <div className={`space-y-2 text-sm ${aiReady ? '' : 'text-mute'}`}>
-          <div>{t('lookup.autoPick')}</div>
-          <Seg<AutoMode> size="sm" className={aiReady ? '' : 'pointer-events-none opacity-60'} value={!src.autoPick ? 'off' : src.aiAlways ? 'always' : 'many'}
-            onChange={m => set({ autoPick: m !== 'off', aiAlways: m === 'always' })}
-            options={[{ value: 'off', label: t('lookup.autoOff') }, { value: 'many', label: t('lookup.autoMany') }, { value: 'always', label: t('lookup.autoAlways') }]} />
-          <label className={`flex items-center gap-2 ${aiReady ? 'cursor-pointer' : ''}`}>
-            <input type="checkbox" checked={src.aiCulture} disabled={!aiReady} onChange={e => set({ aiCulture: e.target.checked })} />
-            {t('lookup.culture')}
-          </label>
+    <div id="settings-lookup" className="scroll-mt-6">
+      <Group title={t('settings.group.lookup')}>
+        <div className="space-y-4">
+          <div className="flex items-center gap-4 flex-wrap">
+            <p className="flex-1 text-sm text-mute">{[t('lookup.click'), ...flow].join(' → ')}</p>
+            {/* Up here, not in a card: flipping it swaps the cards below, and it stays put under the mouse. */}
+            <label className="flex items-center gap-2 text-sm cursor-pointer" title={t('lookup.localFirstHint')}>
+              <input type="checkbox" checked={src.localFirst} onChange={e => set({ localFirst: e.target.checked })} />
+              {t('lookup.localFirst')}
+            </label>
+          </div>
+          {!src.online && !src.local && (
+            <p className="flex items-center gap-2 text-sm text-accent">
+              {t(aiReady ? 'lookup.allOff' : 'lookup.allOffNoAi')}
+              {!aiReady && <Btn type="button" size="sm" flat onClick={goAI}>{t('settings.goAi')}</Btn>}
+            </p>
+          )}
+          {order.map(key => {
+            const idx = steps.indexOf(key);
+            if (key === 'online') {
+              return (
+                <Step key="online" n={idx} title={t('lookup.online')} sub={t('lookup.onlineSub')} on={src.online} setOn={v => set({ online: v })}>
+                  <DictionaryPicker onSaved={onSaved} />
+                </Step>
+              );
+            }
+            const prefix = NUM[idx] ? `${NUM[idx]} ` : '';
+            return (
+              <SettingsFold
+                key="local"
+                title={`${prefix}${t('localDict.label')}`}
+                summary={localSummary}
+                action={
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" checked={src.local} onChange={e => set({ local: e.target.checked })} />
+                    {t('lookup.use')}
+                  </label>
+                }
+              >
+                <SettingsLocalDict />
+              </SettingsFold>
+            );
+          })}
+          <Step n={steps.length - 1} title="AI" sub={t('lookup.aiSub')}>
+            <div className={`space-y-2 text-sm ${aiReady ? '' : 'text-mute'}`}>
+              <div>{t('lookup.autoPick')}</div>
+              <Seg<AutoMode> size="sm" className={aiReady ? '' : 'pointer-events-none opacity-60'} value={!src.autoPick ? 'off' : src.aiAlways ? 'always' : 'many'}
+                onChange={m => set({ autoPick: m !== 'off', aiAlways: m === 'always' })}
+                options={[{ value: 'off', label: t('lookup.autoOff') }, { value: 'many', label: t('lookup.autoMany') }, { value: 'always', label: t('lookup.autoAlways') }]} />
+              <label className={`flex items-center gap-2 ${aiReady ? 'cursor-pointer' : ''}`}>
+                <input type="checkbox" checked={src.aiCulture} disabled={!aiReady} onChange={e => set({ aiCulture: e.target.checked })} />
+                {t('lookup.culture')}
+              </label>
+            </div>
+            {children}
+          </Step>
         </div>
-        {children}
-      </Step>
+      </Group>
     </div>
   );
 };

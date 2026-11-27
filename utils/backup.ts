@@ -32,6 +32,7 @@ export const DEVICE_ONLY = [
   'linguaclip_native_pos_ts',
   'linguaclip_youtube_entry',
   'linguaclip_youtube_quality',
+  'linguaclip_library_filter',
 ];
 const EXTRA = ['import_lang', 'import_trash_original'];
 

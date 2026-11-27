@@ -41,6 +41,8 @@ interface Props {
   splitVersion?: number;
   timedWords?: Word[]; // the line's spoken words, times as 0..1 of the line (wordsInLine)
   inReview?: boolean; // a review sentence card: other keys live here are review's (docs/shortcuts.md)
+  onFastPass?: () => void; // review: flip straight to answer with Good suggested when all blanks are empty
+  onEmptyChange?: (empty: boolean) => void;
 }
 
 // How far into the line word i starts, by letters: a rough stand-in for time when
@@ -59,7 +61,7 @@ export const slotEm = (word: string) =>
 // Typing and the answer share one setting, so submitting changes colours, not positions.
 export const LINE = 'flex flex-wrap justify-center items-baseline gap-x-[0.3em] font-serif text-[38px] leading-[54px]';
 
-const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onStartInput, onReplay, onLookup, onTogglePlay, blanks, nextLabel, hideNext, onResult, extra, inputExtra, splitVersion, timedWords, inReview }) => {
+const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onStartInput, onReplay, onLookup, onTogglePlay, blanks, nextLabel, hideNext, onResult, extra, inputExtra, splitVersion, timedWords, inReview, onFastPass, onEmptyChange }) => {
   const t = useT();
   // A Japanese line is re-split when its dictionary or AI cut points arrive, but
   // never under the user's fingers: once something is typed the split holds.
@@ -222,7 +224,9 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onStartI
   };
 
   const allBlanksEmpty = () => !inputs.some((w, idx) => isBlank(idx) && w.trim().length > 0);
+  useEffect(() => { onEmptyChange?.(allBlanksEmpty()); }, [inputs, mode, targetText, blankSet]); // eslint-disable-line react-hooks/exhaustive-deps
   const reveal = () => { clearReplay(); report(false); onComplete(false); };
+  const fastPass = () => { clearReplay(); onFastPass?.(); };
 
   const submit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -243,7 +247,11 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onStartI
     // Space picks a kanji and Enter commits it inside an input method; those keys
     // are not ours. Safari reports the committing Enter with keyCode 229.
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-    if (matches(e, 'blank.reveal')) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) reveal(); return; }
+    if (matches(e, 'blank.reveal')) {
+      e.preventDefault(); e.stopPropagation();
+      if (!e.repeat) { if (onFastPass && allBlanksEmpty()) fastPass(); else reveal(); }
+      return;
+    }
     if (matches(e, 'dict.replay')) { e.preventDefault(); e.stopPropagation(); clearReplay(); onReplay(false); return; }
     if (matches(e, 'dict.playFrom')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, spanOf(i)[0], undefined, true); return; }
     if (matches(e, 'dict.playWord')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, ...spanOf(i)); return; }
@@ -329,13 +337,13 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onStartI
             const marks = r?.near ? nearMarks(r.inputWord, r.targetWord) : null;
             return (
               <span key={g.key} className="relative inline-flex items-baseline">
-                {r?.inputWord && !r.near && (
+                {r?.inputWord.trim() && !r.near && (
                   <span className="absolute -top-4 left-1/2 -translate-x-1/2 font-sans text-sm leading-none text-mute line-through whitespace-nowrap" title={t('dictation.youTyped')}>
                     {r.inputWord}
                   </span>
                 )}
                 <button type="button" {...bind(gi)} onClick={e => { e.currentTarget.blur(); lookup(wordAt(gi)); }} title={r ? t('dictation.expected', { word: r.targetWord }) : t('common.lookup')}
-                  className={`rounded-md -mx-1 px-1 hover:bg-accent-soft ${inSel(gi) ? 'bg-accent-soft' : ''} ${!r ? '' : r.near ? 'underline decoration-dashed decoration-accent decoration-2 underline-offset-[8px]' : r.inputWord ? 'text-accent underline decoration-2 underline-offset-[8px]' : 'underline decoration-faint decoration-2 underline-offset-[8px]'}`}>
+                  className={`rounded-md -mx-1 px-1 hover:bg-accent-soft ${inSel(gi) ? 'bg-accent-soft' : ''} ${!r ? '' : r.near ? 'underline decoration-dashed decoration-accent decoration-2 underline-offset-[8px]' : r.inputWord.trim() ? 'text-accent underline decoration-2 underline-offset-[8px]' : 'underline decoration-faint decoration-2 underline-offset-[8px]'}`}>
                   {marks ? letters(g.word.value).map((ch, k) => marks[k] ? <span key={k} className="text-accent">{ch}</span> : ch) : g.word.value}
                 </button>
                 <span className="text-mute">{g.punct}</span>
@@ -413,10 +421,15 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onStartI
         })}
       </form>
       <div className="mt-5 flex items-center justify-center gap-2">
-        <Btn type="button" size="sm" flat onClick={e => { e.currentTarget.blur(); reveal(); }}
-          title={t('dictation.revealTitle', { key: formatCombo(getCombo('blank.reveal')) })}>
-          {t('dictation.revealBtn')}
-        </Btn>
+        {(() => {
+          const canFast = !!onFastPass && allBlanksEmpty();
+          return (
+            <Btn type="button" size="sm" flat onClick={e => { e.currentTarget.blur(); if (canFast) fastPass(); else reveal(); }}
+              title={t(canFast ? 'review.fastPassTitle' : 'dictation.revealTitle', { key: formatCombo(getCombo('blank.reveal')) })}>
+              {t(canFast ? 'review.fastPassBtn' : 'dictation.revealBtn')}
+            </Btn>
+          );
+        })()}
         {inputExtra}
       </div>
     </div>

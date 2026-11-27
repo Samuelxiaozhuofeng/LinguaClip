@@ -31,7 +31,7 @@ export default [
   {
     name: '添加视频 → 首页出现卡片',
     run: async ({ page, see, nav }) => {
-      await nav('视频'); // an empty library opens on the podcast page (docs/starter.md)
+      await nav('学习');
       await page.getByRole('button', { name: '添加视频' }).first().click();
       const add = page.getByRole('dialog', { name: '添加视频' });
       await add.getByRole('button', { name: '选择本机视频' }).click();
@@ -73,9 +73,9 @@ export default [
       await see(page.getByText('第 2 / 4 句'), '进到「第 2 / 4 句」');
       await page.mouse.move(300, 30); // the back button shows near the top
       await page.getByRole('button', { name: '回到你的视频列表' }).click();
-      await nav('句子');
+      await nav('复习');
       const text = firstLine(ctx.sample);
-      await see(page.getByText(text), '「句子」页列表里的这张卡');
+      await see(page.getByText(text), '「复习」页句子列表里的这张卡');
       await page.getByRole('button', { name: /^开始复习 · 1/ }).click();
       await see(page.getByText('1 / 1'), '复习进度「1 / 1」');
       await dictate(ctx, text);
@@ -89,7 +89,7 @@ export default [
   {
     name: '回首页再点同一个视频 → 直接续练',
     run: async ({ page, see, nav }) => {
-      await nav('视频');
+      await nav('学习');
       await see(page.getByText('1 / 4 句 · 继续听写'), '卡片进度「1 / 4 句 · 继续听写」');
       await page.getByRole('button', { name: '继续听写' }).first().click();
       await see(page.getByText('第 2 / 4 句'), '直接接着练「第 2 / 4 句」');

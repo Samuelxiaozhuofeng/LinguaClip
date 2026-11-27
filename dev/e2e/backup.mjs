@@ -10,9 +10,10 @@ const firstLine = () => 'Alright, so here we are,';
 const btn = (page, name) => page.getByRole('button', { name, exact: true });
 const OUTSIDE = `${os.homedir()}/Desktop`; // where the mock's save dialog puts a backup
 
-// Settings → 恢复… → 选备份文件… (the mock's open dialog returns `pick`, else the last one saved).
+// Settings → 数据与通用 → 恢复… → 选备份文件… (the mock's open dialog returns `pick`, else the last one saved).
 const pickRestore = async ({ page, see, nav }, pick) => {
   await nav('设置');
+  await page.getByRole('radio', { name: '数据与通用', exact: true }).click();
   await btn(page, '恢复…').click();
   const list = page.getByRole('dialog', { name: '恢复备份' });
   await see(list, '「恢复备份」窗口');
@@ -36,12 +37,12 @@ const confirmRestore = async ({ page, see }, body) => {
 };
 
 const homeHasIt = async ({ page, see, nav, sample }, what) => {
-  await nav('视频');
+  await nav('学习');
   await see(page.getByText(NAME), `${what}：首页视频卡片`, 20_000);
   await see(page.getByText('1 / 4 句 · 继续听写'), `${what}：进度「1 / 4 句 · 继续听写」`);
-  await nav('句子');
-  await see(page.getByText(firstLine(sample)), `${what}：「句子」页的卡`);
-  await nav('视频');
+  await nav('复习');
+  await see(page.getByText(firstLine(sample)), `${what}：「复习」页的卡`);
+  await nav('学习');
 };
 
 export default [
@@ -50,7 +51,7 @@ export default [
     run: async (ctx) => {
       const { page, see, gone, nav } = ctx;
       // Add the clip, bookmark its first line, move on to line 2.
-      await nav('视频'); // an empty library opens on the podcast page (docs/starter.md)
+      await nav('学习');
       await page.getByRole('button', { name: '添加视频' }).first().click();
       const add = page.getByRole('dialog', { name: '添加视频' });
       await add.getByRole('button', { name: '选择本机视频' }).click();
@@ -71,21 +72,22 @@ export default [
 
       // Back up.
       await nav('设置');
-      await see(page.getByText(/数据备份 · /), '设置底部「数据备份」那行');
+      await page.getByRole('radio', { name: '数据与通用', exact: true }).click();
+      await see(page.getByText(/数据备份 · /), '设置「数据与通用」里的「数据备份」那行');
       await btn(page, '备份…').click();
       const done = page.getByRole('dialog', { name: '已备份' });
       await see(done.getByText('1 个视频的记录、1 张卡。'), '「已备份：1 个视频的记录、1 张卡」');
       await done.getByRole('button', { name: '好的' }).click();
 
       // Delete the video: its card goes too.
-      await nav('视频');
+      await nav('学习');
       await page.getByRole('button', { name: '更多' }).first().click();
       await page.getByRole('menuitem', { name: '删除记录' }).click();
       await page.getByRole('dialog', { name: '删除这个视频？' }).getByRole('button', { name: '删除' }).click();
       await page.getByRole('dialog', { name: '视频文件也一起删吗？' }).getByRole('button', { name: '只删记录，保留文件' }).click();
       await see(page.getByText('这里还空着'), '删完首页变空');
-      await nav('句子');
-      await see(page.getByText('共 0 个'), '删完「句子」页「共 0 个」');
+      await nav('复习');
+      await see(page.getByText('共 0 个'), '删完「复习」页「共 0 个」');
 
       // Restore the file just saved.
       await pickRestore(ctx);

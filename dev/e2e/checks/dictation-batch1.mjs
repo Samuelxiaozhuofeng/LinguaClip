@@ -38,7 +38,7 @@ const waitBoxes = async n => {
 };
 // The first time a video opens it asks how to practise; after that it opens straight away.
 const start = async () => {
-  await nav('视频');
+  await nav('学习');
   await page.getByRole('button', { name: '继续听写' }).first().click();
   const panel = page.getByRole('dialog', { name: '这次怎么练' });
   if (await panel.waitFor({ timeout: 3000 }).then(() => true, () => false)) {
@@ -143,7 +143,7 @@ try {
   await page.getByRole('button', { name: '今天到此为止' }).click();
 
   console.log('复习句子卡：宽松 + 差一点');
-  await nav('句子');
+  await nav('复习');
   await page.getByRole('button', { name: /^开始复习/ }).click();
   await waitBoxes(6);
   for (const w of ['HELLO', 'i']) await page.keyboard.type(w);
@@ -192,8 +192,9 @@ try {
   await box.check();
   ok(JSON.parse(await page.evaluate(() => localStorage.getItem('linguaclip_practice_config'))).looseJudge === true, '打开后写回 looseJudge: true');
   await shot('S1-settings-practice');
-  await page.getByRole('radio', { name: '快捷键', exact: true }).click();
-  await see(page.getByText('收藏这句'), '设置 → 快捷键「听写」页有「收藏这句」');
+  await page.getByRole('radio', { name: '数据与通用', exact: true }).click();
+  await page.getByRole('button', { name: /快捷键/ }).click();
+  await see(page.getByText('收藏这句'), '设置 → 数据与通用 → 快捷键「听写」页有「收藏这句」');
   await shot('S2-settings-keys');
 
   console.log('B1 乱序填词：跳过已填对的格 + 补齐最后一处空缺自动过关 + 200ms 内回车立即过关');

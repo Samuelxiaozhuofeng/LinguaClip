@@ -6,6 +6,7 @@ import { fileNameFromPath, isAudioPath, needsConvert, onYouTubePick, onYouTubeRe
 import { IS_WINDOWS } from './platform';
 import { loadImportLang, saveImportLang } from './importLangs';
 import { getYouTubeQuality } from './youtube';
+import { getLibraryFilter, saveLibraryFilter } from './storage';
 import { getLang, t } from './i18n';
 import { getAIConfig } from './aiConfig';
 import { canCloze } from './aiDrills';
@@ -241,8 +242,10 @@ export function startLocalImport(path: string, lang: string, opts: LocalImportOp
 
 // Resolves once the card is saved (the import itself goes on in the background). `subs`: a
 // starter episode's own transcript (docs/starter.md) — downloaded only, nothing transcribed.
-export function startPodcastImport(episode: PodcastImport, subs?: LocalImportOptions['subs']): Promise<boolean> {
-  return startImport(episode.audio, episode.lang, true, 1080, subs ? { subs } : {}, episode);
+export async function startPodcastImport(episode: PodcastImport, subs?: LocalImportOptions['subs']): Promise<boolean> {
+  const ok = await startImport(episode.audio, episode.lang, true, 1080, subs ? { subs } : {}, episode);
+  if (ok && getLibraryFilter() === 'video') saveLibraryFilter('all');
+  return ok;
 }
 
 // A local video whose sound could not be read: converting it to a plain mp4
@@ -448,7 +451,7 @@ export async function startImportListener(): Promise<() => void> {
     if (!isYouTubeUrl(url)) { done(false); return; }
     saveImportLang(lang);
     startOrReuseYouTube(id, url, lang).then(
-      ok => { if (ok) done(true); },
+      ok => { if (ok) { if (getLibraryFilter() === 'podcast') saveLibraryFilter('all'); done(true); } },
       err => { console.error('YouTube pick failed:', err); done(false); },
     );
   }).catch(err => { console.error(err); return () => {}; });

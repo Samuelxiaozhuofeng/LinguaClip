@@ -1,62 +1,9 @@
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
-import { FolderOpen, Loader2 } from 'lucide-react';
-import { Btn, Field, Group, Seg } from './ui';
-import { clipsInfo, revealInFolder } from '../utils/desktop';
-import { getClipProgress, retryClips, subscribeClips } from '../utils/clips';
-import { downloadConvertTool, loadConvertTool, useConvertTool } from '../utils/convertTool';
-import ConvertToolRow from './ConvertToolRow';
+import React, { useState } from 'react';
+import { Field, Group } from './ui';
 import { useT } from '../utils/i18n';
-import { getAudioPaddingConfig, getMasteredBtn, getPracticeConfig, getWordFront, getWordVoice, saveAudioPaddingConfig, savePracticeConfig, setPracticeFlag } from '../utils/storage';
+import { getMasteredBtn, getPracticeConfig, getWordFront, getWordVoice, savePracticeConfig, setPracticeFlag } from '../utils/storage';
 import { getAutoAddReview } from '../utils/autoAddReview';
 import type { WordFront } from '../types';
-
-// Cards keep their own clip of the line (utils/clips.ts): on / off, which kind, and how far along.
-const ClipsRow: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
-  const t = useT();
-  const [on, setOn] = useState(() => getPracticeConfig().saveClips ?? false);
-  const [kind, setKind] = useState(() => getPracticeConfig().clipKind ?? 'video');
-  const p = useSyncExternalStore(subscribeClips, getClipProgress);
-  const tool = useConvertTool();
-  useEffect(() => { loadConvertTool(); }, []);
-  const [info, setInfo] = useState<{ dir: string; bytes: number } | null>(null);
-  useEffect(() => { clipsInfo().then(setInfo).catch(() => setInfo(null)); }, [p.saved, p.running]);
-  const save = (next: { saveClips?: boolean; clipKind?: 'video' | 'audio' }) => {
-    savePracticeConfig({ ...getPracticeConfig(), ...next });
-    onSaved();
-    if (!(next.saveClips ?? on)) return;
-    // Get the converter first when it's missing, so its download shows in its own row below.
-    loadConvertTool().then(st => st && !st.path ? downloadConvertTool() : true).finally(() => { retryClips(); });
-  };
-  const mb = (b: number) => b < 1e9 ? `${Math.round(b / 1e6)} MB` : `${(b / 1e9).toFixed(1)} GB`;
-  return (
-    <>
-      <Field label={t('settingsGeneral.clips')} hint={t('settingsGeneral.clipsHint')}
-        right={on && info && <Btn type="button" size="sm" flat onClick={() => revealInFolder(info.dir).catch(console.error)}><FolderOpen size={14} /> {t('settingsGeneral.clipsShow')}</Btn>}>
-        <div className="space-y-2.5 text-sm">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={on} onChange={e => { setOn(e.target.checked); save({ saveClips: e.target.checked }); }} />
-            {t('settingsGeneral.clipsLabel')}
-          </label>
-          {on && <>
-            <Seg size="sm" value={kind} onChange={v => { setKind(v); save({ clipKind: v }); }} options={[
-              { value: 'video' as const, label: t('settingsGeneral.clipVideo') },
-              { value: 'audio' as const, label: t('settingsGeneral.clipAudio') },
-            ]} />
-            <p className="text-mute flex items-center gap-2">
-              {p.running && <Loader2 size={14} className="animate-spin" />}
-              {p.running ? `${t('settingsGeneral.clipsSaving')} ` : ''}{t('settingsGeneral.clipsStatus', { saved: p.saved, total: p.total, size: info ? mb(info.bytes) : '…' })}
-            </p>
-            {p.noVideo > 0 && <p className="text-mute">{t('settingsGeneral.clipsNoVideo', { n: p.noVideo })}</p>}
-            {p.error && <p className="text-mute">{t('settingsGeneral.clipsFailed')}<span className="text-xs break-all">{p.error}</span></p>}
-          </>}
-        </div>
-      </Field>
-      {/* The converter lives on the Import tab; while it is missing, show its download here too
-          (outside the Field: a label inside a label would flip the clips checkbox). */}
-      {on && tool.status && !tool.status.path && <ConvertToolRow />}
-    </>
-  );
-};
 
 // Two cards, each a small picture of the front it gives.
 const WordFrontPicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
@@ -113,81 +60,36 @@ const WordVoicePicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
   );
 };
 
-// Settings → Cards & review: what goes into review and how cards look; `children` is the Anki group.
-const SettingsCards: React.FC<{ onSaved: () => void; children: React.ReactNode }> = ({ onSaved, children }) => {
+// Settings → Practice → review habits: auto-add lines, fast-pass mastered switch, word card front & voice.
+const SettingsCards: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
   const t = useT();
   const [autoAdd, setAutoAdd] = useState(getAutoAddReview);
   const [masteredBtn, setMasteredBtn] = useState(getMasteredBtn);
-  const [audioPadding, setPadding] = useState(getAudioPaddingConfig);
-  const setAudioPadding = (v: typeof audioPadding) => { setPadding(v); saveAudioPaddingConfig(v); onSaved(); };
   return (
-    <div className="space-y-10">
-      <Group title={t('settings.group.review')}>
-        <Field label={t('settingsGeneral.autoAddReview')} hint={t('settingsGeneral.autoAddReviewHint')}>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoAdd}
-              onChange={e => { setAutoAdd(e.target.checked); savePracticeConfig({ ...getPracticeConfig(), autoAddReview: e.target.checked }); onSaved(); }}
-            />
-            {t('settingsGeneral.autoAddReviewLabel')}
-          </label>
-        </Field>
-        <Field label={t('settingsCards.mastered')} hint={t('settingsCards.masteredHint')}>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              checked={masteredBtn}
-              onChange={e => { setMasteredBtn(e.target.checked); setPracticeFlag('masteredBtn', e.target.checked); onSaved(); }}
-            />
-            {t('settingsCards.masteredLabel')}
-          </label>
-        </Field>
-        <WordFrontPicker onSaved={onSaved} />
-        <WordVoicePicker onSaved={onSaved} />
-        <ClipsRow onSaved={onSaved} />
-      </Group>
-      <Group title={t('settings.group.cardAudio')}>
-        <Field
-          label={t('settingsGeneral.startPadding')}
-          right={`${audioPadding.startPadding}ms`}
-          hint={t('settingsGeneral.startPaddingHint')}
-        >
+    <Group title={t('settings.group.review')}>
+      <Field label={t('settingsGeneral.autoAddReview')} hint={t('settingsGeneral.autoAddReviewHint')}>
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
           <input
-            type="range"
-            min="0"
-            max="1000"
-            step="50"
-            value={audioPadding.startPadding}
-            onChange={(e) => setAudioPadding({ ...audioPadding, startPadding: parseInt(e.target.value, 10) })}
+            type="checkbox"
+            checked={autoAdd}
+            onChange={e => { setAutoAdd(e.target.checked); savePracticeConfig({ ...getPracticeConfig(), autoAddReview: e.target.checked }); onSaved(); }}
           />
-          <div className="flex justify-between text-xs text-mute font-mono mt-1">
-            <span>0ms</span>
-            <span>1000ms</span>
-          </div>
-        </Field>
-
-        <Field
-          label={t('settingsGeneral.endPadding')}
-          right={`${audioPadding.endPadding}ms`}
-          hint={t('settingsGeneral.endPaddingHint')}
-        >
+          {t('settingsGeneral.autoAddReviewLabel')}
+        </label>
+      </Field>
+      <Field label={t('settingsCards.mastered')} hint={t('settingsCards.masteredHint')}>
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
           <input
-            type="range"
-            min="0"
-            max="1000"
-            step="50"
-            value={audioPadding.endPadding}
-            onChange={(e) => setAudioPadding({ ...audioPadding, endPadding: parseInt(e.target.value, 10) })}
+            type="checkbox"
+            checked={masteredBtn}
+            onChange={e => { setMasteredBtn(e.target.checked); setPracticeFlag('masteredBtn', e.target.checked); onSaved(); }}
           />
-          <div className="flex justify-between text-xs text-mute font-mono mt-1">
-            <span>0ms</span>
-            <span>1000ms</span>
-          </div>
-        </Field>
-      </Group>
-      <Group title="Anki">{children}</Group>
-    </div>
+          {t('settingsCards.masteredLabel')}
+        </label>
+      </Field>
+      <WordFrontPicker onSaved={onSaved} />
+      <WordVoicePicker onSaved={onSaved} />
+    </Group>
   );
 };
 

@@ -429,7 +429,7 @@ try {
   // 9 设置关掉 → 菜单项、块、快捷键都没有
   await nav('设置');
   await page.getByRole('checkbox', { name: '硬字幕遮挡' }).uncheck();
-  await nav('视频');
+  await nav('学习');
   await page.evaluate(() => localStorage.setItem('linguaclip_last_way', JSON.stringify({ v1: 'all' })));
   await page.reload();
   await page.getByRole('button', { name: '继续听写', exact: true }).first().click();
@@ -449,12 +449,13 @@ try {
     await page.keyboard.press('Meta+KeyU');
     await page.locator('header button').first().click();
     await nav('设置');
-    await page.getByRole('radio', { name: '快捷键', exact: true }).click();
+    await page.getByRole('radio', { name: '数据与通用', exact: true }).click();
+    await page.getByRole('button', { name: /快捷键/ }).click();
     await see(page.getByText('打字中播放/暂停'), '快捷键页');
     if (await page.getByText('掀开 / 盖回遮挡块').count()) fail('设置 → 快捷键还列着');
     await page.getByRole('radio', { name: '复习', exact: true }).click();
     if (await page.getByText('掀开 / 盖回遮挡块').count()) fail('设置 → 快捷键 · 复习还列着');
-    await nav('视频');
+    await nav('学习');
   });
   await page.evaluate(() => localStorage.removeItem('linguaclip_keys_pinned'));
 

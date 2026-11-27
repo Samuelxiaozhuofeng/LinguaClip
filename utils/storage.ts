@@ -4,6 +4,23 @@ import { forgetPosAt, notifySyncDirty, touchPosAt, touchSyncSetting } from './sy
 
 const STORAGE_KEY_PRACTICE = 'linguaclip_practice_config';
 const STORAGE_KEY_AUDIO_PADDING = 'linguaclip_audio_padding';
+export const STORAGE_KEY_LIBRARY_FILTER = 'linguaclip_library_filter';
+
+export type LibraryFilter = 'all' | 'video' | 'podcast';
+
+export const getLibraryFilter = (): LibraryFilter => {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY_LIBRARY_FILTER);
+    return v === 'video' || v === 'podcast' ? v : 'all';
+  } catch {
+    return 'all';
+  }
+};
+
+// Local-only UI filter preference for the merged Learn shelf (never touches sync timestamps).
+export const saveLibraryFilter = (filter: LibraryFilter) => {
+  try { localStorage.setItem(STORAGE_KEY_LIBRARY_FILTER, filter); } catch { /* stays for this session only */ }
+};
 
 // Helper to format seconds to MM:SS
 export const formatTimeCode = (seconds: number): string => {

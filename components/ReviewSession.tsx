@@ -76,6 +76,7 @@ const ReviewSession: React.FC<{
   const clip = useClip();
   const rootRef = useRef<HTMLDivElement>(null);
   const shotRef = useRef<HTMLImageElement>(null);
+  const blankEmptyRef = useRef(true);
 
   usePracticeClock();
   useEffect(() => registerSyncBusyScope(), []);
@@ -207,7 +208,7 @@ const ReviewSession: React.FC<{
   leaving.current = deferNow;
   const unmountTimer = useRef(0);
   useEffect(() => { window.clearTimeout(unmountTimer.current); return () => { unmountTimer.current = window.setTimeout(() => leaving.current()); }; }, []);
-  const next = () => { clip.stop(); setMode(PracticeMode.INPUT); setTurned(false); setSuggest(undefined); setAt(0); setIdx(i => i + 1); };
+  const next = () => { clip.stop(); blankEmptyRef.current = true; setMode(PracticeMode.INPUT); setTurned(false); setSuggest(undefined); setAt(0); setIdx(i => i + 1); };
 
   // Find this card's file, then play it once.
   useEffect(() => {
@@ -296,6 +297,10 @@ const ReviewSession: React.FC<{
     return () => { window.clearTimeout(id); if (gone && !undone.current.has(gone)) gone.then(c => c?.release()); };
   }, [undo]);
   const canMaster = masteredBtn && !isWord;
+  const fastPass = () => {
+    if (!card || !path || !splitsReady || isWord || grading || !canMaster) return;
+    clearLoop(); setMode(PracticeMode.FEEDBACK); setAt(Date.now()); setSuggest(Rating.Good);
+  };
 
   const relink = async () => {
     if (!card) return;
@@ -313,6 +318,7 @@ const ReviewSession: React.FC<{
     setQueue(more);
     setRound(r => r + 1);
     setIdx(0);
+    blankEmptyRef.current = true;
     setMode(PracticeMode.INPUT);
     setTurned(false);
     setSuggest(undefined);
@@ -328,8 +334,8 @@ const ReviewSession: React.FC<{
   const canRemove = !!card && !done;
   const maskId = done || path === null || front0 ? null : card?.videoId; // the mask shows on this card's picture (docs/subtitle-mask.md)
   useEffect(() => setPeek(false), [card?.id, idx]); // lifted for one card only (idx: "Again" on the last card re-queues the same id)
-  const keys = useRef({ quit, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord, maskId });
-  keys.current = { quit, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, remove, canRemove, isWord, playWord, maskId };
+  const keys = useRef({ quit, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, fastPass, remove, canRemove, isWord, playWord, maskId });
+  keys.current = { quit, done, defOpen, closeDef, front0, grading, suggest, grade, turn, playCard, toggleLoop, master, canMaster, fastPass, remove, canRemove, isWord, playWord, maskId };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || e.keyCode === 229) return; // Esc / Enter inside a Japanese input method
@@ -344,6 +350,7 @@ const ReviewSession: React.FC<{
       if (!typing && !k.done && !k.defOpen) {
         const hit = (run: () => void) => { e.preventDefault(); e.stopPropagation(); run(); };
         if (k.front0 && on('review.flip')) return hit(k.turn);
+        if (!k.isWord && !k.grading && k.canMaster && blankEmptyRef.current && !e.repeat && on('blank.reveal')) return hit(k.fastPass);
         // ⌘⌫ (Ctrl+Backspace on Windows) by default; inside a blank it stays an editing key.
         if (k.canRemove && on('review.remove') && (!isDefault('review.remove') || (IS_WINDOWS ? e.ctrlKey : e.metaKey))) return hit(k.remove);
         const g = ([1, 2, 3, 4] as Grade[]).find(n => on(`review.g${n}`));
@@ -434,13 +441,13 @@ const ReviewSession: React.FC<{
                   targetText={card.text}
                   mode={mode}
                   splitVersion={splitVersion}
-                  hideNext
-                  inReview
-                  onComplete={complete}
-                  onReplay={replay}
+                  hideNext inReview
+                  onComplete={complete} onReplay={replay}
                   timedWords={timedWords}
                   onLookup={lookup}
                   onResult={o => setSuggest(gradeOf(o))}
+                  onFastPass={canMaster ? fastPass : undefined}
+                  onEmptyChange={empty => { blankEmptyRef.current = empty; }}
                 />
               )
             ) : null}

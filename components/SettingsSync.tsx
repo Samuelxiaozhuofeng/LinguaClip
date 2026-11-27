@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Btn, Card, Field, Seg, inputCls } from './ui';
+import SettingsFold from './SettingsFold';
 import { dialog } from './Dialog';
 import { SyncPairModal } from './SyncPairModal';
 import { formatSyncError, getDesktopSyncOpts, openDesktopSyncConfirm, triggerDesktopSyncNow } from './SyncHost';
@@ -46,7 +47,7 @@ const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; disab
   </button>
 );
 
-const SettingsSync: React.FC = () => {
+const SettingsSync: React.FC<{ onClipsChanged?: () => void }> = ({ onClipsChanged }) => {
   const t = useT();
   const lang = useLang();
   const status = useSyncExternalStore(subscribeSyncStatus, getSyncRuntimeStatus);
@@ -128,7 +129,9 @@ const SettingsSync: React.FC = () => {
     } finally {
       setTesting(false);
     }
-    const autoClipsNote = maybeEnableClipsForSync() ? t('sync.autoClipsNote') : '';
+    const enabledClips = maybeEnableClipsForSync();
+    if (enabledClips) onClipsChanged?.();
+    const autoClipsNote = enabledClips ? t('sync.autoClipsNote') : '';
     setCfg(getSyncConfig());
     setConfigOpen(false);
     setNote({
@@ -157,7 +160,7 @@ const SettingsSync: React.FC = () => {
 
   const handleExportPack = async (format: 'zip' | 'json' = 'zip') => {
     if (busy) return;
-    if (format === 'zip') maybeEnableClipsForSync();
+    if (format === 'zip' && maybeEnableClipsForSync()) onClipsChanged?.();
     setBusy(true);
     try {
       const opts = await getDesktopSyncOpts();
@@ -233,40 +236,59 @@ const SettingsSync: React.FC = () => {
 
   const canSubmit = !testing && !!draft.url.trim() && !!draft.username.trim() && !!draft.password;
 
-  return (
-    <div className="mt-12 text-center text-xs text-mute">
-      <p>{t('sync.title')}{' · '}{renderStatus()}</p>
-
-      {!cfg.enabled ? (
-        <>
-          <div className="mt-3 flex flex-wrap justify-center gap-2">
-            <Btn size="sm" disabled={busy} onClick={openConfig}>{t('sync.configure')}</Btn>
-            <Btn size="sm" disabled={busy} onClick={() => { void handleExportPack('zip'); }}>{t('sync.packExport')}</Btn>
-            <Btn size="sm" disabled={busy} onClick={() => { void handleExportPack('json'); }}>{t('sync.packExportJson')}</Btn>
-            <Btn size="sm" disabled={busy} onClick={() => { void handleImportPack(); }}>{t('sync.packImport')}</Btn>
-          </div>
-          <p className="mt-3 mx-auto max-w-md leading-relaxed">{t('sync.subtitle')}</p>
-        </>
-      ) : (
-        <>
-          <div className="mt-3 flex flex-wrap justify-center gap-2">
-            <Btn size="sm" disabled={busy || status.syncing} onClick={() => { void handleSyncNow(); }}>
-              {status.syncing && <Loader2 size={13} className="animate-spin" />}
-              {t('sync.syncNow')}
-            </Btn>
-            <Btn size="sm" disabled={busy} onClick={() => { setCfg(getSyncConfig()); setPairOpen(true); }}>{t('sync.pairPhone')}</Btn>
-            <Btn size="sm" disabled={busy} onClick={openConfig}>{t('sync.configure')}</Btn>
-            {status.pendingAlert && <Btn size="sm" tone="accent" onClick={openDesktopSyncConfirm}>{t('sync.reviewConfirm')}</Btn>}
-          </div>
-          <div className="mt-2 flex flex-wrap justify-center gap-2">
-            <Btn size="sm" flat disabled={busy} onClick={() => { void handleExportPack('zip'); }}>{t('sync.packExport')}</Btn>
-            <Btn size="sm" flat disabled={busy} onClick={() => { void handleExportPack('json'); }}>{t('sync.packExportJson')}</Btn>
-            <Btn size="sm" flat disabled={busy} onClick={() => { void handleImportPack(); }}>{t('sync.packImport')}</Btn>
-          </div>
-        </>
+  const quickActions = cfg.enabled ? (
+    <>
+      {status.pendingAlert && (
+        <Btn type="button" size="sm" tone="accent" onClick={openDesktopSyncConfirm}>{t('sync.reviewConfirm')}</Btn>
       )}
+      <Btn type="button" size="sm" disabled={busy || status.syncing} onClick={() => { void handleSyncNow(); }}>
+        {status.syncing && <Loader2 size={13} className="animate-spin" />}
+        {t('sync.syncNow')}
+      </Btn>
+    </>
+  ) : undefined;
 
-      {note && <p className={`mt-2 ${note.warn ? 'text-accent' : 'text-mute'}`}>{note.text}</p>}
+  return (
+    <div>
+      <SettingsFold
+        title={t('settings.group.sync')}
+        summary={renderStatus()}
+        action={quickActions}
+      >
+        <div className="space-y-3 text-xs text-mute">
+          {!cfg.enabled ? (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Btn type="button" size="sm" disabled={busy} onClick={openConfig}>{t('sync.configure')}</Btn>
+                <Btn type="button" size="sm" disabled={busy} onClick={() => { void handleExportPack('zip'); }}>{t('sync.packExport')}</Btn>
+                <Btn type="button" size="sm" disabled={busy} onClick={() => { void handleExportPack('json'); }}>{t('sync.packExportJson')}</Btn>
+                <Btn type="button" size="sm" disabled={busy} onClick={() => { void handleImportPack(); }}>{t('sync.packImport')}</Btn>
+              </div>
+              <p className="leading-relaxed">{t('sync.subtitle')}</p>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Btn type="button" size="sm" disabled={busy || status.syncing} onClick={() => { void handleSyncNow(); }}>
+                  {status.syncing && <Loader2 size={13} className="animate-spin" />}
+                  {t('sync.syncNow')}
+                </Btn>
+                <Btn type="button" size="sm" disabled={busy} onClick={() => { setCfg(getSyncConfig()); setPairOpen(true); }}>{t('sync.pairPhone')}</Btn>
+                <Btn type="button" size="sm" disabled={busy} onClick={openConfig}>{t('sync.configure')}</Btn>
+                {status.pendingAlert && <Btn type="button" size="sm" tone="accent" onClick={openDesktopSyncConfirm}>{t('sync.reviewConfirm')}</Btn>}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-mute">{t('sync.packSection')}</span>
+                <Btn type="button" size="sm" flat disabled={busy} onClick={() => { void handleExportPack('zip'); }}>{t('sync.packExport')}</Btn>
+                <Btn type="button" size="sm" flat disabled={busy} onClick={() => { void handleExportPack('json'); }}>{t('sync.packExportJson')}</Btn>
+                <Btn type="button" size="sm" flat disabled={busy} onClick={() => { void handleImportPack(); }}>{t('sync.packImport')}</Btn>
+              </div>
+            </>
+          )}
+        </div>
+      </SettingsFold>
+
+      {note && <p className={`mt-2 px-1 text-xs ${note.warn ? 'text-accent' : 'text-mute'}`}>{note.text}</p>}
 
       {configOpen && (
         <div className="fixed inset-0 z-[90] bg-black/40 flex items-center justify-center p-4 fade-in" onClick={() => { if (!testing) setConfigOpen(false); }}>

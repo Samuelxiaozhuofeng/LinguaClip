@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { APP_DATA_FIELDS, AnkiCardTemplateConfig } from '../types';
 import { AnkiConnectionStatus } from '../hooks/useAnkiConnection';
 import { Btn, Card, Field, inputCls } from './ui';
+import SettingsFold from './SettingsFold';
 import { useT, DictKey, getLang } from '../utils/i18n';
 import { invokeAnki } from '../utils/anki';
 import { getAllVideosFromDB } from '../utils/fileSystemAccess';
@@ -124,7 +125,6 @@ const FieldMap: React.FC<{
   const t = useT();
   return (
     <div className="space-y-3">
-      <p className="text-sm font-medium">{t('settingsAnki.fieldMapping')}</p>
       {fields.map((field) => (
         <div key={field} className="flex items-center gap-3">
           <span className="w-1/3 font-mono text-sm truncate" title={field}>{field}</span>
@@ -256,7 +256,9 @@ const SettingsAnki: React.FC<SettingsAnkiProps> = ({
           </div>
           <LangDecks url={url} decks={decks} deckName={deckName} value={deckByLang} onChange={setDeckByLang} refreshDecks={refreshDecks} />
           {modelName && modelFields.length > 0 && (
-            <FieldMap fields={modelFields} mapping={fieldMapping} onChange={updateMapping} />
+            <SettingsFold title={t('settings.fieldMapFold')}>
+              <FieldMap fields={modelFields} mapping={fieldMapping} onChange={updateMapping} />
+            </SettingsFold>
           )}
         </div>
       )}

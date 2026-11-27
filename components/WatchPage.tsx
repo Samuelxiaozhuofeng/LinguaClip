@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bookmark, Maximize2, Minimize2, MoreHorizontal, Pause, Play, RotateCcw, Check } from 'lucide-react';
+import { ArrowLeft, Bookmark, Maximize2, Minimize2, MoreHorizontal, Pause, Play, Repeat, RotateCcw, Check } from 'lucide-react';
 import { Subtitle, VideoRecord } from '../types';
 import { Btn, Menu, Seg, Stamp, useToast } from './ui';
 import WatchLine from './WatchLine';
@@ -13,7 +13,7 @@ import type { StudyWay } from '../utils/studyWays';
 import { useLookup, aroundOf } from '../hooks/useLookup';
 import { useSavedLines } from '../hooks/useSavedLines';
 import { useAnkiIntegration } from '../hooks/useAnkiIntegration';
-import { lineAt, lineEnded, parseSRT } from '../utils/srtParser';
+import { parseSRT } from '../utils/srtParser';
 import { isFullscreen, setFullscreen, videoSrcFromPath } from '../utils/desktop';
 import { resolveDictLang } from '../utils/resolveDictLang';
 import { settleSplits } from '../utils/jaSegments';
@@ -25,6 +25,8 @@ import { SPEEDS, useSpeed } from '../utils/speedPref';
 import { DictKey, useT } from '../utils/i18n';
 import { usePracticeClock } from '../utils/today';
 import { maskShowing, setPeek, togglePeek } from '../utils/subtitleMask';
+import { LOOP_TIMES, LoopTimes, setLoopTimes } from '../utils/loop';
+import { useWatchClock, useWatchLoop, watchLegend } from '../hooks/useWatchLoop';
 
 // Watch mode: the whole window is the video, the subtitle sits on the picture.
 // Look words up, save lines (S), send them to Anki, and at the end dictate a few
@@ -92,53 +94,30 @@ const WatchPage: React.FC<{
   recordingRef.current = recording;
   const busy = () => recordingRef.current || wordRecording.current;
 
-  // --- Playback ---
-  // One loop follows the clock: which line is on screen, and the optional pause at a line's end
-  // (only when playback crossed that end by itself, not when a seek landed past it). The pause
-  // steps back inside the line, so the line just heard stays on screen for S / lookup / replay,
-  // not the next one; `heldAt` keeps it from pausing on that same end again when play resumes.
-  const prevT = useRef(0);
-  const heldAt = useRef(-1);
-  const autoPauseRef = useRef(prefs.autoPause);
-  autoPauseRef.current = prefs.autoPause;
-  useEffect(() => {
-    let raf = 0;
-    const tick = () => {
-      const v = videoRef.current;
-      if (v) {
-        const now = v.currentTime, before = prevT.current;
-        const at = lineAt(lines, now);
-        const on = at >= 0 && now < lines[at].endTime;
-        setCur(c => (c.at === at && c.on === on ? c : { at, on }));
-        const was = lineAt(lines, before);
-        if (autoPauseRef.current && !busy() && !v.paused && was >= 0 && was !== heldAt.current
-          && lineEnded(lines[was], before, now) && now - before < 0.5 * Math.max(1, v.playbackRate)) {
-          v.pause();
-          heldAt.current = was;
-          const back = Math.max(lines[was].startTime, lines[was].endTime - 0.02);
-          v.currentTime = back;
-          prevT.current = back;
-        } else prevT.current = now;
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [lines]); // eslint-disable-line react-hooks/exhaustive-deps
+  // --- Lookup & Playback ---
+  // Clock check (rAF + video timeupdate) tracks the current line and handles line-end loop / auto-pause.
+  const dictLang = useMemo(() => resolveDictLang(record.lang, lines.map(l => l.text)), [record.lang, lines]);
+  useEffect(() => { settleSplits(record.id, lines.map(l => l.text)).catch(() => {}); }, [record.id, lines]); // words, and the reader's marks on them
+  const { def, lookup, explain, closeDef } = useLookup(dictLang, shown?.text ?? '');
+  const loop = useWatchLoop();
+  const onCur = useCallback((at: number, on: boolean) => setCur(c => (c.at === at && c.on === on ? c : { at, on })), []);
+  const { seek: rawSeek, checkClock, tryEndLoop, gapLine } = useWatchClock({
+    videoRef, lines, loop, autoPause: prefs.autoPause, busy,
+    blocked: !!drill || summary || def.word !== null, onCur,
+  });
+  const resumeAfter = useRef(false);
+  const resumeLoopAt = useRef(-1);
+  const seek = useCallback((sec: number, play = false, keepPlays = false) => {
+    if (!keepPlays) { resumeAfter.current = false; resumeLoopAt.current = -1; }
+    rawSeek(sec, play, keepPlays);
+  }, [rawSeek]);
 
-  const seek = useCallback((sec: number, play = false) => {
-    const v = videoRef.current;
-    if (!v || busy()) return;
-    heldAt.current = -1;
-    const to = Math.max(0, Math.min(sec, Number.isFinite(v.duration) ? v.duration - 0.05 : sec));
-    v.currentTime = to;
-    prevT.current = to;
-    if (play) v.play().catch(() => {});
-  }, []);
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v || busy()) return;
+    loop.clearGap();
     resumeAfter.current = false; // played / paused by hand: closing the definition leaves it be
+    resumeLoopAt.current = -1;
     if (v.paused) v.play().catch(() => {}); else v.pause();
   };
   const jump = (i: number) => { if (i >= 0 && i < lines.length) seek(lines[i].startTime, true); };
@@ -164,6 +143,7 @@ const WatchPage: React.FC<{
   };
   const lastSaved = useRef(0);
   const onTime = () => {
+    checkClock();
     const v = videoRef.current;
     if (!v) return;
     setTime(v.currentTime);
@@ -183,19 +163,27 @@ const WatchPage: React.FC<{
   useEffect(() => { if (videoRef.current) videoRef.current.defaultPlaybackRate = videoRef.current.playbackRate = speed; }, [speed]);
 
   // --- Lookup: pauses the video; closing the card resumes it if it was playing ---
-  const dictLang = useMemo(() => resolveDictLang(record.lang, lines.map(l => l.text)), [record.lang, lines]);
-  useEffect(() => { settleSplits(record.id, lines.map(l => l.text)).catch(() => {}); }, [record.id, lines]); // words, and the reader's marks on them
-  const { def, lookup, explain, closeDef } = useLookup(dictLang, shown?.text ?? '');
   const lookLine = useRef<Subtitle | null>(null);
-  const resumeAfter = useRef(false);
   // Pressing a word pauses already: dragging across a phrase, the line must not move on.
   const pauseForLookup = () => {
+    const loopIdx = gapLine();
+    const inGap = loopIdx >= 0;
+    loop.clearGap();
     const v = videoRef.current;
-    if (v && !v.paused && !busy()) { resumeAfter.current = true; v.pause(); }
+    if (v && (!v.paused || inGap) && !busy()) {
+      resumeAfter.current = true;
+      if (inGap) resumeLoopAt.current = loopIdx;
+      v.pause();
+    }
   };
   const unpause = () => {
-    if (resumeAfter.current && !summary) videoRef.current?.play().catch(() => {});
+    const loopIdx = resumeLoopAt.current;
+    resumeLoopAt.current = -1;
+    const shouldResume = resumeAfter.current;
     resumeAfter.current = false;
+    if (!shouldResume || summary) return;
+    if (loopIdx >= 0 && loop.loopOnRef.current && lines[loopIdx]) seek(lines[loopIdx].startTime, true, true);
+    else videoRef.current?.play().catch(() => {});
   };
   const onWord = (word: string, line: Subtitle, fromList = false) => {
     pauseForLookup();
@@ -212,6 +200,7 @@ const WatchPage: React.FC<{
   };
   const wordToAnki = async (word: string, definition: string, example?: string) => {
     if (!lookLine.current) return;
+    loop.clearGap();
     wordRecording.current = true;
     try { await handleWordToAnki(word, definition, lookLine.current, example); } finally { wordRecording.current = false; }
   };
@@ -224,7 +213,7 @@ const WatchPage: React.FC<{
     setMine(m => (savedIds.has(id) ? m.filter(x => x !== id) : [...m, id]));
     toggleSave(target);
   };
-  const toAnki = () => { if (target && !busy()) handleAddToAnki(target); };
+  const toAnki = () => { if (target && !busy()) { loop.clearGap(); handleAddToAnki(target); } };
   const ankiReady = !!ankiConfig?.card;
   // The Anki button lives in "…": how it went shows as a note.
   useEffect(() => {
@@ -240,17 +229,26 @@ const WatchPage: React.FC<{
     setPrefs({ autoPause: !prefs.autoPause });
     say(prefs.autoPause ? 'watch.autoPauseOff' : 'watch.autoPauseOn');
   };
+  const onToggleLoop = () => {
+    const on = loop.toggleLoop();
+    const times = loop.times ? t('transport.loopN', { n: loop.times }) : t('transport.loopForever');
+    toast.say(on ? t('watch.loopOn', { times }) : t('watch.loopOff'));
+  };
 
   // --- Summary: only at the end; leaving midway never asks (the saved lines are review cards already) ---
   const leave = () => { if (!busy()) onExit(); };
   const switchWay = (way: StudyWay) => {
     if (busy()) return;
+    loop.clearGap();
     videoRef.current?.pause();
     const sec = !loadedRef.current ? (startSec ?? getWatchPos(record.id)) : (target?.startTime ?? videoRef.current?.currentTime ?? 0);
     onSwitchWay?.(way, sec);
   };
   const onEnded = () => {
     if (busy()) return; // an Anki clip ran to the very end: not a finished watch
+    if (tryEndLoop()) return;
+    loop.clearGap();
+    loop.resetPlays();
     setWatchPos(record.id, 0);
     setSummary(true);
   };
@@ -274,6 +272,7 @@ const WatchPage: React.FC<{
     if (summary || recording) return;
     let act: (() => void) | null = null;
     if (matches(e, 'watch.replay')) act = replay;
+    else if (matches(e, 'watch.loop') && def.word === null) act = onToggleLoop;
     else if (matches(e, 'watch.play')) act = togglePlay;
     // A learner's jump is by line, not by seconds.
     else if (lineKey(e, 'prev')) act = prev;
@@ -361,18 +360,7 @@ const WatchPage: React.FC<{
   const withKey = (label: string, key: string) => `${label} (${key})`;
   const key = (id: string) => formatCombo(combos[`watch.${id}`]);
   const onOff = (label: string, on: boolean) => <><span className="flex-1">{label}</span>{on && <Check size={15} className="text-accent" />}</>;
-  const legend: [string, string][] = [
-    [key('play'), t('keys.play')],
-    [key('prev'), t('keys.prev')],
-    [key('next'), t('keys.next')],
-    [key('replay'), t('keys.replay')],
-    [key('save'), t('watch.keySave')],
-    [key('autoPause'), t('watch.autoPause')],
-    [key('subs'), t('watch.keySubs')],
-    [key('peek'), t('watch.showLine')],
-    [key('full'), t('watch.fullscreen')],
-    ...(ankiReady ? [[key('anki'), t('keys.anki')] as [string, string]] : []),
-  ];
+  const legend = watchLegend(key, t, ankiReady);
 
   return (
     <div className={`fixed inset-0 bg-black select-none ${hideCursor ? 'cursor-none' : ''}`} onMouseMove={onMove} onMouseLeave={() => setNear(n => ({ top: false, bottom: def.word !== null && n.bottom }))}>
@@ -436,7 +424,12 @@ const WatchPage: React.FC<{
               className="press w-11 h-11 rounded-full bg-accent text-white flex items-center justify-center">
               {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
             </button>
-            <span className="w-10" />{/* keeps play in the middle now that replay sits alone beside it */}
+            <Btn square flat onClick={onToggleLoop} disabled={recording} aria-pressed={loop.loopOn}
+              title={t('watch.loopTitle', { key: key('loop') })} aria-label={t('watch.loop')}
+              className={`relative ${loop.loopOn ? '!text-accent' : '!text-ink'}`}>
+              <Repeat size={18} />
+              {loop.loopOn && loop.times > 0 && <span className="absolute right-0.5 bottom-0.5 text-[10px] font-semibold leading-none">{loop.times}</span>}
+            </Btn>
           </div>
           <div className="flex-1 min-w-0 flex items-center justify-end gap-2">
             <Btn square size="sm" flat onClick={toggleFull} title={withKey(full ? t('watch.exitFullscreen') : t('watch.fullscreen'), key('full'))} aria-label={full ? t('watch.exitFullscreen') : t('watch.fullscreen')}>
@@ -462,6 +455,8 @@ const WatchPage: React.FC<{
               <div className="px-2.5 py-2 flex flex-col gap-2">
                 <span className="text-xs text-mute">{t('transport.speed')}</span>
                 <Seg<number> size="sm" className="w-full [&>button]:flex-1 [&>button]:px-0" value={speed} onChange={setSpeed} options={SPEEDS.watch.map(s => ({ value: s, label: `${s}×` }))} />
+                <span className="text-xs text-mute">{t('transport.loopTimes')}</span>
+                <Seg<LoopTimes> size="sm" className="w-full [&>button]:flex-1" value={loop.times} onChange={setLoopTimes} options={LOOP_TIMES.map(n => ({ value: n, label: n ? t('transport.loopN', { n }) : t('transport.loopForever') }))} />
                 <span className="text-xs text-mute">{withKey(t('watch.keySubs'), key('subs'))}</span>
                 <Seg size="sm" className="w-full [&>button]:flex-1" value={prefs.subs} onChange={subs => setPrefs({ subs })} options={SUBS.map(s => ({ value: s, label: t(`watch.subsShort_${s}` as DictKey) }))} />
               </div>

@@ -1,28 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Languages } from 'lucide-react';
 import { AnkiConfig, AIConfig, AnkiCardTemplateConfig } from '../types';
 import * as Anki from '../utils/anki';
 import * as AI from '../utils/ai';
 import * as Storage from '../utils/storage';
 import { useAnkiConnection } from '../hooks/useAnkiConnection';
+import { useT, useLang, setLang, Lang } from '../utils/i18n';
 import { Seg, Stamp } from './ui';
 import SettingsPractice from './SettingsPractice';
 import SettingsLookup from './SettingsLookup';
 import SettingsCards from './SettingsCards';
+import SettingsTranscribe from './SettingsTranscribe';
 import SettingsAI, { AiAfterImport, AiPrompt } from './SettingsAI';
 import SettingsAnki from './SettingsAnki';
-import SettingsShortcuts from './SettingsShortcuts';
-import SettingsTranscribe from './SettingsTranscribe';
-import { Languages } from 'lucide-react';
-import { useT, useLang, setLang, Lang } from '../utils/i18n';
-import { openExternal } from '../utils/desktop';
-import { ProFooter } from '@pro';
-import { UpdateRow } from './UpdateUI';
-import SettingsSync from './SettingsSync';
-import BackupRow from './BackupRow';
+import SettingsData from './SettingsData';
 
 type DeckByLang = NonNullable<AnkiCardTemplateConfig['deckByLang']>;
-
-const SPONSOR_URL = 'https://afdian.com/a/SamuelXiao';
 
 // Always shown as "中文" / "English" in their own language, regardless of the current UI language.
 const LANG_OPTS: { value: Lang; label: string }[] = [
@@ -30,7 +23,7 @@ const LANG_OPTS: { value: Lang; label: string }[] = [
   { value: 'en', label: 'English' },
 ];
 
-type Tab = 'practice' | 'lookup' | 'cards' | 'import' | 'ai' | 'shortcuts';
+type Layer = 'practice' | 'importAi' | 'data';
 
 type AnkiPatch = {
   url?: string;
@@ -61,10 +54,12 @@ const Settings: React.FC = () => {
   const [aiAutoPhrases, setAiAutoPhrases] = useState(false);
   const [aiJaCheck, setAiJaCheck] = useState(false);
   const [aiLimits, setAiLimits] = useState<NonNullable<AIConfig['limits']>>({});
+  const [cachedModels, setCachedModels] = useState<string[]>(() => AI.getCachedModels());
 
   const [sectionLength, setSectionLength] = useState(Storage.DEFAULT_SECTION_LENGTH);
+  const [clipsVer, setClipsVer] = useState(0);
 
-  const [tab, setTab] = useState<Tab>('practice');
+  const [layer, setLayer] = useState<Layer>('practice');
   const [savedFlash, setSavedFlash] = useState(false);
   const flashTimer = useRef<number>(0);
   const ankiConnection = useAnkiConnection();
@@ -157,18 +152,24 @@ const Settings: React.FC = () => {
 
   const badAiKey = AI.isBadKey(aiApiKey);
   const aiReady = !!(aiApiKey && !badAiKey && aiBaseUrl.trim() && (aiModel.trim() || aiSegmentModel.trim()));
-  const goAI = () => setTab('ai');
+
+  const jumpTo = (target: Layer, anchorId: string) => {
+    setLayer(target);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
+  };
+  const goAI = () => jumpTo('importAi', 'settings-ai-connect');
+  const goLookup = () => jumpTo('practice', 'settings-lookup');
+  const goImport = () => jumpTo('importAi', 'settings-ai-tidy');
 
   return (
     <div>
       <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
-        <Seg<Tab> className="flex-wrap" value={tab} onChange={setTab} options={[
-          { value: 'practice', label: t('settings.practice') },
-          { value: 'lookup', label: t('settings.lookup') },
-          { value: 'cards', label: t('settings.cards') },
-          { value: 'import', label: t('settings.import') },
-          { value: 'ai', label: 'AI' },
-          { value: 'shortcuts', label: t('shortcuts.title') },
+        <Seg<Layer> className="flex-wrap" value={layer} onChange={setLayer} options={[
+          { value: 'practice', label: t('settings.layerPractice') },
+          { value: 'importAi', label: t('settings.layerImportAi') },
+          { value: 'data', label: t('settings.layerData') },
         ]} />
         <div className="flex items-center gap-2 text-mute" title={t('settings.language')}>
           <Languages size={16} aria-hidden />
@@ -176,156 +177,151 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
-      {tab === 'practice' && (
-        <SettingsPractice
-          sectionLength={sectionLength}
-          setSectionLength={(v) => {
-            setSectionLength(v);
-            Storage.savePracticeConfig({ ...Storage.getPracticeConfig(), sectionLength: v });
-            flashSaved();
-          }}
+      {layer === 'practice' && (
+        <div className="space-y-10">
+          <SettingsPractice
+            sectionLength={sectionLength}
+            setSectionLength={(v) => {
+              setSectionLength(v);
+              Storage.savePracticeConfig({ ...Storage.getPracticeConfig(), sectionLength: v });
+              flashSaved();
+            }}
+            onSaved={flashSaved}
+          />
+          <SettingsLookup onSaved={flashSaved} aiReady={AI.aiReady()} goAI={goAI}>
+            <AiPrompt
+              aiReady={AI.aiReady() /* the same check word lookup makes: needs the main model */}
+              goAI={goAI}
+              prompt={aiPrompt}
+              setPrompt={(v) => {
+                setAiPrompt(v);
+                saveAI({ promptTemplate: v });
+              }}
+            />
+          </SettingsLookup>
+          <SettingsCards onSaved={flashSaved} />
+        </div>
+      )}
+
+      {layer === 'importAi' && (
+        <div className="space-y-10">
+          <SettingsTranscribe onSaved={flashSaved}>
+            <AiAfterImport
+              aiReady={aiReady}
+              goAI={goAI}
+              cachedModels={cachedModels}
+              segmentModel={aiSegmentModel}
+              setSegmentModel={(v) => {
+                setAiSegmentModel(v);
+                saveAI({ segmentModel: v });
+              }}
+              autoBreakdown={aiAutoBreakdown}
+              setAutoBreakdown={(v) => {
+                setAiAutoBreakdown(v);
+                saveAI({ autoBreakdown: v });
+              }}
+              breakdownSounds={aiBreakdownSounds}
+              setBreakdownSounds={(v) => {
+                setAiBreakdownSounds(v);
+                saveAI({ breakdownSounds: v });
+              }}
+              autoCloze={aiAutoCloze}
+              setAutoCloze={(v) => {
+                setAiAutoCloze(v);
+                saveAI({ autoCloze: v });
+              }}
+              autoKeywords={aiAutoKeywords}
+              setAutoKeywords={(v) => {
+                setAiAutoKeywords(v);
+                saveAI({ autoKeywords: v });
+              }}
+              autoPhrases={aiAutoPhrases}
+              setAutoPhrases={(v) => {
+                setAiAutoPhrases(v);
+                saveAI({ autoPhrases: v });
+              }}
+              jaCheck={aiJaCheck}
+              setJaCheck={(v) => {
+                setAiJaCheck(v);
+                saveAI({ jaSegmentAi: v });
+              }}
+            />
+          </SettingsTranscribe>
+          <SettingsAI
+            aiModel={aiModel}
+            setAiModel={(v) => {
+              setAiModel(v);
+              saveAI({ model: v });
+            }}
+            aiTemperature={aiTemperature}
+            setAiTemperature={(v) => {
+              setAiTemperature(v);
+              saveAI({ temperature: v });
+            }}
+            aiApiKey={aiApiKey}
+            setAiApiKey={(v) => {
+              setAiApiKey(v);
+              saveAI({ apiKey: v });
+            }}
+            aiBaseUrl={aiBaseUrl}
+            setAiBaseUrl={(v) => {
+              setAiBaseUrl(v);
+              saveAI({ baseUrl: v });
+            }}
+            aiLimits={aiLimits}
+            setAiLimits={(v) => {
+              setAiLimits(v);
+              saveAI({ limits: v });
+            }}
+            goLookup={goLookup}
+            goImport={goImport}
+            onModelsFetched={setCachedModels}
+          />
+        </div>
+      )}
+
+      {layer === 'data' && (
+        <SettingsData
+          onSaved={flashSaved}
+          clipsVer={clipsVer}
+          onClipsChanged={() => setClipsVer(v => v + 1)}
+          anki={
+            <SettingsAnki
+              url={ankiConnection.url}
+              setUrl={(v) => {
+                ankiConnection.setUrl(v);
+                saveAnki({ url: v });
+              }}
+              status={ankiConnection.status}
+              error={ankiConnection.error}
+              onConnect={() => ankiConnection.connect()}
+              decks={ankiConnection.decks}
+              models={ankiConnection.models}
+              deckName={deckName}
+              setDeckName={(v) => {
+                setDeckName(v);
+                saveAnki({ deckName: v });
+              }}
+              modelName={modelName}
+              setModelName={(v) => {
+                setModelName(v);
+                saveAnki({ modelName: v });
+              }}
+              fieldMapping={fieldMapping}
+              setFieldMapping={setFieldMapping}
+              fetchModelFields={ankiConnection.fetchModelFields}
+              saveAnki={saveAnki}
+              createLinguaClip={createLinguaClip}
+              deckByLang={deckByLang}
+              setDeckByLang={(v) => {
+                setDeckByLang(v);
+                saveAnki({ deckByLang: v });
+              }}
+              refreshDecks={() => ankiConnection.connect()}
+            />
+          }
         />
       )}
-
-      {tab === 'lookup' && (
-        <SettingsLookup onSaved={flashSaved} aiReady={AI.aiReady()} goAI={goAI}>
-          <AiPrompt
-            aiReady={AI.aiReady() /* the same check word lookup makes: needs the main model */}
-            goAI={goAI}
-            prompt={aiPrompt}
-            setPrompt={(v) => {
-              setAiPrompt(v);
-              saveAI({ promptTemplate: v });
-            }}
-          />
-        </SettingsLookup>
-      )}
-
-      {tab === 'import' && (
-        <SettingsTranscribe onSaved={flashSaved}>
-          <AiAfterImport
-            aiReady={aiReady}
-            goAI={goAI}
-            segmentModel={aiSegmentModel}
-            setSegmentModel={(v) => {
-              setAiSegmentModel(v);
-              saveAI({ segmentModel: v });
-            }}
-            autoBreakdown={aiAutoBreakdown}
-            setAutoBreakdown={(v) => {
-              setAiAutoBreakdown(v);
-              saveAI({ autoBreakdown: v });
-            }}
-            breakdownSounds={aiBreakdownSounds}
-            setBreakdownSounds={(v) => {
-              setAiBreakdownSounds(v);
-              saveAI({ breakdownSounds: v });
-            }}
-            autoCloze={aiAutoCloze}
-            setAutoCloze={(v) => {
-              setAiAutoCloze(v);
-              saveAI({ autoCloze: v });
-            }}
-            autoKeywords={aiAutoKeywords}
-            setAutoKeywords={(v) => {
-              setAiAutoKeywords(v);
-              saveAI({ autoKeywords: v });
-            }}
-            autoPhrases={aiAutoPhrases}
-            setAutoPhrases={(v) => {
-              setAiAutoPhrases(v);
-              saveAI({ autoPhrases: v });
-            }}
-            jaCheck={aiJaCheck}
-            setJaCheck={(v) => {
-              setAiJaCheck(v);
-              saveAI({ jaSegmentAi: v });
-            }}
-          />
-        </SettingsTranscribe>
-      )}
-
-      {tab === 'shortcuts' && <SettingsShortcuts onSaved={flashSaved} />}
-
-      {tab === 'ai' && (
-        <SettingsAI
-          aiModel={aiModel}
-          setAiModel={(v) => {
-            setAiModel(v);
-            saveAI({ model: v });
-          }}
-          aiTemperature={aiTemperature}
-          setAiTemperature={(v) => {
-            setAiTemperature(v);
-            saveAI({ temperature: v });
-          }}
-          aiApiKey={aiApiKey}
-          setAiApiKey={(v) => {
-            setAiApiKey(v);
-            saveAI({ apiKey: v });
-          }}
-          aiBaseUrl={aiBaseUrl}
-          setAiBaseUrl={(v) => {
-            setAiBaseUrl(v);
-            saveAI({ baseUrl: v });
-          }}
-          aiLimits={aiLimits}
-          setAiLimits={(v) => {
-            setAiLimits(v);
-            saveAI({ limits: v });
-          }}
-          goTab={setTab}
-        />
-      )}
-
-      {tab === 'cards' && (
-        <SettingsCards onSaved={flashSaved}>
-          <SettingsAnki
-            url={ankiConnection.url}
-            setUrl={(v) => {
-              ankiConnection.setUrl(v);
-              saveAnki({ url: v });
-            }}
-            status={ankiConnection.status}
-            error={ankiConnection.error}
-            onConnect={() => ankiConnection.connect()}
-            decks={ankiConnection.decks}
-            models={ankiConnection.models}
-            deckName={deckName}
-            setDeckName={(v) => {
-              setDeckName(v);
-              saveAnki({ deckName: v });
-            }}
-            modelName={modelName}
-            setModelName={(v) => {
-              setModelName(v);
-              saveAnki({ modelName: v });
-            }}
-            fieldMapping={fieldMapping}
-            setFieldMapping={setFieldMapping}
-            fetchModelFields={ankiConnection.fetchModelFields}
-            saveAnki={saveAnki}
-            createLinguaClip={createLinguaClip}
-            deckByLang={deckByLang}
-            setDeckByLang={(v) => {
-              setDeckByLang(v);
-              saveAnki({ deckByLang: v });
-            }}
-            refreshDecks={() => ankiConnection.connect()}
-          />
-        </SettingsCards>
-      )}
-
-      <SettingsSync />
-      <BackupRow />
-      <p className="mt-12 text-center text-xs text-mute">
-        {ProFooter ? <ProFooter /> : (
-          <button type="button" className="underline-offset-4 hover:text-ink hover:underline" onClick={() => openExternal(SPONSOR_URL).catch(err => console.error(err))}>
-            {t('settings.sponsor')}
-          </button>
-        )}
-      </p>
-      <UpdateRow />
 
       {savedFlash && (
         <div className="fixed bottom-6 right-6 z-50">

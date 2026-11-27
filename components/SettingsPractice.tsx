@@ -8,12 +8,14 @@ import { getWatchPrefs, saveWatchPrefs, LISTEN_TRIES, getWeekStats, getTodayBar,
 interface SettingsPracticeProps {
   sectionLength: number;
   setSectionLength: (value: number) => void;
+  onSaved?: () => void;
 }
 
 // Settings → Practice: how a video is cut into sections, how dictation is judged, the hard-subtitle cover, intensive listening's hard-line plays, Japanese splitting, and the home screen's "Today" bar and week.
 const SettingsPractice: React.FC<SettingsPracticeProps> = ({
   sectionLength,
   setSectionLength,
+  onSaved,
 }) => {
   const t = useT();
   const [tries, setTries] = useState(() => getWatchPrefs().listenTries);
@@ -49,21 +51,21 @@ const SettingsPractice: React.FC<SettingsPracticeProps> = ({
       <Group title={t('settings.group.dictation')}>
         <div>
           <label className="flex items-center gap-2.5 text-sm cursor-pointer">
-            <input type="checkbox" checked={lenient} onChange={e => { setLenient(e.target.checked); setPracticeFlag('looseJudge', e.target.checked); }} className="w-4 h-4 accent-accent" />
+            <input type="checkbox" checked={lenient} onChange={e => { setLenient(e.target.checked); setPracticeFlag('looseJudge', e.target.checked); onSaved?.(); }} className="w-4 h-4 accent-accent" />
             {t('settingsGeneral.looseJudge')}
           </label>
           <p className="mt-1.5 text-xs text-mute leading-relaxed">{t('settingsGeneral.looseJudgeHint')}</p>
         </div>
         <div>
           <label className="flex items-center gap-2.5 text-sm cursor-pointer">
-            <input type="checkbox" checked={mask} onChange={e => { setMaskOn(e.target.checked); setPracticeFlag('subtitleMask', e.target.checked); refreshShortcuts(); }} className="w-4 h-4 accent-accent" />
+            <input type="checkbox" checked={mask} onChange={e => { setMaskOn(e.target.checked); setPracticeFlag('subtitleMask', e.target.checked); refreshShortcuts(); onSaved?.(); }} className="w-4 h-4 accent-accent" />
             {t('settingsGeneral.subtitleMask')}
           </label>
           <p className="mt-1.5 text-xs text-mute leading-relaxed">{t('settingsGeneral.subtitleMaskHint')}</p>
         </div>
         <div>
           <label className="flex items-center gap-2.5 text-sm cursor-pointer">
-            <input type="checkbox" checked={slowReplay} onChange={e => { setSlowReplay(e.target.checked); setPracticeFlag('slowReplay', e.target.checked); }} className="w-4 h-4 accent-accent" />
+            <input type="checkbox" checked={slowReplay} onChange={e => { setSlowReplay(e.target.checked); setPracticeFlag('slowReplay', e.target.checked); onSaved?.(); }} className="w-4 h-4 accent-accent" />
             {t('settingsGeneral.slowReplay')}
           </label>
           <p className="mt-1.5 text-xs text-mute leading-relaxed">{t('settingsGeneral.slowReplayHint')}</p>
@@ -72,7 +74,7 @@ const SettingsPractice: React.FC<SettingsPracticeProps> = ({
 
       <Group title={t('settings.group.listen')}>
         <Field label={t('settingsGeneral.listenTries')} hint={t('settingsGeneral.listenTriesHint')}>
-          <Seg options={LISTEN_TRIES.map(n => ({ value: n, label: String(n) }))} value={tries} onChange={n => { setTries(n); saveWatchPrefs({ listenTries: n }); }} />
+          <Seg options={LISTEN_TRIES.map(n => ({ value: n, label: String(n) }))} value={tries} onChange={n => { setTries(n); saveWatchPrefs({ listenTries: n }); onSaved?.(); }} />
         </Field>
       </Group>
 
@@ -83,14 +85,14 @@ const SettingsPractice: React.FC<SettingsPracticeProps> = ({
       <Group title={t('settings.group.home')}>
         <div>
           <label className="flex items-center gap-2.5 text-sm cursor-pointer">
-            <input type="checkbox" checked={today} onChange={e => { setToday(e.target.checked); setPracticeFlag('todayBar', e.target.checked); }} className="w-4 h-4 accent-accent" />
+            <input type="checkbox" checked={today} onChange={e => { setToday(e.target.checked); setPracticeFlag('todayBar', e.target.checked); onSaved?.(); }} className="w-4 h-4 accent-accent" />
             {t('settingsGeneral.todayBar')}
           </label>
           <p className="mt-1.5 text-xs text-mute leading-relaxed">{t('settingsGeneral.todayBarHint')}</p>
         </div>
         <div>
           <label className="flex items-center gap-2.5 text-sm cursor-pointer">
-            <input type="checkbox" checked={week} onChange={e => { setWeek(e.target.checked); setPracticeFlag('weekStats', e.target.checked); }} className="w-4 h-4 accent-accent" />
+            <input type="checkbox" checked={week} onChange={e => { setWeek(e.target.checked); setPracticeFlag('weekStats', e.target.checked); onSaved?.(); }} className="w-4 h-4 accent-accent" />
             {t('settingsGeneral.weekStats')}
           </label>
           <p className="mt-1.5 text-xs text-mute leading-relaxed">{t('settingsGeneral.weekStatsHint')}</p>

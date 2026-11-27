@@ -205,9 +205,9 @@ try {
   ok(rec && rec.subtitleText === RAW, '入门练习自带字幕原样不切');
   await page.evaluate(async id => (await import('/utils/fileSystemAccess.ts')).deleteVideoFromDB(id), starterId);
 
-  // Switch off in Settings → 导入与转录 → imported as it is.
+  // Switch off in Settings → 导入与 AI → imported as it is.
   await nav('设置');
-  await page.getByRole('radio', { name: '导入与转录' }).click();
+  await page.getByRole('radio', { name: '导入与 AI' }).click();
   const box = page.getByRole('checkbox', { name: '自动切开太长的句子' });
   ok(await box.isChecked(), '设置里「自动切开太长的句子」默认开');
   await box.uncheck();

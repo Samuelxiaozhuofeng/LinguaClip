@@ -15,6 +15,7 @@ import { IS_WINDOWS } from '../utils/platform';
 import { Btn, Field, Group, Seg, inputCls } from './ui';
 import ConvertToolRow from './ConvertToolRow';
 import SettingsYouTube from './SettingsYouTube';
+import SettingsFold from './SettingsFold';
 
 // Settings → Import & transcribe: this machine (standard / light model, graphics card
 // on Windows, where its parts live) or a cloud service (link to get a key, the key itself),
@@ -83,45 +84,51 @@ const SettingsTranscribe: React.FC<{ onSaved: () => void; children: React.ReactN
               />
             </Field>
 
-            {IS_WINDOWS && (
-              <Field label={t('transcribe.gpu')} hint={t('transcribe.gpuHint')}>
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={config.gpu} onChange={e => update({ gpu: e.target.checked })} className="w-4 h-4 accent-accent" />
-                  {t('transcribe.gpuLabel')}
-                </label>
-              </Field>
-            )}
+            {(IS_WINDOWS || location) && (
+              <SettingsFold title={t('settings.advanced')}>
+                <div className="space-y-6">
+                  {IS_WINDOWS && (
+                    <Field label={t('transcribe.gpu')} hint={t('transcribe.gpuHint')}>
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input type="checkbox" checked={config.gpu} onChange={e => update({ gpu: e.target.checked })} className="w-4 h-4 accent-accent" />
+                        {t('transcribe.gpuLabel')}
+                      </label>
+                    </Field>
+                  )}
 
-            {showGpus && (
-              <Field label={t('transcribe.gpuWhich')}>
-                {/* A saved card that is not there now runs as automatic (gpus.rs), so it shows as that. */}
-                <select
-                  value={gpus.some(g => g.name === config.gpuName) ? config.gpuName : ''}
-                  onChange={e => update({ gpuName: e.target.value })}
-                  className={inputCls}
-                >
-                  <option value="">{t('transcribe.gpuAuto')}</option>
-                  {gpus.map((g, i) => (
-                    <option key={i} value={g.name}>
-                      {g.name}{t(g.discrete ? 'transcribe.gpuDiscrete' : 'transcribe.gpuIntegrated')}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
+                  {showGpus && (
+                    <Field label={t('transcribe.gpuWhich')}>
+                      {/* A saved card that is not there now runs as automatic (gpus.rs), so it shows as that. */}
+                      <select
+                        value={gpus.some(g => g.name === config.gpuName) ? config.gpuName : ''}
+                        onChange={e => update({ gpuName: e.target.value })}
+                        className={inputCls}
+                      >
+                        <option value="">{t('transcribe.gpuAuto')}</option>
+                        {gpus.map((g, i) => (
+                          <option key={i} value={g.name}>
+                            {g.name}{t(g.discrete ? 'transcribe.gpuDiscrete' : 'transcribe.gpuIntegrated')}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  )}
 
-            {location && (
-              <Field
-                label={t('transcribe.location')}
-                right={location.model && (
-                  <Btn type="button" size="sm" flat onClick={() => revealInFolder(location.model!).catch(err => console.error(err))}>
-                    <FolderOpen size={14} /> {t('transcribe.reveal')}
-                  </Btn>
-                )}
-                hint={location.model ? undefined : t('transcribe.notDownloaded')}
-              >
-                <p className="text-xs font-mono text-mute break-all">{location.model ?? location.dir}</p>
-              </Field>
+                  {location && (
+                    <Field
+                      label={t('transcribe.location')}
+                      right={location.model && (
+                        <Btn type="button" size="sm" flat onClick={() => revealInFolder(location.model!).catch(err => console.error(err))}>
+                          <FolderOpen size={14} /> {t('transcribe.reveal')}
+                        </Btn>
+                      )}
+                      hint={location.model ? undefined : t('transcribe.notDownloaded')}
+                    >
+                      <p className="text-xs font-mono text-mute break-all">{location.model ?? location.dir}</p>
+                    </Field>
+                  )}
+                </div>
+              </SettingsFold>
             )}
           </>
         )}
