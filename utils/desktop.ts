@@ -281,13 +281,14 @@ export type WebDavTestResult = { ok: boolean; remoteRoot: string; existingDevice
 export type RemoteEntry = { name: string; etag?: string | null; size?: number | null };
 export type MergePackContents = { snapshotJson: string; subs: [string, string][]; clipNames: string[] };
 export type RekeyFilesResult = { moved: number; mediaPaths: [string, string][] };
+export type UploadedSyncAudio = { file: string; sha256: string; bytes: number; durSec: number };
 
 export const syncWebdavSupported = (): boolean => true;
 export const syncWebdavTest = (config: WebDavConfig): Promise<WebDavTestResult> =>
   invoke<WebDavTestResult>('sync_webdav_test', { config });
 export const syncWebdavList = (
   config: WebDavConfig,
-  subpath: 'devices' | 'subs' | 'caches' | 'clip-packs',
+  subpath: 'devices' | 'subs' | 'caches' | 'clip-packs' | 'audio',
 ): Promise<RemoteEntry[]> => invoke<RemoteEntry[]>('sync_webdav_list', { config, subpath });
 export const syncWebdavGetGz = (config: WebDavConfig, relPath: string): Promise<string> =>
   invoke<string>('sync_webdav_get_gz', { config, relPath });
@@ -295,6 +296,18 @@ export const syncWebdavPutGz = (config: WebDavConfig, relPath: string, content: 
   invoke<string | null>('sync_webdav_put_gz', { config, relPath, content });
 export const syncWebdavDelete = (config: WebDavConfig, relPath: string): Promise<void> =>
   invoke<void>('sync_webdav_delete', { config, relPath });
+export const syncUploadAudio = (
+  config: WebDavConfig,
+  srcPath: string,
+  relPath: string,
+  maxBytes?: number,
+): Promise<UploadedSyncAudio> => invoke<UploadedSyncAudio>('sync_upload_audio', { config, srcPath, relPath, maxBytes });
+export const syncDownloadAudio = (
+  config: WebDavConfig,
+  relPath: string,
+  videoId: string,
+  expectedSha256: string,
+): Promise<string> => invoke<string>('sync_download_audio', { config, relPath, videoId, expectedSha256 });
 export const syncUploadClipPack = (
   config: WebDavConfig,
   relPath: string,

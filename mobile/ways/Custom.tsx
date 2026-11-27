@@ -38,7 +38,6 @@ import {
   nextHintIndex,
   padSecOf,
   sortedLines,
-  wordCountOf,
 } from './drillCommon';
 import type { WayProps } from './types';
 import { useCachedTrans } from './useCachedTrans';
@@ -321,7 +320,6 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
     : '';
   const isSaved = !!line && savedIds.has(line.id);
   const canHint = !!line && !revealed && !result?.correct && nextHintIndex(line.text, typed, hinted, lenient, lang) >= 0;
-  const needsNext = revealed || (result !== null && !result.correct);
   const answered = revealed || result !== null;
 
   return (
@@ -331,16 +329,19 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
     >
       <PlayerAudio player={player} />
 
-      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto px-4 pt-2 pb-4 flex flex-col gap-2.5">
+      <div className="shrink-0 px-4 pt-2 pb-1">
         <CustomControls
           cfg={cfg}
           hasAi={hasAi}
+          pickedCount={practise.length}
           prepState={prepState}
           progress={progress}
           onUpdate={updateCfg}
           onRetry={() => setTries(n => n + 1)}
         />
+      </div>
 
+      <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto px-4 pt-1 pb-4 flex flex-col gap-2">
         {audioErr && <p role="alert" className="text-xs text-accent px-1">{audioErr}</p>}
 
         {setDone ? (
@@ -357,79 +358,70 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
         ) : practise.length === 0 ? (
           <p className="py-6 text-center text-sm text-mute">{t('m.customEmpty')}</p>
         ) : (
-          <>
-            <p className="text-xs text-mute px-1">{t('m.customCount', { n: practise.length })}</p>
-            <div className="flex flex-col gap-2" data-testid="custom-list">
-              {practise.map((lineIdx, rowPos) => {
-                const sub = lines[lineIdx];
-                if (!sub) return null;
-                const active = rowPos === safePos;
-                const completed = doneLines.has(lineIdx);
-                const lv = labels?.[lineIdx];
+          <div className="flex flex-col gap-2" data-testid="custom-list">
+            {practise.map((lineIdx, rowPos) => {
+              const sub = lines[lineIdx];
+              if (!sub) return null;
+              const active = rowPos === safePos;
+              const completed = doneLines.has(lineIdx);
+              const lv = labels?.[lineIdx];
 
-                if (!active) {
-                  return (
-                    <CustomInactiveRow
-                      key={sub.id}
-                      lineIdx={lineIdx}
-                      rowPos={rowPos}
-                      text={sub.text}
-                      completed={completed}
-                      level={lv}
-                      onSelect={() => selectRow(rowPos, lineIdx)}
-                    />
-                  );
-                }
-
+              if (!active) {
                 return (
-                  <div
+                  <CustomInactiveRow
                     key={sub.id}
-                    data-custom-row={lineIdx}
-                    data-active="true"
-                    className="rounded-2xl bg-page border-2 border-accent/40 shadow-card px-4 py-4 flex flex-col gap-3"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => player.playLine(lineIdx, pad)}
-                      className="w-full flex items-center justify-between gap-2 text-left"
-                    >
-                      <span className="text-xs font-medium text-accent">
-                        ▶ {t('m.customLineHidden', { n: lineIdx + 1, words: wordCountOf(sub.text) })}
-                      </span>
-                      {lv && lv !== 'x' && (
-                        <span className="px-2 py-0.5 rounded-full bg-accent-soft text-[11px] text-accent font-medium">
-                          {lv}
-                        </span>
-                      )}
-                    </button>
-
-                    <GradedLine
-                      tokens={tokens}
-                      hinted={hinted}
-                      result={result}
-                      revealed={revealed}
-                      onWord={handleWordTap}
-                      compact
-                    />
-
-                    <DictStatusBar
-                      result={result}
-                      revealed={revealed}
-                      everRevealed={everRevealed}
-                      usedHint={hinted.size > 0}
-                      wrongTries={wrongTries}
-                      alreadyStuck={stuckLines.has(sub.id)}
-                      trans={trans?.[lineIdx] ?? null}
-                      isSaved={isSaved}
-                      onBreakdown={() => { player.pause(); setShowBreakdown(true); }}
-                      onToggleSave={() => toggleSave(sub)}
-                      compact
-                    />
-                  </div>
+                    lineIdx={lineIdx}
+                    rowPos={rowPos}
+                    text={sub.text}
+                    completed={completed}
+                    level={lv}
+                    onSelect={() => selectRow(rowPos, lineIdx)}
+                  />
                 );
-              })}
-            </div>
-          </>
+              }
+
+              const hasLevel = !!lv && lv !== 'x';
+              return (
+                <div
+                  key={sub.id}
+                  data-custom-row={lineIdx}
+                  data-active="true"
+                  className={`relative rounded-2xl bg-page border-2 border-accent/40 shadow-card px-4 ${
+                    hasLevel ? 'pt-5 pb-3.5' : 'py-3.5'
+                  } flex flex-col gap-2.5`}
+                >
+                  {hasLevel && (
+                    <span className="absolute top-2 right-3 px-1.5 py-0.5 rounded-full bg-accent-soft text-[10px] text-accent font-medium pointer-events-none">
+                      {lv}
+                    </span>
+                  )}
+
+                  <GradedLine
+                    tokens={tokens}
+                    hinted={hinted}
+                    result={result}
+                    revealed={revealed}
+                    onWord={handleWordTap}
+                    compact
+                  />
+
+                  <DictStatusBar
+                    result={result}
+                    revealed={revealed}
+                    everRevealed={everRevealed}
+                    usedHint={hinted.size > 0}
+                    wrongTries={wrongTries}
+                    alreadyStuck={stuckLines.has(sub.id)}
+                    trans={trans?.[lineIdx] ?? null}
+                    isSaved={isSaved}
+                    onBreakdown={() => { player.pause(); setShowBreakdown(true); }}
+                    onToggleSave={() => toggleSave(sub)}
+                    compact
+                  />
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -447,10 +439,8 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
           revealDisabled={revealed || !!result?.correct}
           onPrev={() => { clearAuto(); if (safePos > 0) setPos(safePos - 1); }}
           prevDisabled={safePos <= 0}
-          onSkip={advance}
-          skipDisabled={answered}
           onNext={advance}
-          nextHighlight={needsNext}
+          nextHighlight={answered}
           submitDisabled={!!result?.correct}
           keyboardOpen={kbInset > 0}
           inputRef={inputRef}

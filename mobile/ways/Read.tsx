@@ -1,7 +1,9 @@
 // Phone "Read first" (先读字幕) practice way (docs/reader.md, docs/android-roadmap.md M2.3).
-// Study.tsx owns the top header & way switcher; ReadWay renders only the sticky mini player bar,
-// collapsible Keywords & Episode Phrases cards, the full subtitle list with non-blocking AI
-// translations, tap-word & long-press phrase lookup, and the "Break it down" sheet.
+// Immersive (docs/android.md「沉浸阅读」): Study's top bar floats over this page and slides away
+// when the user scrolls down (back on scroll up / near the top / while the panel is open); playback
+// lives in a floating bottom-right pill (ReaderDock). Renders the collapsible Keywords & Episode
+// Phrases cards, the full subtitle list with non-blocking AI translations, tap-word & long-press
+// phrase lookup, and the "Break it down" sheet (only offered when AI is set up).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Subtitle, VideoRecord } from '../../types';
 import { useSavedLines } from '../../hooks/useSavedLines';
@@ -19,7 +21,7 @@ import { errText } from '../ui';
 import { useWordLookup, type Def } from '../useWordLookup';
 import { WordSheet } from '../WordSheet';
 import { KeywordsCard } from '../reader/KeywordsCard';
-import { MiniPlayerBar } from '../reader/MiniPlayerBar';
+import { ReaderDock } from '../reader/ReaderDock';
 import { PhrasesCard, useReaderPhrases } from '../reader/PhrasesCard';
 import { ReadLine } from '../reader/ReadLine';
 import { ReaderAudio, useReaderPlayer } from '../reader/useReaderPlayer';
@@ -55,7 +57,7 @@ function resolveInitialIndex(record: VideoRecord, lines: Subtitle[], startSec: n
   return 0;
 }
 
-export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, noAudio = false }) => {
+export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, noAudio = false, chrome }) => {
   const t = useT();
   const uiLang = useLang();
   const transTo: TransTo = uiLang === 'en' ? 'en' : 'zh';
@@ -260,10 +262,34 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, n
     player.playLine(idx, 'single');
   }, [indexOf, player]);
 
+  const playTapped = useCallback((idx: number) => {
+    userScrollingRef.current = false;
+    player.playLine(idx);
+  }, [player]);
+
   const openBreakdown = useCallback((line: Subtitle) => {
     player.pause();
     setBreakdownLine(line);
   }, [player]);
+
+  // Top bar: slide away on a deliberate scroll down, back on scroll up or near the top. Only the
+  // user's own scrolling counts (auto-follow during playback never toggles it).
+  const lastTopRef = useRef(0);
+  const travelRef = useRef(0);
+  const setBarHidden = chrome?.setHidden;
+  const onScroll = () => {
+    const el = scrollerRef.current;
+    if (!el || !setBarHidden) return;
+    // Clamp: iOS rubber-band past either end must not read as a scroll up / down.
+    const top = Math.min(Math.max(el.scrollTop, 0), Math.max(0, el.scrollHeight - el.clientHeight));
+    const d = top - lastTopRef.current;
+    lastTopRef.current = top;
+    if (top <= (chrome?.top ?? 0)) { travelRef.current = 0; setBarHidden(false); return; }
+    if (!userScrollingRef.current) return;
+    travelRef.current = Math.sign(d) === Math.sign(travelRef.current) ? travelRef.current + d : d;
+    if (travelRef.current > 24) setBarHidden(true);
+    else if (travelRef.current < -24) setBarHidden(false);
+  };
 
   const onUserScroll = () => {
     userScrollingRef.current = true;
@@ -288,60 +314,43 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, n
   const hasAnyTrans = hasAi || !!trans?.some(Boolean);
   const kanaActive = kana && jaState.ready;
 
+  const kanaPrompt = ja && kanaNeedDict && !jaState.ready ? (
+    <div
+      role="status"
+      data-testid="read-kana-need-dict"
+      className="px-3.5 py-2.5 rounded-xl bg-page shadow-card flex items-center gap-2 shrink-0"
+    >
+      <span className="flex-1 text-[13px] text-ink leading-snug">{t('m.w4KanaNeedDict')}</span>
+      <button
+        type="button"
+        disabled={jaState.running}
+        onClick={() => { void downloadJa(); }}
+        className="min-h-[44px] px-3 rounded-lg bg-accent text-white text-xs font-medium shrink-0 disabled:opacity-60"
+      >
+        {jaState.running ? t('ja.downloading', { pct: jaState.pct }) : t('m.w4KanaDownloadNow')}
+      </button>
+      <button
+        type="button"
+        aria-label={t('m.close')}
+        onClick={() => setKanaNeedDict(false)}
+        className="w-11 h-11 -mr-1.5 shrink-0 flex items-center justify-center text-mute text-lg"
+      >
+        ×
+      </button>
+    </div>
+  ) : null;
+
   return (
-    <div className="flex-1 min-h-0 flex flex-col bg-paper">
+    <div className="relative flex-1 min-h-0 flex flex-col bg-paper">
       <ReaderAudio player={player} />
-
-      <MiniPlayerBar
-        lineNum={player.current + 1}
-        total={lines.length}
-        playing={player.playing}
-        disabled={!player.ready || !!audioErr}
-        noAudio={noAudio}
-        mode={player.mode}
-        rate={player.rate}
-        ja={ja}
-        kana={kanaActive}
-        showTrans={showTrans}
-        hasTrans={hasAnyTrans}
-        onToggle={player.toggle}
-        onModeChange={player.setMode}
-        onRateChange={player.setRate}
-        onKanaToggle={toggleKana}
-        onTransToggle={() => setShowTrans(v => !v)}
-      />
-
-      {ja && kanaNeedDict && !jaState.ready && (
-        <div
-          role="status"
-          data-testid="read-kana-need-dict"
-          className="mx-4 mt-2 px-3.5 py-2.5 rounded-xl bg-page shadow-card flex items-center gap-2 shrink-0"
-        >
-          <span className="flex-1 text-[13px] text-ink leading-snug">{t('m.w4KanaNeedDict')}</span>
-          <button
-            type="button"
-            disabled={jaState.running}
-            onClick={() => { void downloadJa(); }}
-            className="min-h-[44px] px-3 rounded-lg bg-accent text-white text-xs font-medium shrink-0 disabled:opacity-60"
-          >
-            {jaState.running ? t('ja.downloading', { pct: jaState.pct }) : t('m.w4KanaDownloadNow')}
-          </button>
-          <button
-            type="button"
-            aria-label={t('m.close')}
-            onClick={() => setKanaNeedDict(false)}
-            className="w-11 h-11 -mr-1.5 shrink-0 flex items-center justify-center text-mute text-lg"
-          >
-            ×
-          </button>
-        </div>
-      )}
 
       <div
         ref={scrollerRef}
         onTouchMove={onUserScroll}
         onWheel={onUserScroll}
-        className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 pb-[max(28px,env(safe-area-inset-bottom))] space-y-3"
+        onScroll={onScroll}
+        style={chrome ? { paddingTop: chrome.top + 4 } : undefined}
+        className="flex-1 min-h-0 overflow-y-auto px-2 pt-2 pb-[calc(88px+env(safe-area-inset-bottom))] space-y-2"
       >
         {audioErr && (
           <p role="alert" className="px-3.5 py-2.5 rounded-xl bg-accent-soft text-xs text-accent">
@@ -375,7 +384,7 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, n
           </div>
         )}
 
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-0.5">
           {lines.map((line, i) => (
             <ReadLine
               key={line.id}
@@ -392,16 +401,35 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, n
               transText={trans?.[i] ?? null}
               transFailed={!transBusy && transFailed && hasAi}
               marks={phrases.marks.get(line.id)}
-              onPlay={idx => player.playLine(idx)}
+              onPlay={playTapped}
               onWord={onWord}
               onPhrase={onPhrase}
               onSave={toggleSave}
-              onBreakdown={openBreakdown}
+              onBreakdown={hasAi ? openBreakdown : undefined}
               onRetryTrans={hasAi ? () => runTrans(true) : undefined}
             />
           ))}
         </div>
       </div>
+
+      <ReaderDock
+        playing={player.playing}
+        disabled={!player.ready || !!audioErr}
+        noAudio={noAudio}
+        mode={player.mode}
+        rate={player.rate}
+        ja={ja}
+        kana={kanaActive}
+        showTrans={showTrans}
+        hasTrans={hasAnyTrans}
+        onToggle={player.toggle}
+        onModeChange={player.setMode}
+        onRateChange={player.setRate}
+        onKanaToggle={toggleKana}
+        onTransToggle={() => setShowTrans(v => !v)}
+        onPanel={open => { if (open) setBarHidden?.(false); }}
+        extra={kanaPrompt}
+      />
 
       {def && (
         <WordSheet

@@ -1,5 +1,5 @@
 // The phone's practice ways on one study page (docs/android-roadmap.md「第 2 期施工约定」).
-// Study.tsx owns the header (back, title, "line n / N") and the way switch; a way renders only
+// Study.tsx owns the one-row top bar (back, way switch, "line n / N"); a way renders only
 // its own body + bottom controls and never its own back button or title.
 import type { VideoRecord } from '../../types';
 
@@ -21,4 +21,13 @@ export interface WayProps {
   onExit: () => void;
   /** Go to the review tab (e.g. a section summary's "review now"). */
   onReview?: () => void;
+  /**
+   * Immersive ways only (Study passes it to IMMERSIVE_WAYS): the shared top bar floats over the
+   * way instead of taking a row. `top` = its current height in px (leave that much room above
+   * the first item); call `setHidden` to slide it away / back (e.g. on scroll down / up).
+   */
+  chrome?: { top: number; hidden: boolean; setHidden: (hidden: boolean) => void };
 }
+
+/** Ways whose top bar slides away while reading (docs/android.md「沉浸阅读」). */
+export const IMMERSIVE_WAYS: PhoneWay[] = ['read'];

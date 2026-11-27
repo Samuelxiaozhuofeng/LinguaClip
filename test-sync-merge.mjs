@@ -165,6 +165,8 @@ const reviewLocal = (card, meta, revId, grade, at) => {
     rootDir: '我的同步/日语学习',
     syncClips: true,
     wifiOnlyClips: true,
+    autoSyncAudio: false,
+    wifiOnlyAudio: true,
   };
   S.saveSyncConfig(cfg, storage);
   assert.deepEqual(S.getSyncConfig(storage), cfg);
@@ -186,6 +188,7 @@ const reviewLocal = (card, meta, revId, grade, at) => {
     rootDir: cfg.rootDir,
     syncClips: cfg.syncClips,
     wifiOnlyClips: cfg.wifiOnlyClips,
+    wifiOnlyAudio: cfg.wifiOnlyAudio,
   });
 
   // LAN / Tailscale / loopback HTTP allowed; public HTTP rejected
@@ -981,4 +984,258 @@ const reviewLocal = (card, meta, revId, grade, at) => {
   assert.equal(merged.card.mastered, unmAt + 1, 'mastered restored past unmasteredAt survives sync merge');
 }
 
-console.log('test-sync-merge: all passed (including 100-round 3-device convergence + GC anti-zombie)');
+// =========================================================================
+// 14. Compressed audio relay (L2b): offers, deterministic winner, stale cleanup,
+//     deliveredAudioIds, and PairConfig backward compatibility
+// =========================================================================
+{
+  const T = 1_750_000_000_000;
+  const makeOffer = (file, createdAt, bytes = 2_000_000, offerId) => ({
+    file, sha256: S.sha256Hex(file), bytes, durSec: 180, createdAt, ...(offerId ? { offerId } : {}),
+  });
+
+  // 14a. Desktop audioOffers merged to Android -> availableAudioOffers filtering & deterministic tie-break
+  const vNormal = makeVideo('v-normal', { bornAt: T - DAY });
+  const vPodcast = makeVideo('v-podcast', {
+    bornAt: T - DAY,
+    podcast: { show: 'S', feed: 'https://f.example/rss', guid: 'g1', name: 'ep1', audio: 'https://cdn.example/ep1.mp3' },
+  });
+  const vStarter = makeVideo('v-starter', { bornAt: T - DAY, videoPath: 'https://linguaclipapp.com/starter/1.mp3' });
+  const vLocalHave = makeVideo('v-local-have', { bornAt: T - DAY });
+  const vLostDisk = makeVideo('v-has-path', { bornAt: T - DAY, videoPath: '/data/user/0/app/media/v-has-path.m4a' });
+  const vDeskPath = makeVideo('v-desk-path', { bornAt: T - DAY, videoPath: '/Users/a/Movies/v-desk-path.mp4' });
+  const vMultiNewer = makeVideo('v-multi-newer', { bornAt: T - DAY });
+  const vMultiTie = makeVideo('v-multi-tie', { bornAt: T - DAY });
+
+  const deskA = makeSnap('dev-desk-a', 'mac', '/Users/a/LinguaClip', {
+    exportedAt: T, lastMergedAt: T,
+    videos: [vNormal, vPodcast, vStarter, vLocalHave, vLostDisk, vDeskPath, vMultiNewer, vMultiTie],
+    audioOffers: {
+      'v-podcast': makeOffer('dev-desk-a__v-podcast__111111111111.m4a', T - 100, 2_000_000, '111111111111'),
+      'v-starter': makeOffer('dev-desk-a__v-starter__222222222222.m4a', T - 100, 2_000_000, '222222222222'),
+      'v-local-have': makeOffer('dev-desk-a__v-local-have__333333333333.m4a', T - 100, 2_000_000, '333333333333'),
+      'v-has-path': makeOffer('dev-desk-a__v-has-path__444444444444.m4a', T - 100, 2_000_000, '444444444444'),
+      'v-desk-path': makeOffer('dev-desk-a__v-desk-path__555555555555.m4a', T - 100, 2_000_000, '555555555555'),
+      'v-multi-newer': makeOffer('dev-desk-a__v-multi-newer__666666666666.m4a', T - 500, 2_000_000, '666666666666'),
+      'v-multi-tie': makeOffer('dev-desk-a__v-multi-tie__777777777777.m4a', T - 200, 2_000_000, '777777777777'),
+    },
+  });
+  const deskB = makeSnap('dev-desk-b', 'windows', 'C:\\Users\\b\\LinguaClip', {
+    exportedAt: T, lastMergedAt: T,
+    videos: [vNormal, vMultiNewer, vMultiTie],
+    audioOffers: {
+      'v-normal': makeOffer('dev-desk-b__v-normal__888888888888.m4a', T - 300, 2_000_000, '888888888888'),
+      'v-multi-newer': makeOffer('dev-desk-b__v-multi-newer__999999999999.m4a', T - 100, 2_000_000, '999999999999'),
+      'v-multi-tie': makeOffer('dev-desk-b__v-multi-tie__aaaaaaaaaaaa.m4a', T - 200, 2_000_000, 'aaaaaaaaaaaa'),
+    },
+  });
+  const androidLocal = makeSnap('dev-and-1', 'android', '/data/user/0/app', {
+    exportedAt: T - 1000, lastMergedAt: T - 1000,
+    videos: [vStarter, vLocalHave, vLostDisk, vDeskPath],
+  });
+
+  const andMerge = S.mergeSnapshots(androidLocal, [deskB, deskA], {
+    localPlatform: 'android', localOwnDir: '/data/user/0/app', now: T, initialized: true, lastSyncAt: T - 1000,
+    localAudioHave: ['v-local-have'],
+  });
+  assert.deepEqual(
+    andMerge.availableAudioOffers.map(o => [o.videoId, o.fromDevId, o.file]),
+    [
+      ['v-desk-path', 'dev-desk-a', 'dev-desk-a__v-desk-path__555555555555.m4a'],
+      ['v-has-path', 'dev-desk-a', 'dev-desk-a__v-has-path__444444444444.m4a'],
+      ['v-multi-newer', 'dev-desk-b', 'dev-desk-b__v-multi-newer__999999999999.m4a'],
+      ['v-multi-tie', 'dev-desk-a', 'dev-desk-a__v-multi-tie__777777777777.m4a'],
+      ['v-normal', 'dev-desk-b', 'dev-desk-b__v-normal__888888888888.m4a'],
+    ],
+    'Android availableAudioOffers skips podcast/http/localHave, STILL includes stale desktop path & missing disk file, and picks deterministic winner',
+  );
+  assert.deepEqual(
+    andMerge.localAudioAck,
+    { 'v-local-have': '333333333333' },
+    'Android already having playable local audio acks peer offerId directly without re-downloading',
+  );
+
+  // Desktop never populates availableAudioOffers
+  const deskMerge = S.mergeSnapshots(deskA, [deskB], {
+    localPlatform: 'mac', localOwnDir: '/Users/a/LinguaClip', now: T, initialized: true, lastSyncAt: T - 1000,
+  });
+  assert.deepEqual(deskMerge.availableAudioOffers, [], 'desktop never populates availableAudioOffers');
+
+  // 14b. Desktop staleAudioVideoIds & deliveredAudioIds
+  const vDelivered = makeVideo('v-delivered', { bornAt: T - 10 * DAY });
+  const vPartial = makeVideo('v-partial', { bornAt: T - 10 * DAY });
+  const vWaiting = makeVideo('v-waiting', { bornAt: T - 10 * DAY });
+  const vExpired = makeVideo('v-expired', { bornAt: T - 40 * DAY });
+  const vTomb = makeVideo('v-tomb', { bornAt: T - 10 * DAY });
+
+  const deskSender = makeSnap('dev-desk-send', 'mac', '/Users/s/LinguaClip', {
+    exportedAt: T - HOUR, lastMergedAt: T - HOUR,
+    videos: [vDelivered, vPartial, vWaiting, vExpired, vTomb],
+    audioOffers: {
+      'v-delivered': makeOffer('dev-desk-send__v-delivered__d11111111111.m4a', T - 8 * DAY, 2_000_000, 'd11111111111'),
+      'v-partial': makeOffer('dev-desk-send__v-partial__p11111111111.m4a', T - 8 * DAY, 2_000_000, 'p11111111111'),
+      'v-waiting': makeOffer('dev-desk-send__v-waiting__w11111111111.m4a', T - 8 * DAY, 2_000_000, 'w11111111111'),
+      'v-expired': makeOffer('dev-desk-send__v-expired__e11111111111.m4a', T - 31 * DAY, 2_000_000, 'e11111111111'),
+      'v-tomb': makeOffer('dev-desk-send__v-tomb__t11111111111.m4a', T - 8 * DAY, 2_000_000, 't11111111111'),
+    },
+  });
+  const andActive1 = makeSnap('dev-and-1', 'android', '/data/user/0/app', {
+    exportedAt: T - 2 * DAY, lastMergedAt: T - 2 * DAY,
+    videos: [vDelivered, vPartial, vWaiting, vExpired],
+    tombstones: { videos: { 'v-tomb': { at: T - HOUR } }, cards: {} },
+    audioHave: ['v-delivered', 'v-partial', 'v-tomb'],
+    audioAck: { 'v-delivered': 'd11111111111', 'v-partial': 'p11111111111', 'v-tomb': 't11111111111' },
+  });
+  const andActive2 = makeSnap('dev-and-2', 'android', '/data/user/0/app', {
+    exportedAt: T - 5 * DAY, lastMergedAt: T - 5 * DAY,
+    videos: [vDelivered, vPartial, vWaiting, vExpired],
+    audioHave: ['v-delivered'],
+    audioAck: { 'v-delivered': 'd11111111111' },
+  });
+  const andInactiveOld = makeSnap('dev-and-old', 'android', '/data/user/0/app', {
+    exportedAt: T - 35 * DAY, lastMergedAt: T - 35 * DAY,
+    videos: [vDelivered],
+    audioHave: [], // inactive > 30d: must NOT block cleanup
+  });
+
+  // Single active Android peer: v-delivered + v-partial + v-tomb + v-expired all stale
+  const singleRes = S.mergeSnapshots(deskSender, [andActive1], {
+    localPlatform: 'mac', localOwnDir: '/Users/s/LinguaClip', now: T, initialized: true, lastSyncAt: T - HOUR,
+  });
+  assert.deepEqual(singleRes.staleAudioVideoIds, ['v-delivered', 'v-expired', 'v-partial', 'v-tomb']);
+  assert.deepEqual(singleRes.deliveredAudioIds, ['v-delivered', 'v-partial'], 'deliveredAudioIds excludes tombstoned v-tomb');
+
+  // Multiple Android peers (2 active + 1 inactive >30d): v-delivered stale, v-partial waits for active2, old inactive ignored
+  const multiRes = S.mergeSnapshots(deskSender, [andActive1, andActive2, andInactiveOld], {
+    localPlatform: 'mac', localOwnDir: '/Users/s/LinguaClip', now: T, initialized: true, lastSyncAt: T - HOUR,
+  });
+  assert.deepEqual(
+    multiRes.staleAudioVideoIds,
+    ['v-delivered', 'v-expired', 'v-tomb'],
+    'requires all active <=30d Androids to ack; >30d inactive Android does not block; tombstone & >30d TTL cleaned',
+  );
+  assert.deepEqual(multiRes.deliveredAudioIds, ['v-delivered'], 'undelivered local offer v-partial excluded from deliveredAudioIds');
+
+  // 14c. offerId re-send anti-premature-delete + peersIncomplete guard + malformed audio fields resilience
+  const deskResend = makeSnap('dev-desk-resend', 'mac', '/Users/s/LinguaClip', {
+    exportedAt: T - 50, lastMergedAt: T - 50,
+    videos: [vDelivered, vExpired, vTomb],
+    audioOffers: {
+      'v-delivered': makeOffer('dev-desk-resend__v-delivered__bbbbbbbbbbbb.m4a', T - 100, 2_000_000, 'bbbbbbbbbbbb'),
+      'v-expired': makeOffer('dev-desk-resend__v-expired__eeeeeeeeeeee.m4a', T - 31 * DAY, 2_000_000, 'eeeeeeeeeeee'),
+      'v-tomb': makeOffer('dev-desk-resend__v-tomb__tttttttttttt.m4a', T - 100, 2_000_000, 'tttttttttttt'),
+    },
+  });
+  const andOldAck = makeSnap('dev-and-ack', 'android', '/data/user/0/app', {
+    exportedAt: T - 10, lastMergedAt: T - 10, // newer than offer.createdAt, yet holds OLD offerId
+    videos: [vDelivered, vExpired],
+    tombstones: { videos: { 'v-tomb': { at: T - 20 } }, cards: {} },
+    audioHave: ['v-delivered'],
+    audioAck: { 'v-delivered': 'aaaaaaaaaaaa' },
+  });
+  const resOldAck = S.mergeSnapshots(deskResend, [andOldAck], {
+    localPlatform: 'mac', localOwnDir: '/Users/s/LinguaClip', now: T, initialized: true, lastSyncAt: T - 50,
+  });
+  assert.deepEqual(resOldAck.staleAudioVideoIds, ['v-expired', 'v-tomb'], 'old offerId ack MUST NOT prematurely delete re-sent offer');
+  assert.deepEqual(resOldAck.deliveredAudioIds, [], 're-sent pending offer MUST NOT simultaneously appear in deliveredAudioIds');
+
+  const andNewAck = { ...andOldAck, audioAck: { 'v-delivered': 'bbbbbbbbbbbb' } };
+  const resNewAck = S.mergeSnapshots(deskResend, [andNewAck], {
+    localPlatform: 'mac', localOwnDir: '/Users/s/LinguaClip', now: T, initialized: true, lastSyncAt: T - 50,
+  });
+  assert.deepEqual(resNewAck.staleAudioVideoIds, ['v-delivered', 'v-expired', 'v-tomb'], 'matching new offerId ack marks offer stale immediately');
+  assert.deepEqual(resNewAck.deliveredAudioIds, ['v-delivered']);
+
+  // Legacy Android peer without audioAck: exportedAt <= createdAt does NOT delete; exportedAt > createdAt DOES delete
+  const andLegacyOld = makeSnap('dev-and-leg', 'android', '/data/user/0/app', {
+    exportedAt: T - 200, lastMergedAt: T - 200,
+    videos: [vDelivered], audioHave: ['v-delivered'],
+  });
+  const resLegOld = S.mergeSnapshots(deskResend, [andLegacyOld], {
+    localPlatform: 'mac', localOwnDir: '/Users/s/LinguaClip', now: T, initialized: true, lastSyncAt: T - 50,
+  });
+  assert.equal(resLegOld.staleAudioVideoIds.includes('v-delivered'), false, 'legacy peer snapshot older than offer.createdAt must NOT delete');
+  const andLegacyFresh = { ...andLegacyOld, exportedAt: T - 50, lastMergedAt: T - 50 };
+  const resLegFresh = S.mergeSnapshots(deskResend, [andLegacyFresh], {
+    localPlatform: 'mac', localOwnDir: '/Users/s/LinguaClip', now: T, initialized: true, lastSyncAt: T - 50,
+  });
+  assert.equal(resLegFresh.staleAudioVideoIds.includes('v-delivered'), true, 'legacy peer snapshot newer than offer.createdAt still deletes');
+
+  // peersIncomplete: true suppresses delivery cleanup, keeps tombstone & >30d TTL cleanup
+  const resIncomplete = S.mergeSnapshots(deskResend, [andNewAck], {
+    localPlatform: 'mac', localOwnDir: '/Users/s/LinguaClip', now: T, initialized: true, lastSyncAt: T - 50,
+    peersIncomplete: true,
+  });
+  assert.deepEqual(resIncomplete.staleAudioVideoIds, ['v-expired', 'v-tomb'], 'peersIncomplete skips delivery deletion but keeps TTL & tombstone cleanup');
+
+  // Malformed audioHave / audioAck / audioOffers in peer snapshots safely ignored without throwing
+  const badPeer = makeSnap('dev-bad', 'android', '/data/user/0/app', {
+    exportedAt: T - 10, lastMergedAt: T - 10,
+    videos: [vNormal],
+    audioHave: 'not-an-array',
+    audioAck: ['not-an-object'],
+    audioOffers: {
+      badNull: null,
+      badShape: { file: 123, sha256: null, bytes: -5, durSec: 'x', createdAt: NaN },
+      'v-normal': makeOffer('dev-bad__v-normal__cccccccccccc.m4a', T - 10, 1024, 'cccccccccccc'),
+    },
+  });
+  const badPeer2 = makeSnap('dev-bad-2', 'mac', '/Users/x', {
+    exportedAt: T - 10, lastMergedAt: T - 10,
+    videos: [vNormal],
+    audioHave: [123, null, '', 'v-normal'],
+    audioAck: { 'v-normal': 42 },
+    audioOffers: 'not-an-object',
+  });
+  const resBad = S.mergeSnapshots(androidLocal, [badPeer, badPeer2], {
+    localPlatform: 'android', localOwnDir: '/data/user/0/app', now: T, initialized: true, lastSyncAt: T - 50,
+  });
+  assert.deepEqual(resBad.availableAudioOffers.map(o => o.videoId), ['v-normal'], 'malformed audio fields ignored while valid offer survives');
+
+  // 14c-4. Newer-format peer defers ack-based deletion & empty-sha256 offer is dropped
+  const newerAndroid = makeSnap('and-future', 'android', '/data/user/0/app', {
+    v: S.SYNC_FORMAT + 1, exportedAt: T - 10, lastMergedAt: T - 10, videos: [vDelivered],
+  });
+  const resNewer = S.mergeSnapshots(deskResend, [andNewAck, newerAndroid], {
+    localPlatform: 'mac', localOwnDir: '/Users/s/LinguaClip', now: T, initialized: true, lastSyncAt: T - 50,
+  });
+  assert.equal(resNewer.newerFormat, true);
+  assert.deepEqual(resNewer.staleAudioVideoIds, ['v-expired', 'v-tomb'], 'newer-format peer prevents ack-based premature deletion');
+
+  const emptyShaPeer = makeSnap('desk-empty-sha', 'mac', '/Users/u/Movies/LinguaClip', {
+    videos: [vNormal],
+    audioOffers: { 'v-normal': { file: 'desk__v-normal__aa11bb22cc33.m4a', sha256: '', bytes: 1000, durSec: 10, createdAt: T - 10, offerId: 'aa11bb22cc33' } },
+  });
+  const resEmptySha = S.mergeSnapshots(androidLocal, [emptyShaPeer], {
+    localPlatform: 'android', localOwnDir: '/data/user/0/app', now: T, initialized: true, lastSyncAt: T - 50,
+  });
+  assert.deepEqual(resEmptySha.availableAudioOffers, [], 'empty sha256 audio offer is rejected during merge');
+
+  // 14d. PairConfig backward compatibility (excludes autoSyncAudio; missing wifiOnlyAudio defaults to true)
+  const fullCfgWithAuto = {
+    enabled: true,
+    preset: 'jianguoyun',
+    url: S.JIANGUOYUN_URL,
+    username: 'u@example.com',
+    password: 'secret',
+    rootDir: 'LinguaClip',
+    syncClips: true,
+    wifiOnlyClips: false,
+    autoSyncAudio: true,
+    wifiOnlyAudio: false,
+  };
+  const encodedNoAuto = S.encodePairCode(fullCfgWithAuto);
+  const decodedNoAuto = S.decodePairCode(encodedNoAuto);
+  assert.equal(decodedNoAuto.wifiOnlyAudio, false);
+  assert.equal('autoSyncAudio' in decodedNoAuto, false, 'PairConfig never carries desktop-only autoSyncAudio');
+
+  // Legacy pairing code without `a` / `wifiOnlyAudio` field -> defaults wifiOnlyAudio to true
+  const legacyPayload = Buffer.from(JSON.stringify({
+    p: 'j', u: S.JIANGUOYUN_URL, n: 'u@example.com', w: 'secret', d: 'LinguaClip', c: 1, f: 0,
+  })).toString('base64url');
+  const legacyDecoded = S.decodePairCode(`${S.PAIR_PREFIX}${legacyPayload}`);
+  assert.ok(legacyDecoded, 'legacy pair code without wifiOnlyAudio still decodes');
+  assert.equal(legacyDecoded.wifiOnlyAudio, true, 'missing wifiOnlyAudio defaults to true');
+}
+
+console.log('test-sync-merge: all passed (including 100-round 3-device convergence + GC anti-zombie + L2b audio relay)');

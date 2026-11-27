@@ -318,28 +318,7 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
     >
       <PlayerAudio player={player} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 pb-4 flex flex-col gap-3">
-        {hasAi && (
-          <div className="flex items-center justify-between gap-2 px-1">
-            <span className="text-xs text-mute">{t('m.clozeFillHint')}</span>
-            <div className="inline-flex bg-page rounded-full p-0.5 shadow-card">
-              {(['easy', 'medium'] as const).map(lv => (
-                <button
-                  key={lv}
-                  type="button"
-                  aria-pressed={density === lv}
-                  onClick={() => changeDensity(lv)}
-                  className={`min-h-[36px] px-3 rounded-full text-xs font-medium ${
-                    density === lv ? 'bg-ink text-white' : 'text-mute'
-                  }`}
-                >
-                  {t(lv === 'easy' ? 'm.clozeLevelEasy' : 'm.clozeLevelMedium')}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-2 pb-4 flex flex-col gap-2.5">
         {!hasAi && (
           <div role="status" data-testid="cloze-no-key" className="bg-page rounded-2xl shadow-card px-4 py-4">
             <p className="text-[14px] leading-relaxed text-ink">{t('m.clozeNeedKey')}</p>
@@ -368,7 +347,20 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
         {audioErr && <p role="alert" className="text-xs text-accent px-1">{audioErr}</p>}
 
         {canFill && (
-          <div className="bg-page rounded-2xl shadow-card px-4 py-5 flex flex-col gap-4">
+          <div className="relative bg-page rounded-2xl shadow-card px-4 pt-7 pb-3.5 flex flex-col gap-3">
+            <button
+              type="button"
+              data-testid="cloze-density"
+              aria-label={t('studio.clozeLabel')}
+              onClick={() => changeDensity(density === 'easy' ? 'medium' : 'easy')}
+              className="absolute top-0.5 right-2.5 min-h-[40px] inline-flex items-center px-1 active:opacity-80"
+            >
+              <span className="h-[24px] px-2.5 rounded-full bg-shade text-mute text-[11px] font-medium inline-flex items-center gap-1 whitespace-nowrap">
+                <span>{t(density === 'easy' ? 'm.clozeLevelEasy' : 'm.clozeLevelMedium')}</span>
+                <span aria-hidden>⇄</span>
+              </span>
+            </button>
+
             <ClozeLine
               tokens={tokens}
               blanks={blanks}
@@ -405,36 +397,37 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
             />
 
             {allRight && (
-              <p role="status" data-testid="cloze-all-right" className="self-start px-3 py-1.5 rounded-full bg-shade text-ink text-[13px] font-medium">
+              <p role="status" data-testid="cloze-all-right" className="self-start px-3 py-1 rounded-full bg-shade text-ink text-[13px] font-medium">
                 {stuckLineRef.current ? t('m.fxRightAfterWrong') : t('m.dictAllRightAuto')}
               </p>
             )}
 
             {submitted && !allRight && line && (
-              <div className="pt-1 border-t border-shade flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => { player.pause(); setShowBreakdown(true); }}
-                  className="min-h-[44px] px-3.5 rounded-xl bg-shade text-ink text-[14px] font-medium"
-                >
-                  {t('studio.breakdown')}
-                </button>
+              <div className="pt-1 border-t border-shade flex items-center justify-end gap-1.5 -mb-1" data-testid="cloze-actions">
+                {hasAi && (
+                  <button
+                    type="button"
+                    onClick={() => { player.pause(); setShowBreakdown(true); }}
+                    className="min-h-[40px] inline-flex items-center active:opacity-80"
+                  >
+                    <span className="h-[34px] px-3 rounded-lg bg-shade text-ink text-[13px] font-medium inline-flex items-center whitespace-nowrap">
+                      {t('studio.breakdown')}
+                    </span>
+                  </button>
+                )}
                 <button
                   type="button"
                   aria-pressed={isSaved}
                   onClick={() => toggleSave(line)}
-                  className={`min-h-[44px] px-3.5 rounded-xl text-[14px] font-medium ${
-                    isSaved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
-                  }`}
+                  className="min-h-[40px] inline-flex items-center active:opacity-80"
                 >
-                  {isSaved ? t('m.saved') : t('m.dictSaveLine')}
-                </button>
-                <button
-                  type="button"
-                  onClick={advance}
-                  className="ml-auto min-h-[44px] px-4 rounded-xl bg-accent text-white text-[14px] font-semibold"
-                >
-                  {t('m.nextLine')}
+                  <span
+                    className={`h-[34px] px-3 rounded-lg text-[13px] font-medium inline-flex items-center whitespace-nowrap ${
+                      isSaved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
+                    }`}
+                  >
+                    {isSaved ? t('m.saved') : t('m.dictSaveLine')}
+                  </span>
                 </button>
               </div>
             )}

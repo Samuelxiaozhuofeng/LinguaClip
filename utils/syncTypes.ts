@@ -10,6 +10,23 @@ export const MAX_REVLOGS = 8;
 export const DAYS_DEV_KEEP = 35;
 export const TOMBSTONE_GC_AGE_MS = 90 * 86_400_000;
 export const ACTIVE_PEER_WINDOW_MS = 180 * 86_400_000;
+export const AUDIO_OFFER_TTL_MS = 30 * 86_400_000;
+export const AUDIO_ACTIVE_ANDROID_WINDOW_MS = 30 * 86_400_000;
+export const AUTO_AUDIO_MONTHLY_BUDGET_BYTES = 600 * 1024 * 1024;
+
+export interface SyncAudioOffer {
+  file: string;
+  sha256: string;
+  bytes: number;
+  durSec: number;
+  createdAt: number;
+  offerId?: string;
+}
+
+export type RemoteAudioOffer = SyncAudioOffer & {
+  videoId: string;
+  fromDevId: string;
+};
 
 export type SyncPlatform = 'mac' | 'windows' | 'android' | 'pwa';
 export type RevGrade = 1 | 2 | 3 | 4;
@@ -116,6 +133,9 @@ export interface DeviceSnapshot {
   idRedirects?: Record<string, string>;
   settings?: Record<string, SyncSettingEntry>;
   clipPacks?: Record<string, string[]>;
+  audioOffers?: Record<string, SyncAudioOffer>;
+  audioHave?: string[];
+  audioAck?: Record<string, string>;
 }
 
 export interface MergeOptions {
@@ -130,6 +150,10 @@ export interface MergeOptions {
   localSubHashes?: Iterable<string>;
   /** Optional set of clip filenames already stored locally. */
   localClipFiles?: Iterable<string>;
+  /** Optional set of video IDs that already have playable local audio on this device. */
+  localAudioHave?: Iterable<string>;
+  /** True when at least one remote peer snapshot could not be read/parsed this round. */
+  peersIncomplete?: boolean;
 }
 
 export interface NeededClip {
@@ -168,6 +192,10 @@ export interface MergeResult {
   neededClips: NeededClip[];
   neededSubs: string[];
   candidateRemappedPaths: Record<string, string>;
+  availableAudioOffers: RemoteAudioOffer[];
+  staleAudioVideoIds: string[];
+  deliveredAudioIds: string[];
+  localAudioAck: Record<string, string>;
   newerFormat: boolean;
   summary: MergeSummary;
   safetyAlert: SafetyAlert | null;

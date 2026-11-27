@@ -9,12 +9,12 @@ import type { Heard, Way } from '../pro/listenLevel';
 import { btnPlain, btnPrimary } from './ui';
 import { useBackClose } from './backClose';
 
-export const StepBar: React.FC<{ step: number; onStep: (n: number) => void; className?: string }> = ({ step, onStep, className = 'mx-5 mt-1' }) => {
+export const StepBar: React.FC<{ step: number; onStep: (n: number) => void; className?: string }> = ({ step, onStep, className = 'mx-4 mt-0.5' }) => {
   const t = useT();
   return (
     <div className={`${className} grid grid-cols-3 gap-1.5`}>
       {[1, 2, 3].map(n => (
-        <button key={n} onClick={() => onStep(n)} aria-current={n === step ? 'step' : undefined} className="min-h-[44px] flex flex-col justify-center gap-1.5 text-left">
+        <button key={n} type="button" onClick={() => onStep(n)} aria-current={n === step ? 'step' : undefined} className="min-h-[40px] flex flex-col justify-center gap-1 text-left">
           <span className={`h-1 rounded ${n <= step ? 'bg-accent' : 'bg-line'}`} />
           <span className={`text-xs ${n === step ? 'font-semibold' : 'text-mute'}`}>{n} {t(`listen.step_${n}` as DictKey)}</span>
         </button>
@@ -55,11 +55,11 @@ export const Blind: React.FC<{
 export const DrillBar: React.FC<{ n: number; total: number; play: number; tries: number; shown: boolean; onShow: () => void; onNext: () => void }> = ({ n, total, play, tries, shown, onShow, onNext }) => {
   const t = useT();
   return (
-    <div className="flex flex-col gap-2.5">
-      <p className="text-center text-[13px] text-mute tabular-nums">{t('listen.drillOf', { n, total })}{!shown && ` · ${t('listen.drillPlay', { n: play, total: tries })}`}</p>
-      <div className={`grid ${shown ? 'grid-cols-1' : 'grid-cols-[1fr_2fr]'} gap-2.5`}>
-        {!shown && <button className={btnPlain} onClick={onShow}>{t('m.showText')}</button>}
-        <button className={`${btnPrimary} h-16 text-[17px]`} onClick={onNext}>{t(shown ? 'm.drillNext' : 'm.drillGot')}</button>
+    <div className="flex flex-col gap-1.5">
+      <p className="text-center text-xs text-mute tabular-nums">{t('listen.drillOf', { n, total })}{!shown && ` · ${t('listen.drillPlay', { n: play, total: tries })}`}</p>
+      <div className={`grid ${shown ? 'grid-cols-1' : 'grid-cols-[1fr_2fr]'} gap-2`}>
+        {!shown && <button type="button" className={`${btnPlain} h-[50px] text-[14px]`} onClick={onShow}>{t('m.showText')}</button>}
+        <button type="button" className={`${btnPrimary} h-[50px] text-[15px]`} onClick={onNext}>{t(shown ? 'm.drillNext' : 'm.drillGot')}</button>
       </div>
     </div>
   );

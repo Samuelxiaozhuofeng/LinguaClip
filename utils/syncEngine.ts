@@ -16,6 +16,10 @@ import {
   filterDownloadableClips, isClipsUnpacking, mountExtractedClips, parsePeerSnapshot,
   pendingClipsList, remergeWithoutUnreadyRekeys, withClipsUnpacking, withRestoreLock,
 } from './syncApply';
+import {
+  clearAudioBudgetNotice, collectLocalAudioHave, hasPendingAudioWork, notifyAudioStateChanged,
+  registerAudioSyncHooks, resetAudioRuntimeState, syncAudioPhase,
+} from './syncAudio';
 import { sha256Hex } from './syncClock';
 import {
   createFreshSyncState, getSyncConfig, getSyncDeviceId, getSyncState, isSafeWebDavUrl,
@@ -88,10 +92,7 @@ function hydrateRuntime(): SyncRuntimeStatus {
   if (!runtimeHydrated) {
     runtimeHydrated = true;
     const st = getSyncState();
-    runtime = {
-      ...runtime, lastSyncAt: st.lastSyncAt, lastError: st.lastError, authFailed: st.authFailed,
-      newerFormat: st.newerFormat, dirty: st.dirty, backoffUntil: st.backoffUntil,
-    };
+    runtime = { ...runtime, lastSyncAt: st.lastSyncAt, lastError: st.lastError, authFailed: st.authFailed, newerFormat: st.newerFormat, dirty: st.dirty, backoffUntil: st.backoffUntil };
   }
   return runtime;
 }
@@ -99,15 +100,13 @@ function hydrateRuntime(): SyncRuntimeStatus {
 function refreshRuntime(patch: Partial<SyncRuntimeStatus> = {}): void {
   const st = getSyncState();
   runtimeHydrated = true;
-  runtime = {
-    ...runtime, lastSyncAt: st.lastSyncAt, lastError: st.lastError, authFailed: st.authFailed,
-    newerFormat: st.newerFormat, dirty: st.dirty, backoffUntil: st.backoffUntil, ...patch,
-  };
+  runtime = { ...runtime, lastSyncAt: st.lastSyncAt, lastError: st.lastError, authFailed: st.authFailed, newerFormat: st.newerFormat, dirty: st.dirty, backoffUntil: st.backoffUntil, ...patch };
   statusListeners.forEach(fn => { try { fn(); } catch { /* isolate */ } });
 }
 
-function notifySyncApplied(): void { appliedListeners.forEach(fn => { try { fn(); } catch { /* isolate */ } }); }
+export function notifySyncApplied(): void { appliedListeners.forEach(fn => { try { fn(); } catch { /* isolate */ } }); }
 registerOfflineAppliedHook(notifySyncApplied);
+registerAudioSyncHooks({ onApplied: notifySyncApplied });
 
 export const getSyncRuntimeStatus = (): SyncRuntimeStatus => hydrateRuntime();
 export const subscribeSyncStatus = (fn: () => void): (() => void) => { hydrateRuntime(); statusListeners.add(fn); return () => { statusListeners.delete(fn); }; };
@@ -129,11 +128,15 @@ export async function testAndEnableSync(cfg: WebDavConfig): Promise<WebDavTestRe
   const targetChanged = !!prevKey && prevKey !== nextKey;
 
   configEpoch++;
-  saveSyncConfig({ ...cfg, enabled: true });
+  const nextAutoSyncAudio = cfg.autoSyncAudio ?? prevCfg.autoSyncAudio ?? false;
+  saveSyncConfig({ ...cfg, enabled: true, autoSyncAudio: nextAutoSyncAudio, wifiOnlyAudio: cfg.wifiOnlyAudio ?? prevCfg.wifiOnlyAudio ?? true });
   saveSyncState(targetChanged
     ? { ...createFreshSyncState(nextKey), dirty: true, ...(prevState.settingAt ? { settingAt: prevState.settingAt } : {}) }
     : { ...prevState, targetKey: nextKey, authFailed: false, failCount: 0, backoffUntil: 0, lastError: null });
   peerCache.clear();
+  if (targetChanged || !prevState.initialized) resetAudioRuntimeState();
+  else if (!nextAutoSyncAudio) clearAudioBudgetNotice();
+  else notifyAudioStateChanged();
   refreshRuntime({ pendingAlert: null });
   return res;
 }
@@ -143,28 +146,30 @@ export function disableSync(): void {
   configEpoch++;
   saveSyncConfig({ ...getSyncConfig(), enabled: false });
   saveSyncState({ ...getSyncState(), authFailed: false, failCount: 0, backoffUntil: 0, lastError: null });
+  resetAudioRuntimeState();
   refreshRuntime({ syncing: false, phase: 'idle', pendingAlert: null, lastError: null });
 }
 
 async function pullPeers(cfg: WebDavConfig, targetKey: string, entries: RemoteEntry[], useCache: boolean) {
   const nextPeerEtags: Record<string, string> = {}, peers: DeviceSnapshot[] = [];
+  let skippedCount = 0;
   for (const entry of entries) {
-    const cacheKey = `${targetKey}|${entry.name}`;
-    const cached = peerCache.get(cacheKey);
+    const cacheKey = `${targetKey}|${entry.name}`, cached = peerCache.get(cacheKey);
     if (useCache && !!entry.etag && cached?.etag === entry.etag) {
       peers.push(cached.snap); nextPeerEtags[entry.name] = entry.etag; continue;
     }
     try {
       const snap = parsePeerSnapshot(await syncWebdavGetGz(cfg, `devices/${entry.name}`));
-      if (!snap) continue;
+      if (!snap) { skippedCount++; continue; }
       peers.push(snap);
       if (entry.etag) { nextPeerEtags[entry.name] = entry.etag; peerCache.set(cacheKey, { etag: entry.etag, snap }); }
     } catch (e) {
       if (isFatalSyncErr(e)) throw e;
+      skippedCount++;
       if (!errStr(e).startsWith('sync:corrupt:')) console.warn('sync: skipping peer', entry.name, errStr(e));
     }
   }
-  return { peers, nextPeerEtags };
+  return { peers, nextPeerEtags, skippedCount };
 }
 
 async function syncLightCaches(cfg: WebDavConfig, liveVideoIds: Set<string>, uploadedCaches: Set<string>): Promise<void> {
@@ -263,35 +268,46 @@ async function runWebDavSyncInner(opts: SyncRunOptions): Promise<SyncRunResult> 
 
   const devId = getSyncDeviceId(), ownFile = `${devId}.json.gz`;
   const startGen = getSyncDirtyGen(), startEpoch = configEpoch;
+  const abortDisabled = (): SyncRunResult => { refreshRuntime({ syncing: false, phase: 'idle' }); return { status: 'skipped', reason: 'disabled' }; };
   refreshRuntime({ syncing: true, phase: 'pulling', lastError: null });
 
   try {
     const entries = await syncWebdavList(cfg, 'devices');
+    if (configEpoch !== startEpoch) return abortDisabled();
     const remoteHasOwn = entries.some(e => e.name === ownFile);
     const peerEntries = entries.filter(e => e.name !== ownFile && e.name.endsWith('.json.gz'));
     const hasDownloadableClips = cfg.syncClips
       && (await syncClipNetworkOk(cfg.wifiOnlyClips).catch(() => false))
       && (await downloadablePendingClipsList().catch(() => [])).length > 0;
-    const unchanged = state.initialized && !state.dirty && !isManual && remoteHasOwn && !hasDownloadableClips &&
+    const hasAudioWork = await hasPendingAudioWork(opts.platform, cfg, state, nowFn());
+    const liveBeforeUnchanged = getSyncState();
+    const unchanged = state.initialized && !state.dirty && !liveBeforeUnchanged.dirty && !isManual && remoteHasOwn &&
+      !hasDownloadableClips && !hasAudioWork && getSyncDirtyGen() === startGen && configEpoch === startEpoch &&
       peerEntries.length === Object.keys(state.peerEtags).length &&
       peerEntries.every(e => !!e.etag && state.peerEtags[e.name] === e.etag);
     if (unchanged) {
-      saveSyncState({ ...state, targetKey, dirty: getSyncDirtyGen() !== startGen, lastSyncAt: nowFn(), failCount: 0, backoffUntil: 0, lastError: null });
+      const live = getSyncState();
+      if (configEpoch !== startEpoch) return abortDisabled();
+      saveSyncState({ ...live, targetKey, dirty: live.dirty || getSyncDirtyGen() !== startGen, lastSyncAt: nowFn(), failCount: 0, backoffUntil: 0, lastError: null });
       refreshRuntime({ syncing: false, phase: 'idle' });
-      return { status: 'ok', uploaded: false, clipsDownloaded: 0, clipsUploaded: 0, newerFormat: state.newerFormat, summary: ZERO_SUMMARY };
+      return { status: 'ok', uploaded: false, clipsDownloaded: 0, clipsUploaded: 0, newerFormat: live.newerFormat, summary: ZERO_SUMMARY };
     }
 
-    const { peers, nextPeerEtags } = await pullPeers(cfg, targetKey, peerEntries, !isManual && state.initialized);
+    const { peers, nextPeerEtags, skippedCount } = await pullPeers(cfg, targetKey, peerEntries, !isManual && state.initialized);
     refreshRuntime({ phase: 'merging' });
     const mergeNow = nowFn();
     let syncedGen = getSyncDirtyGen();
     const localBundle = await buildLocalSnapshot({
-      platform: opts.platform, ownDir: opts.ownDir, clipPacks: state.clipPacks, lastMergedAt: state.lastMergedAt, now: mergeNow,
+      platform: opts.platform, ownDir: opts.ownDir, clipPacks: state.clipPacks,
+      audioOffers: state.audioOffers, audioAck: state.audioAck, lastMergedAt: state.lastMergedAt, now: mergeNow,
     });
+    const localAudioHave = await collectLocalAudioHave(opts.platform, localBundle.rawVideos, opts.pathExists);
+    if (localAudioHave.length > 0) localBundle.snapshot.audioHave = localAudioHave;
     const mergeOpts = {
       localPlatform: opts.platform, localOwnDir: opts.ownDir, now: mergeNow,
       initialized: state.initialized, lastSyncAt: state.lastSyncAt,
-      subtitles: localBundle.subsByHash, localSubHashes: Object.keys(localBundle.subsByHash), localClipFiles: localBundle.localClipFiles,
+      subtitles: localBundle.subsByHash, localSubHashes: Object.keys(localBundle.subsByHash),
+      localClipFiles: localBundle.localClipFiles, localAudioHave, peersIncomplete: skippedCount > 0,
     };
     let result = mergeSnapshots(localBundle.snapshot, peers, mergeOpts);
 
@@ -311,14 +327,8 @@ async function runWebDavSyncInner(opts: SyncRunOptions): Promise<SyncRunResult> 
       catch (e) { if (isFatalSyncErr(e)) throw e; console.warn('sync: missing subtitle', hash, errStr(e)); }
     }
 
-    // Never execute a rekey when the winning remote record's subtitle failed to download.
     result = remergeWithoutUnreadyRekeys(localBundle, peers, result, downloadedSubs, mergeOpts);
-
-    // Abort cleanly if the user switched WebDAV target or disabled sync while pulling.
-    if (configEpoch !== startEpoch) {
-      refreshRuntime({ syncing: false, phase: 'idle' });
-      return { status: 'skipped', reason: 'disabled' };
-    }
+    if (configEpoch !== startEpoch) return abortDisabled();
 
     await withRestoreLock(() => applyMergeToLocal({
       result, downloadedSubs, platform: opts.platform, localOwnDir: opts.ownDir,
@@ -344,57 +354,74 @@ async function runWebDavSyncInner(opts: SyncRunOptions): Promise<SyncRunResult> 
       new Map(result.snapshot.cards.map(c => [c.id, c])), opts.clipsRuntime,
     );
 
-    refreshRuntime({ phase: 'pushing' });
-    const syncAt = nowFn();
-    syncedGen = getSyncDirtyGen();
-    const freshBundle = await buildLocalSnapshot({
-      platform: opts.platform, ownDir: opts.ownDir, clipPacks: clipRes.clipPacks, lastMergedAt: syncAt, now: syncAt,
-    });
-    const freshHash = snapshotContentHash(freshBundle.snapshot);
-    const changed = summaryChanged(result.summary);
-    const needPush = !state.initialized || state.dirty || changed || !remoteHasOwn ||
-      result.rekeys.length > 0 || clipRes.clipsUploaded > 0 || clipRes.clipsDownloaded > 0 ||
-      freshHash !== state.lastPublishedHash;
-    if (configEpoch !== startEpoch) {
-      refreshRuntime({ syncing: false, phase: 'idle' });
-      return { status: 'skipped', reason: 'disabled' };
-    }
-    if (needPush) {
-      // Ensure any new video added mid-sync also has its subtitle uploaded before publishing own snapshot.
-      await uploadMissingSubs(freshBundle.subsByHash);
-      await syncWebdavPutGz(cfg, `devices/${ownFile}`, JSON.stringify(freshBundle.snapshot));
-    }
-    if (configEpoch !== startEpoch) {
-      refreshRuntime({ syncing: false, phase: 'idle' });
-      return { status: 'skipped', reason: 'disabled' };
-    }
+    // Push lightweight snapshot first so cards/subs/progress never get blocked by large audio I/O.
+    const buildOwn = (audioOffers: SyncState['audioOffers'], audioHave: string[], audioAck: Record<string, string>, ts: number) =>
+      buildLocalSnapshot({ platform: opts.platform, ownDir: opts.ownDir, clipPacks: clipRes.clipPacks, audioOffers, audioHave, audioAck, lastMergedAt: ts, now: ts });
+    const pushOwn = async (bundle: Awaited<ReturnType<typeof buildLocalSnapshot>>) => {
+      await uploadMissingSubs(bundle.subsByHash);
+      await syncWebdavPutGz(cfg, `devices/${ownFile}`, JSON.stringify(bundle.snapshot));
+    };
 
-    const latestSettingAt = getSyncState().settingAt;
-    const compatiblePeers = peers.filter(p => p.v <= SYNC_FORMAT);
-    const allPeersUnusable = peerEntries.length > 0 && compatiblePeers.length === 0;
-    const hasUnuploadedNewClips = cfg.syncClips && freshBundle.localClipFiles.some(f => !clipRes.uploadedClips[f]);
-    const stillDirty = getSyncDirtyGen() !== syncedGen || hasUnuploadedNewClips;
+    refreshRuntime({ phase: 'pushing' });
+    let finalSyncAt = nowFn(), finalUploaded = false, finalHash = state.lastPublishedHash, audioPushFailed = false;
+    const preAudioSt = getSyncState();
+    const preAudioAck: Record<string, string> = opts.platform === 'android'
+      ? { ...result.localAudioAck, ...Object.fromEntries(Object.entries(preAudioSt.audioAck).filter(([k]) => !(k in state.audioAck) && !(k in result.localAudioAck))) }
+      : {};
+    syncedGen = getSyncDirtyGen();
+    let finalBundle = await buildOwn(preAudioSt.audioOffers, localAudioHave, preAudioAck, finalSyncAt);
+    const freshHash = snapshotContentHash(finalBundle.snapshot), changed = summaryChanged(result.summary);
+    const needPush = !state.initialized || state.dirty || changed || !remoteHasOwn ||
+      result.rekeys.length > 0 || clipRes.clipsUploaded > 0 || clipRes.clipsDownloaded > 0 || freshHash !== state.lastPublishedHash;
+    if (configEpoch !== startEpoch) return abortDisabled();
+    if (needPush) { await pushOwn(finalBundle); finalUploaded = true; finalHash = freshHash; }
+    if (configEpoch !== startEpoch) return abortDisabled();
+
+    refreshRuntime({ phase: 'clips' });
+    const audioRes = await syncAudioPhase({
+      cfg, devId, platform: opts.platform, targetKey, state, result, localAudioHave,
+      now: nowFn(), isAuthErr, isStale: () => configEpoch !== startEpoch,
+    });
+    if (configEpoch !== startEpoch) return abortDisabled();
+
+    if (audioRes.changed) {
+      refreshRuntime({ phase: 'pushing' });
+      const postSyncAt = nowFn(), postGen = getSyncDirtyGen();
+      const postBundle = await buildOwn(audioRes.audioOffers, audioRes.localAudioHave, audioRes.audioAck, postSyncAt);
+      if (configEpoch !== startEpoch) return abortDisabled();
+      try {
+        await pushOwn(postBundle);
+        finalUploaded = true; finalHash = snapshotContentHash(postBundle.snapshot);
+        finalSyncAt = postSyncAt; finalBundle = postBundle; syncedGen = postGen;
+      } catch (e) {
+        if (isAuthErr(errStr(e))) throw e;
+        console.warn('sync: post-audio snapshot push failed', errStr(e));
+        audioPushFailed = true;
+      }
+    }
+    if (configEpoch !== startEpoch) return abortDisabled();
+
+    const latestSt = getSyncState();
+    const allPeersUnusable = peerEntries.length > 0 && peers.every(p => p.v > SYNC_FORMAT);
+    const hasUnuploadedNewClips = cfg.syncClips && finalBundle.localClipFiles.some(f => !clipRes.uploadedClips[f]);
+    const stillDirty = getSyncDirtyGen() !== syncedGen || hasUnuploadedNewClips || audioPushFailed;
     saveSyncState({
-      initialized: state.initialized || !allPeersUnusable,
-      dirty: stillDirty,
-      lastSyncAt: syncAt, lastMergedAt: syncAt, targetKey,
-      lastPublishedHash: needPush ? freshHash : state.lastPublishedHash,
+      initialized: state.initialized || !allPeersUnusable, dirty: stillDirty,
+      lastSyncAt: finalSyncAt, lastMergedAt: finalSyncAt, targetKey, lastPublishedHash: finalHash,
       peerEtags: nextPeerEtags, uploadedSubs: [...uploadedSubs], uploadedCaches: [...uploadedCaches],
       uploadedClips: clipRes.uploadedClips, clipPackSeq: clipRes.clipPackSeq, clipPacks: clipRes.clipPacks,
+      audioOffers: latestSt.audioOffers, remoteAudioOffers: latestSt.remoteAudioOffers,
+      audioMonthly: latestSt.audioMonthly, audioAutoPending: latestSt.audioAutoPending,
+      deliveredAudioIds: latestSt.deliveredAudioIds, audioAck: latestSt.audioAck,
       authFailed: false, failCount: 0, backoffUntil: 0, newerFormat: result.newerFormat, lastError: null,
-      ...(latestSettingAt ? { settingAt: latestSettingAt } : {}),
+      ...(latestSt.settingAt ? { settingAt: latestSt.settingAt } : {}),
     });
+    notifyAudioStateChanged();
     refreshRuntime({ syncing: false, phase: 'idle', pendingAlert: null });
-    if (changed || !state.initialized || clipRes.clipsDownloaded > 0 || result.rekeys.length > 0) notifySyncApplied();
-    return {
-      status: 'ok', summary: result.summary, uploaded: needPush,
-      clipsDownloaded: clipRes.clipsDownloaded, clipsUploaded: clipRes.clipsUploaded, newerFormat: result.newerFormat,
-    };
+    if (changed || !state.initialized || clipRes.clipsDownloaded > 0 || audioRes.downloadedCount > 0 || result.rekeys.length > 0) notifySyncApplied();
+    return { status: 'ok', summary: result.summary, uploaded: finalUploaded, clipsDownloaded: clipRes.clipsDownloaded, clipsUploaded: clipRes.clipsUploaded, newerFormat: result.newerFormat };
   } catch (e) {
-    if (configEpoch !== startEpoch) {
-      refreshRuntime({ syncing: false, phase: 'idle' });
-      return { status: 'skipped', reason: 'disabled' };
-    }
+    if (configEpoch !== startEpoch) return abortDisabled();
     const msg = errStr(e), cur = getSyncState();
     if (isAuthErr(msg)) saveSyncState({ ...cur, targetKey, authFailed: true, lastError: 'sync:auth' });
     else if (isTransientErr(msg)) {
@@ -408,18 +435,13 @@ async function runWebDavSyncInner(opts: SyncRunOptions): Promise<SyncRunResult> 
 
 /** Single-flight WebDAV sync entry point; strictly serializes manual runs and coalesces background triggers. */
 export async function runWebDavSync(opts: SyncRunOptions): Promise<SyncRunResult> {
-  if (inFlight && !opts.manual && !opts.confirmSafety) {
-    queuedBgOpts = opts;
-    return inFlight;
-  }
+  if (inFlight && !opts.manual && !opts.confirmSafety) { queuedBgOpts = opts; return inFlight; }
   while (inFlight) await inFlight;
   const task = runWebDavSyncInner(opts).finally(() => {
     if (inFlight === task) inFlight = null;
     const follow = queuedBgOpts;
     queuedBgOpts = null;
-    if (follow && getSyncState().dirty && !follow.isBusy?.()) {
-      void runWebDavSync(follow);
-    }
+    if (follow && getSyncState().dirty && !follow.isBusy?.()) void runWebDavSync(follow);
   });
   inFlight = task;
   return task;
@@ -446,28 +468,21 @@ export function startSyncScheduler(opts: Omit<SyncRunOptions, 'manual' | 'confir
     return res;
   };
   const bootTimer = setTimeout(() => { void runBg(); }, STARTUP_DELAY_MS);
-
-  const unsubDirty = subscribeSyncDirty(() => {
-    if (stopped) return;
-    refreshRuntime({ dirty: true });
-    scheduleDirty();
-  });
-
+  const unsubDirty = subscribeSyncDirty(() => { if (!stopped) { refreshRuntime({ dirty: true }); scheduleDirty(); } });
   const onVisibility = () => {
     if (stopped || typeof document === 'undefined') return;
     const st = getSyncState();
     if (document.visibilityState === 'hidden') { if (st.dirty) { clearDirty(); void runBg(); } }
     else if (document.visibilityState === 'visible' && nowFn() - st.lastSyncAt >= MIN_FOREGROUND_GAP_MS) void runBg();
   };
+  registerAudioSyncHooks({ triggerSync: () => { if (!stopped) { clearDirty(); void runBg(); } } });
   if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
-
   return {
-    stop() { stopped = true; clearTimeout(bootTimer); clearDirty(); unsubDirty(); if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility); },
+    stop() { stopped = true; registerAudioSyncHooks({ triggerSync: null }); clearTimeout(bootTimer); clearDirty(); unsubDirty(); if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility); },
     triggerNow() { clearDirty(); return runWebDavSync({ ...opts, manual: true }); },
     onLeavePractice() {
       const st = getSyncState();
-      if (st.dirty || nowFn() - st.lastSyncAt >= MIN_FOREGROUND_GAP_MS) { clearDirty(); return runBg(); }
-      return Promise.resolve({ status: 'skipped', reason: 'busy' });
+      return st.dirty || nowFn() - st.lastSyncAt >= MIN_FOREGROUND_GAP_MS ? (clearDirty(), runBg()) : Promise.resolve({ status: 'skipped', reason: 'busy' });
     },
     confirmPending() { clearDirty(); return runWebDavSync({ ...opts, manual: true, confirmSafety: true }); },
     dismissPending() { refreshRuntime({ pendingAlert: null }); },

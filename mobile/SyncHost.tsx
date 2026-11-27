@@ -108,6 +108,9 @@ export function formatSyncError(err: unknown, tr: typeof tFn): string {
   if (msg === 'sync:ratelimit') return tr('sync.errRateLimit');
   if (msg === 'sync:insecure_url') return tr('sync.errInsecure');
   if (msg === 'sync:newer_format') return tr('sync.newerFormat');
+  if (msg === 'sync:audio_missing_src' || msg === 'audio:missing') return tr('sync.audioErrMissing');
+  if (msg === 'sync:audio_too_large') return tr('sync.audioErrTooLarge');
+  if (msg === 'sync:audio_no_track' || msg === 'extract:no audio track') return tr('sync.audioErrNoTrack');
   if (msg.startsWith('sync:pre_failed:')) {
     return tr('sync.preFailed', { why: msg.slice('sync:pre_failed:'.length).trim() || 'error' });
   }

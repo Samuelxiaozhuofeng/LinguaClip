@@ -2,20 +2,27 @@
 // for their meaning (Japanese split into groups once the dictionary is in), long-press drag
 // to select & look up a phrase (usePhrasePick, M2.3), "see this line" — the line in a card
 // between its neighbours, with listen again / ☆ / 中 — and the whole section's transcript.
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import type { Subtitle } from '../types';
 import { TokenType, tokenizeText } from '../utils/textTokenizer';
 import { useJaVersion } from '../utils/japanese';
 import { useT } from '../utils/i18n';
 import type { PickToken } from './reader/phrasePick';
-import { PickHandleDot, usePhrasePick } from './reader/usePhrasePick';
+import { PickHandleDot, TAP_CANCEL_MS, usePhrasePick } from './reader/usePhrasePick';
+import { useJustShown } from './justShown';
 
 export type LineProps = {
   saved: Set<number>; trans: (l: Subtitle) => string | null | undefined; // undefined: closed
   onWord: (w: string, l: Subtitle) => void; onSave: (l: Subtitle) => void; onTrans?: (l: Subtitle) => void;
 };
 
-export const Words: React.FC<{ line: Subtitle; onWord: (w: string, l: Subtitle) => void; className?: string }> = ({ line, onWord, className }) => {
+export const Words: React.FC<{
+  line: Subtitle;
+  onWord: (w: string, l: Subtitle) => void;
+  className?: string;
+  prefix?: React.ReactNode;
+  onSelectingChange?: (selecting: boolean, byTap?: boolean) => void;
+}> = ({ line, onWord, className, prefix, onSelectingChange }) => {
   const t = useT();
   const v = useJaVersion();
   const tokens = useMemo(() => tokenizeText(line.text), [line.text, v]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -27,6 +34,7 @@ export const Words: React.FC<{ line: Subtitle; onWord: (w: string, l: Subtitle) 
     tokens: pickTokens,
     onWord: w => onWord(w, line),
     onPhrase: phrase => onWord(phrase, line),
+    onSelectingChange,
   });
 
   return (
@@ -36,6 +44,7 @@ export const Words: React.FC<{ line: Subtitle; onWord: (w: string, l: Subtitle) 
         className={`${className ?? ''} select-none`.trim()}
         data-split={tokens.filter(x => x.type === TokenType.WORD).length}
       >
+        {prefix}
         {tokens.map((x, idx) => {
           const selected = pick.inRange(idx);
           if (x.type !== TokenType.WORD) {
@@ -98,30 +107,108 @@ export const LineCard: React.FC<LineProps & { lines: Subtitle[]; at: number; onA
   );
 };
 
-// The section's lines; the one being said stands out. ▶ plays from a line.
-export const Transcript = React.forwardRef<HTMLDivElement, LineProps & { lines: Subtitle[]; cur: number | null; hint?: string | null; onPlay: (l: Subtitle) => void; onScroll: () => void }>(
-  ({ lines, cur, hint, saved, trans, onWord, onSave, onTrans, onPlay, onScroll }, ref) => {
-    const t = useT();
-    return (
-      <div ref={ref} className="h-full overflow-y-auto px-4 pb-6" onTouchMove={onScroll}>
-        {hint && <p className="px-1 py-2 text-[13px] text-mute">{hint}</p>}
-        {lines.map(l => {
-          const tr = trans(l);
-          return (
-            <div key={l.id} data-line={l.id} className={`flex gap-1 py-2 border-b border-shade ${l.id === cur ? 'bg-accent-soft/60 rounded-xl' : ''}`}>
-              <button aria-label={t('listen.playFrom')} className="shrink-0 w-11 h-11 text-mute" onClick={() => onPlay(l)}>▶</button>
-              <div className="flex-1 min-w-0 pt-2 flex flex-col gap-1">
-                <Words line={l} onWord={onWord} className={`font-serif text-[18px] leading-normal ${l.id === cur ? 'text-ink' : 'text-ink/80'}`} />
-                {tr !== undefined && <TransText text={tr} />}
-              </div>
-              <div className="shrink-0 flex flex-col">
-                <button aria-label={t('m.save')} aria-pressed={saved.has(l.id)} className={`w-11 h-11 ${saved.has(l.id) ? 'text-accent' : 'text-mute'}`} onClick={() => onSave(l)}>{saved.has(l.id) ? '★' : '☆'}</button>
-                {onTrans && <button aria-label={t('reader.transShow')} className="w-11 h-11 text-[13px] text-mute" onClick={() => onTrans(l)}>{t('reader.transShort')}</button>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  },
+const TranscriptRow: React.FC<{
+  line: Subtitle;
+  index: number;
+  isCur: boolean;
+  isSaved: boolean;
+  tr: string | null | undefined;
+  onWord: (w: string, l: Subtitle) => void;
+  onSave: (l: Subtitle) => void;
+  onTrans?: (l: Subtitle) => void;
+  onPlay: (l: Subtitle) => void;
+}> = ({ line, index, isCur, isSaved, tr, onWord, onSave, onTrans, onPlay }) => {
+  const t = useT();
+  const selectingRef = useRef(false);
+  const suppressRowClickRef = useRef(false);
+  const tapCancelAtRef = useRef(0);
+  // The save / translation row follows the playing line: ignore a tap that lands just as it moved.
+  const actionsTooSoon = useJustShown(isCur);
+
+  const prefix = (
+    <span
+      aria-hidden="true"
+      className={`inline-flex items-center gap-0.5 mr-1.5 font-sans text-[11px] tabular-nums align-[1px] select-none ${
+        isCur ? 'text-accent font-semibold' : 'text-mute/75'
+      }`}
+    >
+      <span>{isCur ? '▶' : index + 1}</span>
+      {isSaved && <span className="text-accent leading-none">★</span>}
+    </span>
+  );
+
+  return (
+    <div
+      data-line={line.id}
+      onPointerDownCapture={() => { suppressRowClickRef.current = selectingRef.current; }}
+      onClick={() => {
+        if (suppressRowClickRef.current || selectingRef.current || performance.now() - tapCancelAtRef.current < TAP_CANCEL_MS) {
+          suppressRowClickRef.current = false;
+          return;
+        }
+        onPlay(line);
+      }}
+      className={`px-2.5 py-2 border-b border-shade transition-colors ${
+        isCur ? 'bg-accent-soft/60 rounded-xl border-b-transparent' : ''
+      }`}
+    >
+      <Words
+        line={line}
+        onWord={onWord}
+        prefix={prefix}
+        onSelectingChange={(s, byTap) => { selectingRef.current = s; if (byTap) tapCancelAtRef.current = performance.now(); }}
+        className={`font-serif text-[18px] leading-normal ${isCur ? 'text-ink' : 'text-ink/85'}`}
+      />
+      {tr !== undefined && <div className="mt-1"><TransText text={tr} /></div>}
+      {isCur && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <button
+            type="button"
+            aria-pressed={isSaved}
+            onClick={e => { e.stopPropagation(); if (!actionsTooSoon()) onSave(line); }}
+            className={`relative h-9 px-2.5 rounded-[10px] text-xs font-medium inline-flex items-center before:content-[''] before:absolute before:-inset-y-1 before:-inset-x-0.5 ${
+              isSaved ? 'bg-page text-accent shadow-card' : 'bg-page/80 text-mute shadow-card'
+            }`}
+          >
+            {isSaved ? t('m.saved') : t('m.save')}
+          </button>
+          {onTrans && (
+            <button
+              type="button"
+              aria-label={t('reader.transShow')}
+              aria-pressed={tr !== undefined}
+              onClick={e => { e.stopPropagation(); if (!actionsTooSoon()) onTrans(line); }}
+              className={`relative h-9 min-w-[40px] px-2.5 rounded-[10px] text-xs font-medium inline-flex items-center justify-center before:content-[''] before:absolute before:-inset-y-1 before:-inset-x-0.5 ${
+                tr !== undefined ? 'bg-page text-accent shadow-card' : 'bg-page/80 text-mute shadow-card'
+              }`}
+            >
+              {t('reader.transShort')}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// The section's lines; tapping a line plays from it, words tap to look up, active line shows ☆ / 中 below.
+export const Transcript = React.forwardRef<HTMLDivElement, LineProps & { lines: Subtitle[]; cur: number | null; onPlay: (l: Subtitle) => void; onScroll: () => void }>(
+  ({ lines, cur, saved, trans, onWord, onSave, onTrans, onPlay, onScroll }, ref) => (
+    <div ref={ref} className="h-full overflow-y-auto px-3 pb-6" onTouchMove={onScroll}>
+      {lines.map((l, idx) => (
+        <TranscriptRow
+          key={l.id}
+          line={l}
+          index={idx}
+          isCur={l.id === cur}
+          isSaved={saved.has(l.id)}
+          tr={trans(l)}
+          onWord={onWord}
+          onSave={onSave}
+          onTrans={onTrans}
+          onPlay={onPlay}
+        />
+      ))}
+    </div>
+  ),
 );

@@ -161,9 +161,9 @@ pub struct SubTrack {
 
 #[derive(serde::Serialize, Debug, Default, PartialEq)]
 pub struct Probe {
-  duration: Option<f64>,
+  pub(crate) duration: Option<f64>,
   video: Option<String>,
-  audio: Option<String>,
+  pub(crate) audio: Option<String>,
   subtitles: Vec<SubTrack>,
   // ffmpeg's index of the real picture (cover art can come first).
   #[serde(skip)]
@@ -239,7 +239,7 @@ fn parse_probe(text: &str) -> Probe {
   probe
 }
 
-fn probe_with(ffmpeg: &Path, video: &Path) -> Result<Probe, String> {
+pub(crate) fn probe_with(ffmpeg: &Path, video: &Path) -> Result<Probe, String> {
   // No output file: ffmpeg describes the input, then exits with an error.
   let out = crate::paths::command(ffmpeg).arg("-hide_banner").arg("-i").arg(video).output().map_err(|e| e.to_string())?;
   let probe = parse_probe(&String::from_utf8_lossy(&out.stderr));

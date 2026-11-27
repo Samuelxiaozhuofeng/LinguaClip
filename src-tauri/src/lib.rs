@@ -23,6 +23,7 @@ mod ja_dict;
 mod paths;
 mod podcast;
 mod repeat_fix;
+mod sync_audio;
 mod sync_packs;
 mod sync_webdav;
 mod tts;
@@ -132,6 +133,8 @@ pub fn run() {
       sync_packs::sync_read_merge_pack,
       sync_packs::sync_unpack_merge_pack,
       sync_packs::sync_rekey_files,
+      sync_audio::sync_upload_audio,
+      sync_audio::sync_download_audio,
       youtube_window::open_youtube_window,
       youtube_window::youtube_pick_done,
       youtube_window::youtube_pick_error,

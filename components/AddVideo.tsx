@@ -17,6 +17,7 @@ import { parseSRT } from '../utils/srtParser';
 import { splitLongLines } from '../utils/splitLong';
 import { CLOUD, cloudKeyMissing, getTranscribeConfig } from '../utils/transcribeConfig';
 import * as VideoStorage from '../utils/videoStorage';
+import { maybeQueueAutoAudioSync } from '../utils/syncAudio';
 import { getLang, useT } from '../utils/i18n';
 import { dialog } from './Dialog';
 import { Btn, Card, inputCls } from './ui';
@@ -202,6 +203,7 @@ const AddVideo: React.FC<Props> = ({ initialPath, initialSrt, onClose, onPractic
       return;
     }
     const record = await VideoStorage.createVideoRecord(fileNameFromPath(video), file, text, count, { videoPath: video });
+    maybeQueueAutoAudioSync(record);
     onClose();
     await onPractice(record);
   };

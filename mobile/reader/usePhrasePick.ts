@@ -36,8 +36,11 @@ export interface UsePhrasePickOptions {
   onWord: (word: string) => void;
   onPhrase: (phrase: string) => void;
   /** Optional callback whenever selection opens/closes (lets parent suppress line-play taps). */
-  onSelectingChange?: (selecting: boolean) => void;
+  /** byTap: a tap elsewhere just dropped the selection — that tap must not also act (e.g. play the row). */
+  onSelectingChange?: (selecting: boolean, byTap?: boolean) => void;
 }
+
+export const TAP_CANCEL_MS = 700;
 
 export function usePhrasePick({ tokens, onWord, onPhrase, onSelectingChange }: UsePhrasePickOptions) {
   const lineKey = useId();
@@ -65,11 +68,14 @@ export function usePhrasePick({ tokens, onWord, onPhrase, onSelectingChange }: U
     }
   }, []);
 
-  const updateSel = useCallback((next: PhrasePickSelection | null) => {
+  // When a tap off the selection drops it: that same tap's click must not also play the row.
+  const tapCancelAtRef = useRef(0);
+  const updateSel = useCallback((next: PhrasePickSelection | null, byTap = false) => {
     const was = selRef.current !== null;
     selRef.current = next;
     setSel(next);
-    if (was !== (next !== null)) cbRef.current.onSelectingChange?.(next !== null);
+    if (byTap) tapCancelAtRef.current = performance.now();
+    if (was !== (next !== null)) cbRef.current.onSelectingChange?.(next !== null, byTap);
   }, []);
 
   const cancel = useCallback(() => {
@@ -177,7 +183,7 @@ export function usePhrasePick({ tokens, onWord, onPhrase, onSelectingChange }: U
       const inLine = target?.closest?.('[data-pick-line]')?.getAttribute('data-pick-line') === lineKey;
       const inHandle = target?.closest?.('[data-pick-handle-line]')?.getAttribute('data-pick-handle-line') === lineKey;
       if (!inLine && !inHandle) {
-        updateSel(null);
+        updateSel(null, true);
       }
     };
 
@@ -273,6 +279,8 @@ export function usePhrasePick({ tokens, onWord, onPhrase, onSelectingChange }: U
   return {
     sel,
     selecting: sel !== null,
+    /** True right after a tap dropped the selection (that tap's click should do nothing else). */
+    tapCancelled: () => performance.now() - tapCancelAtRef.current < TAP_CANCEL_MS,
     inRange: (index: number) => isIndexInRange(index, sel?.range ?? null),
     isStart: (index: number) => !!sel && sel.range[0] === index,
     isEnd: (index: number) => !!sel && sel.range[1] === index,

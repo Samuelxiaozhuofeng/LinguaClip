@@ -8,6 +8,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::*;
+use crate::sync_audio::{download_audio_in, upload_audio_file_in, MAX_SYNC_AUDIO_BYTES};
 use crate::sync_packs::{
   download_clip_pack_in, read_merge_pack_at, rekey_files_in, unpack_merge_pack_in,
   upload_clip_pack_in, write_merge_pack_in,
@@ -17,12 +18,19 @@ const DEV_A: &str = "550e8400-e29b-41d4-a716-446655440000";
 const DEV_B: &str = "550e8400-e29b-41d4-a716-446655440001";
 const SHA_A: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
+const JIANGUOYUN_DUP_409: &str = concat!(
+  r#"<?xml version="1.0" encoding="UTF-8" standalone="no"?><d:error xmlns:d="DAV:" xmlns:s="http://ns.jianguoyun.com">"#,
+  r#"<s:exception>DuplicateName</s:exception><s:message>The object on path /LinguaClipSync/devices/x.json.gz existed</s:message></d:error>"#,
+);
+
 #[derive(Default)]
 struct ServerState {
   dirs: HashSet<String>,
   files: HashMap<String, (Vec<u8>, String)>,
   log: Vec<(String, String)>,
   reject_move_405: bool,
+  // Jianguoyun: MOVE ignores `Overwrite: T` and answers 409 DuplicateName when the target exists.
+  move_no_overwrite: bool,
   force_status: Option<u16>,
   required_auth: Option<String>,
   extra_propfind_entries: Vec<(String, String, u64)>,
@@ -186,6 +194,9 @@ fn handle_dav_op(
       let dest_path = Url::parse(dest_raw)
         .map(|u| percent_decode(u.path()))
         .unwrap_or_else(|_| percent_decode(dest_raw));
+      if g.move_no_overwrite && g.files.contains_key(&dest_path) {
+        return (409, "Conflict", vec![], JIANGUOYUN_DUP_409.as_bytes().to_vec());
+      }
       if let Some(entry) = g.files.remove(path) {
         let etag = entry.1.clone();
         g.files.insert(dest_path, entry);
@@ -291,6 +302,33 @@ async fn put_gz_atomic_move_and_405_fallback() {
   }
   let got = sync_webdav_get_gz(cfg, rel2).await.unwrap();
   assert_eq!(got, r#"{"v":1,"fallback":true}"#);
+}
+
+#[tokio::test]
+async fn put_gz_overwrites_when_move_refuses_existing_target_jianguoyun_409() {
+  let srv = start_mock_dav("/dav/").await;
+  srv.state.lock().unwrap().move_no_overwrite = true;
+  let cfg = cfg_for(&srv.base_url);
+  let rel = format!("devices/{DEV_A}.json.gz");
+  sync_webdav_put_gz(cfg.clone(), rel.clone(), r#"{"round":1}"#.into()).await.unwrap();
+  srv.state.lock().unwrap().log.clear();
+  // Second sync: target already exists -> MOVE 409 DuplicateName -> must still land via direct PUT.
+  sync_webdav_put_gz(cfg.clone(), rel.clone(), r#"{"round":2}"#.into()).await.unwrap();
+  {
+    let g = srv.state.lock().unwrap();
+    let methods: Vec<&str> = g.log.iter().map(|(m, _)| m.as_str()).collect();
+    assert_eq!(methods, vec!["PUT", "MOVE", "PUT", "DELETE"]);
+    assert!(!g.files.contains_key(&format!("/dav/LinguaClip/LinguaClipSync/{rel}.tmp")));
+  }
+  assert_eq!(sync_webdav_get_gz(cfg, rel).await.unwrap(), r#"{"round":2}"#);
+}
+
+#[test]
+fn http_error_surfaces_jianguoyun_exception_name() {
+  let err = map_http_error(409, JIANGUOYUN_DUP_409);
+  assert!(err.starts_with("sync:http:409:DuplicateName"), "got {err}");
+  assert!(!err.contains("<?xml"), "got {err}");
+  assert_eq!(map_http_error(500, "plain\nbody"), "sync:http:500:plain body");
 }
 
 #[tokio::test]
@@ -508,4 +546,225 @@ fn rekey_files_renames_caches_and_media_without_overwriting_existing() {
   assert!(validate_url("http://[fd00::1]/dav").is_ok());
 
   let _ = fs::remove_dir_all(&own);
+}
+
+#[test]
+fn audio_rel_path_whitelist_checks() {
+  let offer_a = "550e8400-e29b-41d4-a716-446655440002";
+  assert!(validate_rel_path(&format!("audio/{DEV_A}__{DEV_B}.m4a")).is_ok());
+  assert!(validate_rel_path(&format!("audio/{DEV_A}__{DEV_B}__{offer_a}.m4a")).is_ok());
+  for bad in [
+    "audio/../evil.m4a",
+    &format!("audio/{DEV_A}.m4a"),
+    &format!("audio/{DEV_A}__{DEV_B}.mp3"),
+    &format!("audio/bad_dev__{DEV_B}.m4a"),
+    &format!("audio/{DEV_A}__bad_vid.m4a"),
+    &format!("audio/{DEV_A}__{DEV_B}__bad_offer.m4a"),
+    &format!("audio/{DEV_A}__a/b.m4a"),
+    &format!("audio/__{DEV_B}.m4a"),
+    &format!("audio/{DEV_A}__.m4a"),
+    &format!("audio/{DEV_A}__{DEV_B}__.m4a"),
+    &format!("audio/{DEV_A}____{DEV_B}.m4a"),
+    &format!("audio/{DEV_A}__{DEV_B}__extra.m4a"),
+    &format!("audio/{DEV_A}__{DEV_B}__{offer_a}__{DEV_A}.m4a"),
+  ] {
+    assert!(validate_rel_path(bad).is_err(), "{bad}");
+  }
+}
+
+#[tokio::test]
+async fn audio_streaming_upload_move_fallback_and_size_limit() {
+  let srv = start_mock_dav("/dav/").await;
+  let cfg = cfg_for(&srv.base_url);
+  let own = temp_own("audio-up");
+
+  // Multi-chunk deterministic payload (~200 KiB)
+  let payload: Vec<u8> = (0..200_000u32).map(|i| ((i * 31 + 7) & 0xff) as u8).collect();
+  let expected_sha: String = Sha256::digest(&payload).iter().map(|b| format!("{b:02x}")).collect();
+  let sample_path = own.join("tmp/encoded.m4a");
+  fs::write(&sample_path, &payload).unwrap();
+
+  // 1) Happy path: auto-creates audio/ via MKCOL + PUT .tmp + MOVE (also accepts 3-segment offer path)
+  let offer_a = "550e8400-e29b-41d4-a716-446655440002";
+  let rel1 = format!("audio/{DEV_A}__{DEV_B}__{offer_a}.m4a");
+  let up = upload_audio_file_in(
+    own.clone(),
+    cfg.clone(),
+    sample_path.clone(),
+    rel1.clone(),
+    321,
+    Some(payload.len() as u64),
+  )
+  .await
+  .unwrap();
+  assert_eq!(up.file, format!("{DEV_A}__{DEV_B}__{offer_a}.m4a"));
+  assert_eq!(up.sha256, expected_sha);
+  assert_eq!(up.bytes, payload.len() as u64);
+  assert_eq!(up.dur_sec, 321);
+  {
+    let g = srv.state.lock().unwrap();
+    let methods: Vec<&str> = g.log.iter().map(|(m, _)| m.as_str()).collect();
+    assert_eq!(methods, vec!["MKCOL", "PUT", "MOVE"]);
+    assert!(g.dirs.contains("/dav/LinguaClip/LinguaClipSync/audio"));
+    let key = format!("/dav/LinguaClip/LinguaClipSync/{rel1}");
+    assert_eq!(g.files.get(&key).map(|(b, _)| b.as_slice()), Some(payload.as_slice()));
+    assert!(!g.files.contains_key(&format!("{key}.tmp")));
+  }
+  let listed = sync_webdav_list(cfg.clone(), "audio".into()).await.unwrap();
+  assert_eq!(listed.len(), 1);
+  assert_eq!(listed[0].name, format!("{DEV_A}__{DEV_B}__{offer_a}.m4a"));
+  assert_eq!(listed[0].size, Some(payload.len() as u64));
+
+  // 2) MOVE returns 405 -> falls back to direct streaming PUT + DELETE .tmp
+  {
+    let mut g = srv.state.lock().unwrap();
+    g.log.clear();
+    g.reject_move_405 = true;
+  }
+  let rel2 = format!("audio/{DEV_B}__{DEV_A}.m4a");
+  let up2 = upload_audio_file_in(own.clone(), cfg.clone(), sample_path.clone(), rel2.clone(), 45, None)
+    .await
+    .unwrap();
+  assert_eq!(up2.sha256, expected_sha);
+  {
+    let g = srv.state.lock().unwrap();
+    let methods: Vec<&str> = g.log.iter().map(|(m, _)| m.as_str()).collect();
+    assert_eq!(methods, vec!["MKCOL", "PUT", "MOVE", "PUT", "DELETE"]);
+    let key = format!("/dav/LinguaClip/LinguaClipSync/{rel2}");
+    assert_eq!(g.files.get(&key).map(|(b, _)| b.as_slice()), Some(payload.as_slice()));
+    assert!(!g.files.contains_key(&format!("{key}.tmp")));
+  }
+
+  // 3) Budget cap (max_bytes) exceeded -> rejected with sync:audio_budget and 0 network calls
+  srv.state.lock().unwrap().log.clear();
+  let budget_err = upload_audio_file_in(
+    own.clone(),
+    cfg.clone(),
+    sample_path.clone(),
+    rel1.clone(),
+    321,
+    Some(payload.len() as u64 - 1),
+  )
+  .await
+  .unwrap_err();
+  assert_eq!(budget_err, "sync:audio_budget");
+  assert!(srv.state.lock().unwrap().log.is_empty());
+
+  // 4) Oversized file (> 100 MB) rejected before any network call
+  let huge_path = own.join("tmp/huge.m4a");
+  let huge_file = fs::File::create(&huge_path).unwrap();
+  huge_file.set_len(MAX_SYNC_AUDIO_BYTES + 1).unwrap();
+  drop(huge_file);
+  srv.state.lock().unwrap().log.clear();
+  let err = upload_audio_file_in(own.clone(), cfg, huge_path, rel1, 9999, None)
+    .await
+    .unwrap_err();
+  assert_eq!(err, "sync:audio_too_large");
+  assert!(srv.state.lock().unwrap().log.is_empty());
+
+  let _ = fs::remove_dir_all(&own);
+}
+
+#[tokio::test]
+async fn audio_streaming_download_verifies_sha256_and_protects_media_dir() {
+  let srv = start_mock_dav("/dav/").await;
+  let cfg = cfg_for(&srv.base_url);
+  let src_own = temp_own("audio-dl-src");
+  let dst_own = temp_own("audio-dl-dst");
+
+  let payload1: Vec<u8> = (0..150_000u32).map(|i| ((i * 17 + 3) & 0xff) as u8).collect();
+  let src_file1 = src_own.join("tmp/a1.m4a");
+  fs::write(&src_file1, &payload1).unwrap();
+  let rel1 = format!("audio/{DEV_A}__{DEV_B}.m4a");
+  let up1 = upload_audio_file_in(src_own.clone(), cfg.clone(), src_file1, rel1.clone(), 120, None)
+    .await
+    .unwrap();
+
+  // 1) Matching SHA-256 succeeds and lands in <own>/media/<videoId>.m4a
+  let saved = download_audio_in(
+    dst_own.clone(),
+    cfg.clone(),
+    rel1.clone(),
+    DEV_B.into(),
+    up1.sha256.clone(),
+  )
+  .await
+  .unwrap();
+  let expected_dest = dst_own.join("media").join(format!("{DEV_B}.m4a"));
+  assert_eq!(PathBuf::from(&saved), expected_dest);
+  assert_eq!(fs::read(&expected_dest).unwrap(), payload1);
+  assert!(fs::read_dir(dst_own.join("tmp")).unwrap().next().is_none());
+
+  // 2) Mismatched SHA-256 fails without writing to media/ or leaving .part in tmp/
+  let err_fresh = download_audio_in(
+    dst_own.clone(),
+    cfg.clone(),
+    rel1.clone(),
+    DEV_A.into(),
+    SHA_A.into(),
+  )
+  .await
+  .unwrap_err();
+  assert_eq!(err_fresh, "sync:corrupt:sha256");
+  assert!(!dst_own.join("media").join(format!("{DEV_A}.m4a")).exists());
+  assert!(fs::read_dir(dst_own.join("tmp")).unwrap().next().is_none());
+
+  // 3) Mismatched SHA-256 must not clobber existing media file
+  let err_existing = download_audio_in(
+    dst_own.clone(),
+    cfg.clone(),
+    rel1.clone(),
+    DEV_B.into(),
+    SHA_A.into(),
+  )
+  .await
+  .unwrap_err();
+  assert_eq!(err_existing, "sync:corrupt:sha256");
+  assert_eq!(fs::read(&expected_dest).unwrap(), payload1);
+  assert!(fs::read_dir(dst_own.join("tmp")).unwrap().next().is_none());
+
+  // 4) Empty or invalid SHA-256 fails immediately with sync:corrupt:sha256 and 0 network calls
+  srv.state.lock().unwrap().log.clear();
+  for bad_sha in ["", "not-a-sha", "0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef"] {
+    let err_empty = download_audio_in(
+      dst_own.clone(),
+      cfg.clone(),
+      rel1.clone(),
+      DEV_A.into(),
+      bad_sha.into(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err_empty, "sync:corrupt:sha256", "sha={bad_sha}");
+  }
+  assert!(srv.state.lock().unwrap().log.is_empty());
+
+  // 5) Valid second download cleanly replaces existing media file
+  let payload2 = b"replacement-audio-stream-data".to_vec();
+  let src_file2 = src_own.join("tmp/a2.m4a");
+  fs::write(&src_file2, &payload2).unwrap();
+  let rel2 = format!("audio/{DEV_B}__{DEV_B}.m4a");
+  let up2 = upload_audio_file_in(src_own.clone(), cfg.clone(), src_file2, rel2.clone(), 12, None)
+    .await
+    .unwrap();
+  download_audio_in(dst_own.clone(), cfg.clone(), rel2, DEV_B.into(), up2.sha256)
+    .await
+    .unwrap();
+  assert_eq!(fs::read(&expected_dest).unwrap(), payload2);
+
+  // 6) Missing remote audio returns sync:notfound and leaves tmp/ clean
+  let missing_err = download_audio_in(
+    dst_own.clone(),
+    cfg,
+    format!("audio/{DEV_A}__{DEV_A}.m4a"),
+    DEV_A.into(),
+    SHA_A.into(),
+  )
+  .await
+  .unwrap_err();
+  assert_eq!(missing_err, "sync:notfound");
+  assert!(fs::read_dir(dst_own.join("tmp")).unwrap().next().is_none());
+
+  let _ = fs::remove_dir_all(&src_own);
+  let _ = fs::remove_dir_all(&dst_own);
 }

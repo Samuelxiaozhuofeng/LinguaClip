@@ -33,3 +33,6 @@ dist-ssr
 
 # Vercel
 .vercel
+
+# Local signing secrets (Android release keystore + password). Never commit; sync-public uses git archive so ignored files never go public.
+.secrets/

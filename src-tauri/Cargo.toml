@@ -29,12 +29,12 @@ tauri-plugin-fs = "2.5.2"
 tauri-plugin-opener = "2.5.5"
 reqwest-websocket = "0.5"
 # Same 0.12 the http plugin already pulls in; used for AnkiConnect (anki.rs)
-reqwest = { version = "0.12", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "fs"] }
 # Reads a video's audio track where macOS's afconvert is not around (decode.rs)
 symphonia = { version = "0.5", default-features = false, features = ["aac", "mp3", "pcm", "alac", "flac", "isomp4"] }
 

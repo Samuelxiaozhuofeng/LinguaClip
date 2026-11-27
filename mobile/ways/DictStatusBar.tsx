@@ -1,7 +1,8 @@
 // Shared post-check feedback block for Dictation & Custom ways:
 // optional cached translation line, independent vs helped-correct status pill,
-// wrong/near summary text, and secondary actions (Break it down / Save line).
+// wrong/near summary text, and compact secondary actions (Break it down when AI is set / Save line).
 import React from 'react';
+import { canCloze } from '../../utils/aiDrills';
 import { useT } from '../../utils/i18n';
 import type { Checked } from '../dictation';
 import { dictCorrectKind } from './drillCommon';
@@ -31,9 +32,9 @@ export const DictStatusBar: React.FC<DictStatusBarProps> = ({
   isSaved,
   onBreakdown,
   onToggleSave,
-  compact = false,
 }) => {
   const t = useT();
+  const hasAi = canCloze();
   const showTrans = !!trans && (revealed || result !== null);
   const showActions = revealed || (result !== null && !result.correct);
   const correctKind = dictCorrectKind({ everRevealed, usedHint, wrongTries, alreadyStuck });
@@ -56,7 +57,7 @@ export const DictStatusBar: React.FC<DictStatusBarProps> = ({
       {showTrans && (
         <p
           data-testid="dict-trans"
-          className="text-[14px] leading-relaxed text-mute border-t border-shade pt-2.5"
+          className="text-[14px] leading-relaxed text-mute border-t border-shade pt-2"
         >
           {trans}
         </p>
@@ -68,7 +69,7 @@ export const DictStatusBar: React.FC<DictStatusBarProps> = ({
             role="status"
             data-testid="dict-right-helped"
             data-helped={helpedKind}
-            className="self-start px-3 py-1.5 rounded-full bg-shade text-mute text-[13px] font-medium"
+            className="self-start px-3 py-1 rounded-full bg-shade text-mute text-[13px] font-medium"
           >
             {helpedLabel}
           </p>
@@ -77,43 +78,52 @@ export const DictStatusBar: React.FC<DictStatusBarProps> = ({
             role="status"
             data-testid="dict-all-right"
             data-independent="true"
-            className="self-start px-3 py-1.5 rounded-full bg-accent-soft text-accent text-[13px] font-semibold"
+            className="self-start px-3 py-1 rounded-full bg-accent-soft text-accent text-[13px] font-semibold"
           >
             ✓ {t('m.dictAllRightAuto')}
           </p>
         )
       )}
 
-      {result && !result.correct && (
-        <p className="text-[13px] text-mute" role="status" data-testid="dict-wrong-summary">
-          {result.near > 0
-            ? t('m.dictNearSummary', { wrong: wrongCount, near: result.near })
-            : t('m.dictWrongSummary', { wrong: wrongCount })}
-        </p>
-      )}
-
       {showActions && (
         <div
-          className="pt-1 border-t border-shade flex flex-wrap items-center gap-2"
+          className="pt-1 border-t border-shade flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 -mb-1"
           data-testid="dict-actions"
         >
-          <button
-            type="button"
-            onClick={onBreakdown}
-            className={`min-h-[44px] ${compact ? 'px-3 text-[13px]' : 'px-3.5 text-[14px]'} rounded-xl bg-shade text-ink font-medium`}
-          >
-            {t('studio.breakdown')}
-          </button>
-          <button
-            type="button"
-            aria-pressed={isSaved}
-            onClick={onToggleSave}
-            className={`min-h-[44px] ${compact ? 'px-3 text-[13px]' : 'px-3.5 text-[14px]'} rounded-xl font-medium ${
-              isSaved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
-            }`}
-          >
-            {isSaved ? t('m.saved') : t('m.dictSaveLine')}
-          </button>
+          {result && !result.correct && (
+            <p className="text-[12px] text-mute" role="status" data-testid="dict-wrong-summary">
+              {result.near > 0
+                ? t('m.dictNearSummary', { wrong: wrongCount, near: result.near })
+                : t('m.dictWrongSummary', { wrong: wrongCount })}
+            </p>
+          )}
+          <div className="ml-auto flex items-center gap-1.5">
+            {hasAi && (
+              <button
+                type="button"
+                onClick={onBreakdown}
+                className="min-h-[40px] inline-flex items-center active:opacity-80"
+              >
+                <span className="h-[34px] px-3 rounded-lg bg-shade text-ink text-[13px] font-medium inline-flex items-center whitespace-nowrap">
+                  {t('studio.breakdown')}
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              aria-pressed={isSaved}
+              onClick={onToggleSave}
+              className="min-h-[40px] inline-flex items-center active:opacity-80"
+            >
+              <span
+                className={`h-[34px] px-3 rounded-lg text-[13px] font-medium inline-flex items-center whitespace-nowrap ${
+                  isSaved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
+                }`}
+              >
+                {isSaved ? t('m.saved') : t('m.dictSaveLine')}
+              </span>
+            </button>
+          </div>
         </div>
       )}
     </>

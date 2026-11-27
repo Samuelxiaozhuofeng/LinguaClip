@@ -10,7 +10,8 @@ import { pickSyncPackFile } from '../utils/desktop';
 import { enableLocalSaveClipsIfUnset } from '../utils/storage';
 import { downloadConvertTool, loadConvertTool } from '../utils/convertTool';
 import { retryClips } from '../utils/clips';
-import { getSyncConfig, JIANGUOYUN_URL, type WebDavConfig } from '../utils/syncConfig';
+import { getSyncConfig, JIANGUOYUN_URL, saveSyncConfig, type WebDavConfig } from '../utils/syncConfig';
+import { clearAudioBudgetNotice, formatAudioMB, getMonthlyAudioUsage, getSyncAudioSnapshot, subscribeSyncAudio } from '../utils/syncAudio';
 import {
   disableSync, exportOfflineSyncPack, getSyncRuntimeStatus, previewOfflineSyncPack,
   subscribeSyncStatus, testAndEnableSync, type OfflineMergePreview, type SyncRunResult,
@@ -51,6 +52,8 @@ const SettingsSync: React.FC<{ onClipsChanged?: () => void }> = ({ onClipsChange
   const t = useT();
   const lang = useLang();
   const status = useSyncExternalStore(subscribeSyncStatus, getSyncRuntimeStatus);
+  const audioSnap = useSyncExternalStore(subscribeSyncAudio, getSyncAudioSnapshot);
+  const usage = getMonthlyAudioUsage();
   const [cfg, setCfg] = useState<WebDavConfig>(() => getSyncConfig());
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; warn?: boolean } | null>(null);
@@ -149,6 +152,13 @@ const SettingsSync: React.FC<{ onClipsChanged?: () => void }> = ({ onClipsChange
     setCfg(getSyncConfig());
     setConfigOpen(false);
     setNote(null);
+  };
+
+  const toggleAutoSyncAudio = (v: boolean) => {
+    const next: WebDavConfig = { ...getSyncConfig(), autoSyncAudio: v };
+    saveSyncConfig(next);
+    if (!v) clearAudioBudgetNotice();
+    setCfg(next);
   };
 
   const handleSyncNow = async () => {
@@ -283,6 +293,21 @@ const SettingsSync: React.FC<{ onClipsChanged?: () => void }> = ({ onClipsChange
                 <Btn type="button" size="sm" flat disabled={busy} onClick={() => { void handleExportPack('json'); }}>{t('sync.packExportJson')}</Btn>
                 <Btn type="button" size="sm" flat disabled={busy} onClick={() => { void handleImportPack(); }}>{t('sync.packImport')}</Btn>
               </div>
+              <div className="pt-2 border-t border-line/60 space-y-1.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-ink font-medium">{t('sync.autoSyncAudio')}</span>
+                  <Toggle checked={!!cfg.autoSyncAudio} disabled={busy} label={t('sync.autoSyncAudio')} onChange={toggleAutoSyncAudio} />
+                </div>
+                <p className="leading-relaxed">{t('sync.autoSyncAudioHint')}</p>
+                {cfg.autoSyncAudio && (
+                  <p className="leading-relaxed">
+                    {t('sync.audioMonthlyUsed', { used: formatAudioMB(usage.bytes), limit: formatAudioMB(usage.budgetBytes) })}
+                  </p>
+                )}
+                {cfg.autoSyncAudio && (audioSnap.budgetNotice || usage.exceeded) && (
+                  <p className="text-accent leading-relaxed">{t('sync.audioBudgetHit')}</p>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -338,6 +363,19 @@ const SettingsSync: React.FC<{ onClipsChanged?: () => void }> = ({ onClipsChange
                       onChange={v => setDraft(d => ({ ...d, syncClips: v }))} />
                   </div>
                   <p className="mt-1.5 text-xs text-mute leading-relaxed">{t('sync.syncClipsHint')}</p>
+                </div>
+                <div className="pt-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-ink">{t('sync.autoSyncAudio')}</span>
+                    <Toggle checked={!!draft.autoSyncAudio} disabled={testing} label={t('sync.autoSyncAudio')}
+                      onChange={v => setDraft(d => ({ ...d, autoSyncAudio: v }))} />
+                  </div>
+                  <p className="mt-1.5 text-xs text-mute leading-relaxed">{t('sync.autoSyncAudioHint')}</p>
+                  {draft.autoSyncAudio && (
+                    <p className="mt-1 text-xs text-mute">
+                      {t('sync.audioMonthlyUsed', { used: formatAudioMB(usage.bytes), limit: formatAudioMB(usage.budgetBytes) })}
+                    </p>
+                  )}
                 </div>
                 {formError && <p className="text-xs text-accent leading-relaxed">{formError}</p>}
               </div>

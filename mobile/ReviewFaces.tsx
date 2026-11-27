@@ -93,10 +93,17 @@ export const Dictation: React.FC<{ card: ReviewCard; trans: string | null; lang?
         placeholder={t('m.typeHere')}
         className="w-full rounded-xl bg-shade px-3.5 py-3 font-serif text-[18px] leading-normal outline-none focus:ring-2 focus:ring-accent/30"
       />
-      <button type="submit" disabled={!canSubmit} className={btnPrimary}>{t('m.check')}</button>
-      <button type="button" onClick={revealAnswer} className="min-h-[44px] rounded-[12px] text-[14px] text-mute active:bg-shade">
-        {t('m.w1RevealAnswer')}
-      </button>
+      <div className="grid grid-cols-[auto_1fr] gap-2">
+        <button
+          type="button"
+          onClick={revealAnswer}
+          title={t('m.w1RevealAnswer')}
+          className="h-[48px] px-4 rounded-[14px] bg-shade text-ink text-[14px] font-medium whitespace-nowrap active:bg-line"
+        >
+          {t('review.show')}
+        </button>
+        <button type="submit" disabled={!canSubmit} className={`${btnPrimary} h-[48px]`}>{t('m.check')}</button>
+      </div>
     </form>
   );
   return (

@@ -77,8 +77,70 @@ const storeProxy = <T extends Record<string, any>>(key: string) => new Proxy({} 
 const SYNC_FILES_KEY = '__mock_sync_webdav';
 const SYNC_PACKS_KEY = '__mock_sync_merge_packs';
 const SYNC_CLIPS_KEY = '__mock_sync_clips';
+const SYNC_MEDIA_KEY = '__mock_sync_media';
 let syncEtagSeq = 0;
 const nextEtag = () => `"mock-${Date.now()}-${++syncEtagSeq}"`;
+const mockSha256Hex = (seed: string) => {
+  let h1 = 0x811c9dc5, h2 = 0x9e3779b9;
+  for (let i = 0; i < seed.length; i++) {
+    const c = seed.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b) >>> 0;
+  }
+  let out = '';
+  for (let i = 0; i < 8; i++) {
+    h1 = Math.imul(h1 ^ (h2 >>> 13) ^ i, 0x27d4eb2d) >>> 0;
+    h2 = Math.imul(h2 ^ (h1 >>> 15) ^ (i * 31), 0x165667b1) >>> 0;
+    out += h1.toString(16).padStart(8, '0');
+  }
+  return out;
+};
+type SyncAudioMeta = { sha256: string; bytes: number; durSec: number };
+const syncAudioStoreProxy = () => new Proxy({} as Record<string, SyncAudioMeta>, {
+  get: (_, prop) => {
+    if (typeof prop !== 'string') return undefined;
+    const entry = syncEntryOf(loadObj<Record<string, unknown>>(SYNC_FILES_KEY)[`audio/${prop}`]);
+    if (!entry) return undefined;
+    try { return JSON.parse(entry.content) as SyncAudioMeta; } catch { return { sha256: mockSha256Hex(entry.content), bytes: entry.size, durSec: 600 }; }
+  },
+  has: (_, prop) => typeof prop === 'string' && `audio/${prop}` in loadObj<Record<string, unknown>>(SYNC_FILES_KEY),
+  set: (_, prop, val: SyncAudioMeta) => {
+    if (typeof prop === 'string') {
+      const store = loadObj<Record<string, SyncFile>>(SYNC_FILES_KEY);
+      const meta: SyncAudioMeta = {
+        sha256: val?.sha256 || mockSha256Hex(prop),
+        bytes: typeof val?.bytes === 'number' ? val.bytes : 3_600_000,
+        durSec: typeof val?.durSec === 'number' ? val.durSec : 600,
+      };
+      store[`audio/${prop}`] = { content: JSON.stringify(meta), etag: nextEtag(), size: meta.bytes };
+      saveObj(SYNC_FILES_KEY, store);
+    }
+    return true;
+  },
+  deleteProperty: (_, prop) => {
+    if (typeof prop === 'string') {
+      const store = loadObj<Record<string, unknown>>(SYNC_FILES_KEY);
+      delete store[`audio/${prop}`];
+      saveObj(SYNC_FILES_KEY, store);
+    }
+    return true;
+  },
+  ownKeys: () => Object.keys(loadObj<Record<string, unknown>>(SYNC_FILES_KEY))
+    .filter(k => k.startsWith('audio/') && !k.slice(6).includes('/'))
+    .map(k => k.slice(6)),
+  getOwnPropertyDescriptor: (_, prop) => {
+    if (typeof prop !== 'string') return undefined;
+    const key = `audio/${prop}`;
+    const store = loadObj<Record<string, unknown>>(SYNC_FILES_KEY);
+    if (!(key in store)) return undefined;
+    const entry = syncEntryOf(store[key]);
+    let value: SyncAudioMeta | undefined;
+    if (entry) {
+      try { value = JSON.parse(entry.content) as SyncAudioMeta; } catch { value = { sha256: mockSha256Hex(entry.content), bytes: entry.size, durSec: 600 }; }
+    }
+    return { configurable: true, enumerable: true, value, writable: true };
+  },
+});
 const syncEntryOf = (raw: unknown): SyncFile | null => typeof raw === 'string'
   ? { content: raw, etag: `"raw-${raw.length}"`, size: byteLen(raw) }
   : raw && typeof raw === 'object' && typeof (raw as SyncFile).content === 'string'
@@ -95,7 +157,7 @@ const isLocalHost = (host: string) => {
 const VALID_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const VALID_SHA = /^[0-9a-f]{64}$/;
 const SAFE_CLIP = /^[A-Za-z0-9._-]+$/;
-const SYNC_SUBS = new Set(['devices', 'subs', 'caches', 'clip-packs']);
+const SYNC_SUBS = new Set(['devices', 'subs', 'caches', 'clip-packs', 'audio']);
 const SYNC_CACHE_KINDS = new Set(['cloze', 'breakdown', 'segments', 'levels', 'trans', 'keywords', 'phrases']);
 const REKEY_KINDS = ['words', 'cloze', 'breakdown', 'segments', 'levels', 'trans', 'keywords', 'phrases'];
 const checkClipName = (name: string) => {
@@ -108,7 +170,8 @@ const checkRelPath = (rel: string) => {
   const ok = (sub === 'devices' && rest.endsWith('.json.gz') && VALID_ID.test(rest.slice(0, -8)))
     || (sub === 'subs' && rest.endsWith('.srt.gz') && VALID_SHA.test(rest.slice(0, -7)))
     || (sub === 'caches' && rest.endsWith('.json.gz') && (() => { const s = rest.slice(0, -8); const d = s.indexOf('.'); return d > 0 && VALID_ID.test(s.slice(0, d)) && SYNC_CACHE_KINDS.has(s.slice(d + 1)); })())
-    || (sub === 'clip-packs' && rest.endsWith('.zip') && /^[A-Za-z0-9_-]{1,196}$/.test(rest.slice(0, -4)));
+    || (sub === 'clip-packs' && rest.endsWith('.zip') && /^[A-Za-z0-9_-]{1,196}$/.test(rest.slice(0, -4)))
+    || (sub === 'audio' && rest.endsWith('.m4a') && (() => { const parts = rest.slice(0, -4).split('__'); return (parts.length === 2 || parts.length === 3) && parts.every(p => VALID_ID.test(p)); })());
   if (!ok) throw `sync:invalid_path:${rel}`;
 };
 const checkSyncCfg = (cfg: Args | undefined, isGetGz = false) => {
@@ -131,6 +194,18 @@ const syncMock = {
   set mergePacks(v: Record<string, SyncPack>) { saveObj(SYNC_PACKS_KEY, v ?? {}); },
   get clips(): Record<string, string> { return storeProxy<Record<string, string>>(SYNC_CLIPS_KEY); },
   set clips(v: Record<string, string>) { saveObj(SYNC_CLIPS_KEY, v ?? {}); },
+  get audio(): Record<string, SyncAudioMeta> { return syncAudioStoreProxy(); },
+  set audio(v: Record<string, SyncAudioMeta>) {
+    const store = loadObj<Record<string, SyncFile>>(SYNC_FILES_KEY);
+    for (const k of Object.keys(store)) if (k.startsWith('audio/')) delete store[k];
+    for (const [name, meta] of Object.entries(v ?? {})) {
+      const m: SyncAudioMeta = { sha256: meta.sha256 || mockSha256Hex(name), bytes: meta.bytes ?? 3_600_000, durSec: meta.durSec ?? 600 };
+      store[`audio/${name}`] = { content: JSON.stringify(m), etag: nextEtag(), size: m.bytes };
+    }
+    saveObj(SYNC_FILES_KEY, store);
+  },
+  get media(): Record<string, { sha256: string; bytes: number }> { return storeProxy<Record<string, { sha256: string; bytes: number }>>(SYNC_MEDIA_KEY); },
+  set media(v: Record<string, { sha256: string; bytes: number }>) { saveObj(SYNC_MEDIA_KEY, v ?? {}); },
   fail: null as string | null,
   putPeer(devId: string, snapshotObj: unknown, subsMap?: Record<string, string>, clipPacksMap?: Record<string, Record<string, string> | string[] | string>) {
     const store = loadObj<Record<string, SyncFile>>(SYNC_FILES_KEY);
@@ -152,6 +227,7 @@ const syncMock = {
     sessionStorage.removeItem(SYNC_FILES_KEY);
     sessionStorage.removeItem(SYNC_PACKS_KEY);
     sessionStorage.removeItem(SYNC_CLIPS_KEY);
+    sessionStorage.removeItem(SYNC_MEDIA_KEY);
     sessionStorage.removeItem('__mock_last_sync_pack');
   },
 };
@@ -336,6 +412,7 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
       if (cache.has(args.path)) return true;
       const clipPrefix = `${OWN}/clips/`;
       if (typeof args.path === 'string' && args.path.startsWith(clipPrefix) && args.path.slice(clipPrefix.length) in loadObj(SYNC_CLIPS_KEY)) return true;
+      if (typeof args.path === 'string' && args.path in loadObj(SYNC_MEDIA_KEY)) return true;
       return (await fetch(fsUrl(args.path), { method: 'HEAD' })).ok;
     }
     case 'plugin:fs|read_file': {
@@ -561,6 +638,52 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
       delete store[rel];
       saveObj(SYNC_FILES_KEY, store);
       return null;
+    }
+    case 'sync_upload_audio': {
+      checkSyncCfg(args.config);
+      const srcPath = String(args.srcPath ?? '').trim();
+      if (!srcPath) throw 'sync:audio_missing_src';
+      const rel = String(args.relPath ?? '');
+      checkRelPath(rel);
+      if (!rel.startsWith('audio/')) throw `sync:invalid_path:${rel}`;
+      const file = rel.slice('audio/'.length);
+      const sha256 = mockSha256Hex(`${srcPath}:${rel}`);
+      const bytes = 3_600_000;
+      const durSec = 600;
+      if (typeof args.maxBytes === 'number' && bytes > args.maxBytes) throw 'sync:audio_budget';
+      const store = loadObj<Record<string, SyncFile>>(SYNC_FILES_KEY);
+      store[rel] = { content: JSON.stringify({ sha256, bytes, durSec }), etag: nextEtag(), size: bytes };
+      saveObj(SYNC_FILES_KEY, store);
+      return { file, sha256, bytes, durSec };
+    }
+    case 'sync_download_audio': {
+      checkSyncCfg(args.config);
+      const rel = String(args.relPath ?? '');
+      checkRelPath(rel);
+      if (!rel.startsWith('audio/')) throw `sync:invalid_path:${rel}`;
+      const videoId = String(args.videoId ?? '');
+      if (!VALID_ID.test(videoId)) throw 'sync:invalid_id';
+      const expectedSha = typeof args.expectedSha256 === 'string' ? args.expectedSha256 : '';
+      if (!VALID_SHA.test(expectedSha)) throw 'sync:corrupt:sha256';
+      const entry = syncEntryOf(loadObj<Record<string, unknown>>(SYNC_FILES_KEY)[rel]);
+      if (!entry) throw 'sync:notfound';
+      let meta: SyncAudioMeta;
+      try {
+        const parsed = JSON.parse(entry.content);
+        meta = {
+          sha256: typeof parsed?.sha256 === 'string' ? parsed.sha256 : mockSha256Hex(entry.content),
+          bytes: typeof parsed?.bytes === 'number' ? parsed.bytes : entry.size,
+          durSec: typeof parsed?.durSec === 'number' ? parsed.durSec : 600,
+        };
+      } catch {
+        meta = { sha256: mockSha256Hex(entry.content), bytes: entry.size, durSec: 600 };
+      }
+      if (meta.sha256 !== expectedSha) throw 'sync:corrupt:sha256';
+      const localPath = `${OWN}/media/${videoId}.m4a`;
+      const media = loadObj<Record<string, { sha256: string; bytes: number }>>(SYNC_MEDIA_KEY);
+      media[localPath] = { sha256: meta.sha256, bytes: meta.bytes };
+      saveObj(SYNC_MEDIA_KEY, media);
+      return localPath;
     }
     case 'sync_upload_clip_pack': {
       checkSyncCfg(args.config);

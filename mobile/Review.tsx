@@ -36,7 +36,7 @@ import { removeCardFromQueue, roundSummaryCounts, shouldDeferCard } from './revi
 import { findCardMedia, locateWordInLine, resolveContinueRecord, useReviewClip, type FoundCardMedia } from './review/useReviewClip';
 import { UndoToast } from './review/UndoToast';
 import { Dictation, GradeBar, SilentLineFace, WordFace } from './ReviewFaces';
-import { Header, btnPlain, btnPrimary } from './ui';
+import { btnPlain, btnPrimary } from './ui';
 
 type Held = Removed & { release: () => void };
 type UndoState = { id: string; n: number; gone?: Promise<Held | null> };
@@ -325,39 +325,28 @@ export const Review: React.FC<{
         />
       )}
 
-      <div className="flex items-center gap-2 pr-3">
-        <div className="flex-1 min-w-0 flex items-center gap-2">
-          {onBack
-            ? <Header title={title} onBack={() => { deferNow(); onBack(); }} />
-            : <h1 className="pt-4 pl-5 pb-2 text-[17px] font-semibold truncate">{title}</h1>}
-          <span className="mt-2 shrink-0 px-2.5 py-0.5 rounded-full bg-shade text-[12px] font-medium text-ink tabular-nums">
-            {t('m.duePill', { n: totalDue })}
-          </span>
-        </div>
-        {onOpenLibrary && (
+      <div className="pt-2.5 pl-4 pr-2 pb-1.5 flex items-center gap-1.5">
+        {onBack && (
           <button
             type="button"
-            onClick={() => { deferNow(); onOpenLibrary(); }}
-            className="mt-2 shrink-0 min-h-[44px] px-3 rounded-full text-[14px] font-medium text-ink active:bg-shade flex items-center gap-0.5"
+            aria-label={t('m.back')}
+            onClick={() => { deferNow(); onBack(); }}
+            className="w-10 h-10 -ml-1.5 shrink-0 flex items-center justify-center text-2xl"
           >
-            <span>{t('m.cardLib')}</span>
-            <span aria-hidden="true" className="text-mute text-base leading-none">›</span>
+            ‹
           </button>
         )}
-      </div>
-
-      {card && (
-        <div className="px-5 pt-1 flex flex-col gap-1.5">
-          <div className="h-1 rounded-full bg-line overflow-hidden">
-            <div className="h-full rounded-full bg-ink transition-all" style={{ width: `${(idx / Math.max(1, list.length)) * 100}%` }} />
-          </div>
-          <div className="flex items-center justify-between text-[13px] text-mute">
-            <span className="tabular-nums">{t('session.progress', { current: idx + 1, total: list.length })}</span>
-            <div className="flex items-center gap-1">
+        <h1 className="text-[16px] font-semibold truncate min-w-0">{title}</h1>
+        <span className="shrink-0 px-2 py-0.5 rounded-full bg-shade text-[12px] font-medium text-ink tabular-nums">
+          {card ? t('session.progress', { current: idx + 1, total: list.length }) : t('m.duePill', { n: totalDue })}
+        </span>
+        <div className="ml-auto flex items-center gap-0.5 shrink-0">
+          {card && (
+            <>
               <button
                 type="button"
                 onClick={skip}
-                className="min-h-[44px] px-3 rounded-full text-[13px] text-mute active:bg-shade"
+                className="min-h-[40px] px-2 rounded-full text-xs text-mute active:bg-shade whitespace-nowrap"
               >
                 {t('session.skip')}
               </button>
@@ -365,12 +354,30 @@ export const Review: React.FC<{
                 type="button"
                 onClick={removeCurrent}
                 aria-label={t('review.delete')}
-                className="min-h-[44px] min-w-[44px] px-2.5 rounded-full text-[13px] text-mute active:bg-shade flex items-center justify-center gap-1"
+                title={t('review.delete')}
+                className="w-10 h-10 rounded-full text-mute active:bg-shade flex items-center justify-center"
               >
-                <Trash2 size={15} />
-                <span>{t('review.delete')}</span>
+                <Trash2 size={16} />
               </button>
-            </div>
+            </>
+          )}
+          {onOpenLibrary && (
+            <button
+              type="button"
+              onClick={() => { deferNow(); onOpenLibrary(); }}
+              className="min-h-[40px] px-2 rounded-full text-[13px] font-medium text-ink active:bg-shade flex items-center gap-0.5 whitespace-nowrap"
+            >
+              <span>{t('m.cardLib')}</span>
+              <span aria-hidden="true" className="text-mute text-base leading-none">›</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {card && (
+        <div className="px-4 pb-1">
+          <div className="h-1 rounded-full bg-line overflow-hidden">
+            <div className="h-full rounded-full bg-ink transition-all" style={{ width: `${(idx / Math.max(1, list.length)) * 100}%` }} />
           </div>
         </div>
       )}
@@ -458,20 +465,22 @@ export const Review: React.FC<{
         )}
       </div>
 
-      <div className={onBack ? 'px-5 pt-2 pb-[max(20px,env(safe-area-inset-bottom))]' : 'px-5 pt-2 pb-4'}>
-        {grading && at ? (
-          <GradeBar
-            due={due}
-            now={at}
-            suggest={isWord || silentFace ? undefined : suggest}
-            onGrade={grade}
-            canMaster={canMaster}
-            onMaster={master}
-          />
-        ) : onBack && (done || (Array.isArray(queue) && !list.length)) && (
-          <button type="button" className={`${btnPrimary} w-full`} onClick={onBack}>{t('session.back')}</button>
-        )}
-      </div>
+      {((grading && at) || (onBack && (done || (Array.isArray(queue) && !list.length)))) && (
+        <div className={onBack ? 'px-5 pt-2 pb-[max(20px,env(safe-area-inset-bottom))]' : 'px-5 pt-2 pb-3'}>
+          {grading && at ? (
+            <GradeBar
+              due={due}
+              now={at}
+              suggest={isWord || silentFace ? undefined : suggest}
+              onGrade={grade}
+              canMaster={canMaster}
+              onMaster={master}
+            />
+          ) : (
+            <button type="button" className={`${btnPrimary} w-full`} onClick={onBack}>{t('session.back')}</button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

@@ -1,12 +1,12 @@
 // Stands in for utils/desktop.ts in the mobile build (vite.mobile.config.ts). Only
 // what the phone really uses; anything else imported from utils/desktop.ts fails
 // the build ("not exported"), on purpose.
-import type { CacheKind, MergePackContents, RekeyFilesResult, RemoteEntry, WebDavTestResult } from '../../utils/desktop';
+import type { CacheKind, MergePackContents, RekeyFilesResult, RemoteEntry, UploadedSyncAudio, WebDavTestResult } from '../../utils/desktop';
 import type { WebDavConfig } from '../../utils/syncConfig';
 import { deleteCache, getAudio, readCache, writeCache } from '../store';
 import { blobId } from '../backup';
 
-export type { MergePackContents, RekeyFilesResult, RemoteEntry, WebDavTestResult };
+export type { MergePackContents, RekeyFilesResult, RemoteEntry, UploadedSyncAudio, WebDavTestResult };
 
 // A record's videoPath on the phone: the episode's web address, or `blob:<id>` for
 // an audio file kept in linguaclip_audio. Blob ones need prepareSrc first.
@@ -64,12 +64,24 @@ export const syncWebdavSupported = (): boolean => false;
 export const syncWebdavTest = (_config: WebDavConfig): Promise<WebDavTestResult> => unsupportedSync();
 export const syncWebdavList = (
   _config: WebDavConfig,
-  _subpath: 'devices' | 'subs' | 'caches' | 'clip-packs',
+  _subpath: 'devices' | 'subs' | 'caches' | 'clip-packs' | 'audio',
 ): Promise<RemoteEntry[]> => unsupportedSync();
 export const syncWebdavGetGz = (_config: WebDavConfig, _relPath: string): Promise<string> => unsupportedSync();
 export const syncWebdavPutGz = (_config: WebDavConfig, _relPath: string, _content: string): Promise<string | null> =>
   unsupportedSync();
 export const syncWebdavDelete = (_config: WebDavConfig, _relPath: string): Promise<void> => unsupportedSync();
+export const syncUploadAudio = (
+  _config: WebDavConfig,
+  _srcPath: string,
+  _relPath: string,
+  _maxBytes?: number,
+): Promise<UploadedSyncAudio> => unsupportedSync();
+export const syncDownloadAudio = (
+  _config: WebDavConfig,
+  _relPath: string,
+  _videoId: string,
+  _expectedSha256: string,
+): Promise<string> => unsupportedSync();
 export const syncUploadClipPack = (
   _config: WebDavConfig,
   _relPath: string,

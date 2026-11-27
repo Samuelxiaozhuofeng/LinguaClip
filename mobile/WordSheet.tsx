@@ -97,26 +97,19 @@ export const WordSheet: React.FC<{
   const plus = (id: string, k: Keep) => {
     const saved = kept.has(id);
     return (
-      <div className="pt-1 flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          data-testid="keep-word-btn"
-          aria-pressed={saved}
-          disabled={saved}
-          onClick={() => { setKept(s => new Set(s).add(id)); onKeep(k); }}
-          className={`min-h-[44px] px-3 rounded-[10px] text-[13px] font-medium whitespace-nowrap ${
-            saved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
-          }`}
-        >
-          {saved ? t('m.w4KeptWordBtn') : (
-            <>
-              <span className="hidden min-[360px]:inline">{t('m.w4KeepWordBtn')}</span>
-              <span className="inline min-[360px]:hidden">{t('m.w4KeepWordShort')}</span>
-            </>
-          )}
-        </button>
-        {saved && <span role="status" className="text-xs text-mute">{t('m.w4KeptWordHint')}</span>}
-      </div>
+      <button
+        type="button"
+        data-testid="keep-word-btn"
+        aria-label={saved ? t('m.w4KeptWordBtn') : t('m.w4KeepWordBtn')}
+        aria-pressed={saved}
+        disabled={saved}
+        onClick={() => { setKept(s => new Set(s).add(id)); onKeep(k); }}
+        className={`shrink-0 w-10 h-10 rounded-[10px] text-[18px] font-medium flex items-center justify-center ${
+          saved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink active:bg-line'
+        }`}
+      >
+        {saved ? '✓' : '＋'}
+      </button>
     );
   };
 
@@ -185,18 +178,18 @@ export const WordSheet: React.FC<{
                 const num = ++n;
                 const isPicked = def.picked != null && num === def.picked;
                 return (
-                  <div key={id} className={`flex gap-2.5 items-start ${isPicked ? 'rounded-xl bg-accent-soft/70 border-l-2 border-accent pl-2.5 pr-1.5 py-1.5 -mx-2' : ''}`}>
-                    <span className={`text-[13px] w-4 pt-0.5 ${isPicked ? 'text-accent font-semibold' : 'text-mute'}`}>{num}</span>
+                  <div key={id} className={`flex gap-2 items-start ${isPicked ? 'rounded-xl bg-accent-soft/70 border-l-2 border-accent pl-2.5 pr-1.5 py-1.5 -mx-2' : ''}`}>
+                    <span className={`text-[13px] w-4 pt-0.5 shrink-0 ${isPicked ? 'text-accent font-semibold' : 'text-mute'}`}>{num}</span>
                     <div className="flex-1 min-w-0 flex flex-col gap-1">
                       <span className="text-[15px] leading-snug">{s.pos && <i className="text-mute mr-1">{s.pos}</i>}{s.phrase && <b className="mr-1">{s.phrase}</b>}<SegText line={s.text} /></span>
                       {s.examples[0] && <span className="font-serif text-sm text-mute"><SegText line={s.examples[0]} /></span>}
                       {isPicked && def.pickNote && <span className="text-[13px] text-accent leading-snug">AI：{def.pickNote}</span>}
                       {isPicked && def.pickCulture && <span className="text-[13px] text-ink/80 leading-snug whitespace-pre-line">{def.pickCulture}</span>}
-                      {!def.phrase && plus(id, {
-                        ...senseFields(e, s, def.ai, isPicked ? pickAiNote : ''),
-                        word: cardWordOf(def, e),
-                      })}
                     </div>
+                    {!def.phrase && plus(id, {
+                      ...senseFields(e, s, def.ai, isPicked ? pickAiNote : ''),
+                      word: cardWordOf(def, e),
+                    })}
                   </div>
                 );
               })}
@@ -207,14 +200,15 @@ export const WordSheet: React.FC<{
           <p className="text-sm text-mute">{def.phrase && !onExplain ? t('m.phraseNoAi') : t(errKey)}</p>
         )}
         {def.ai && (
-          <div className="rounded-xl bg-accent-soft px-3.5 py-3 flex flex-col gap-2">
-            <div className="min-w-0 text-[15px] leading-relaxed whitespace-pre-line">
+          <div className="rounded-xl bg-accent-soft px-3.5 py-3 flex items-start gap-2.5">
+            <div className="flex-1 min-w-0 text-[15px] leading-relaxed whitespace-pre-line">
               <span className="text-xs text-accent font-medium block mb-0.5">AI{def.ai.partOfSpeech ? ` · ${def.ai.partOfSpeech}` : ''}</span>
               {def.ai.definition}{def.ai.culture ? `\n${def.ai.culture}` : ''}
             </div>
             {!def.dict && !def.phrase && plus('ai', { ...aiFields(def.ai), word: cardWordOf(def) })}
           </div>
         )}
+        {!def.phrase && kept.size > 0 && <p role="status" className="text-xs text-accent">{t('m.w4KeptWordHint')}</p>}
         {def.aiBusy && <p className="text-sm text-mute">{t('m.aiAsking')}</p>}
         {def.aiError && <p className="text-sm text-accent">{t('m.aiFail')}</p>}
         {def.dict && def.dict.length > 0 && <p className="text-xs text-mute">{dictSourceLabel(def.dict, t, WORD_PLATFORM, !!onExplain)}</p>}

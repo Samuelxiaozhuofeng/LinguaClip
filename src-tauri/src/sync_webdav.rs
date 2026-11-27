@@ -9,6 +9,7 @@ use std::time::Duration;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use sha2::{Digest, Sha256};
 use tauri_plugin_http::reqwest::{self, Method, Url};
 
 use crate::cache::{valid_id, valid_kind};
@@ -16,7 +17,7 @@ use crate::clips::safe_name;
 
 const UA: &str = "LinguaClip-Sync/1.0";
 const MAX_GZ_BYTES: u64 = 32 * 1024 * 1024;
-const SYNC_SUBDIRS: [&str; 4] = ["devices", "subs", "caches", "clip-packs"];
+const SYNC_SUBDIRS: [&str; 5] = ["devices", "subs", "caches", "clip-packs", "audio"];
 const PROPFIND_BODY: &str = concat!(
   r#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:">"#,
   r#"<d:prop><d:resourcetype/><d:getetag/><d:getcontentlength/></d:prop></d:propfind>"#,
@@ -218,6 +219,13 @@ pub(crate) fn validate_rel_path(rel_path: &str) -> Result<(), String> {
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
         && safe_name(rest).is_ok()
     }),
+    Some(("audio", rest)) => rest.strip_suffix(".m4a").is_some_and(|s| {
+      let mut count = 0usize;
+      s.split("__").all(|p| {
+        count += 1;
+        count <= 3 && valid_id(p)
+      }) && (count == 2 || count == 3)
+    }),
     _ => false,
   };
   ok.then_some(()).ok_or_else(|| format!("sync:invalid_path:{rel_path}"))
@@ -235,17 +243,49 @@ pub(crate) fn build_client(is_local: bool, timeout_secs: u64) -> Result<reqwest:
   b.build().map_err(net_err)
 }
 
+pub(crate) fn build_stream_client(is_local: bool, read_timeout_secs: u64) -> Result<reqwest::Client, String> {
+  let mut b = reqwest::Client::builder()
+    .user_agent(UA)
+    .redirect(reqwest::redirect::Policy::none())
+    .connect_timeout(Duration::from_secs(15))
+    .read_timeout(Duration::from_secs(read_timeout_secs));
+  if is_local {
+    b = b.no_proxy();
+  }
+  b.build().map_err(net_err)
+}
+
+pub(crate) fn build_upload_client(is_local: bool) -> Result<reqwest::Client, String> {
+  let mut b = reqwest::Client::builder()
+    .user_agent(UA)
+    .redirect(reqwest::redirect::Policy::none())
+    .connect_timeout(Duration::from_secs(15));
+  if is_local {
+    b = b.no_proxy();
+  }
+  b.build().map_err(net_err)
+}
+
 pub(crate) fn map_http_error(status: u16, body: &str) -> String {
   match status {
     401 | 403 => "sync:auth".into(),
     404 => "sync:notfound".into(),
     429 | 503 => "sync:ratelimit".into(),
     _ => {
+      // Jianguoyun wraps the real reason in <s:exception>/<s:message>; surface it instead of the XML prologue.
+      if let Some(ex) = first_text(body, "exception") {
+        let msg: String = first_text(body, "message").unwrap_or_default().chars().take(100).collect();
+        return format!("sync:http:{status}:{ex} {msg}").trim_end().to_string();
+      }
       let head: String = body.chars().map(|c| if c == '\r' || c == '\n' { ' ' } else { c }).take(120).collect();
       format!("sync:http:{status}:{}", head.trim())
     }
   }
 }
+
+/// MOVE refusals that a plain overwrite-PUT can still satisfy. 409/412: Jianguoyun ignores
+/// `Overwrite: T` and answers 409 DuplicateName once the target exists (every sync after the first).
+fn move_falls_back_to_put(status: u16) -> bool { matches!(status, 400 | 403 | 405 | 409 | 412 | 501) }
 
 fn header_etag(res: &reqwest::Response) -> Option<String> {
   res.headers().get(reqwest::header::ETAG).and_then(|v| v.to_str().ok()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
@@ -463,7 +503,7 @@ pub(crate) async fn put_bytes_atomic(
   if (200..=299).contains(&move_status) {
     return Ok(move_etag.or(put_etag));
   }
-  if matches!(move_status, 400 | 403 | 405 | 501) {
+  if move_falls_back_to_put(move_status) {
     let direct = ep.auth(client.put(&target_url)).header(reqwest::header::CONTENT_TYPE, content_type).body(bytes).send().await.map_err(net_err)?;
     let (d_status, d_etag) = (direct.status().as_u16(), header_etag(&direct));
     let _ = ep.auth(client.delete(&tmp_url)).send().await;
@@ -474,6 +514,104 @@ pub(crate) async fn put_bytes_atomic(
   }
   let body = move_res.text().await.unwrap_or_default();
   let _ = ep.auth(client.delete(&tmp_url)).send().await;
+  Err(map_http_error(move_status, &body))
+}
+
+pub(crate) async fn ensure_subdir(client: &reqwest::Client, ep: &Endpoint, subpath: &str) -> Result<(), String> {
+  let mkcol = Method::from_bytes(b"MKCOL").expect("MKCOL");
+  let res = ep.auth(client.request(mkcol, ep.dir_url(subpath))).send().await.map_err(net_err)?;
+  let status = res.status().as_u16();
+  if matches!(status, 200 | 201 | 204 | 301 | 405) {
+    Ok(())
+  } else {
+    Err(map_http_error(status, &res.text().await.unwrap_or_default()))
+  }
+}
+
+pub(crate) async fn put_file_atomic(
+  client: &reqwest::Client,
+  ep: &Endpoint,
+  rel_path: &str,
+  file_path: &Path,
+  content_type: &str,
+) -> Result<Option<String>, String> {
+  let file_len = tokio::fs::metadata(file_path).await.map_err(|e| format!("sync:io:{e}"))?.len();
+  let put_timeout = Duration::from_secs(120u64.saturating_add(file_len / 16_384));
+  let op_timeout = Duration::from_secs(60);
+  let target_url = ep.file_url(rel_path);
+  let tmp_url = format!("{target_url}.tmp");
+  let file = tokio::fs::File::open(file_path).await.map_err(|e| format!("sync:io:{e}"))?;
+  let put_res = match ep
+    .auth(client.put(&tmp_url))
+    .timeout(put_timeout)
+    .header(reqwest::header::CONTENT_TYPE, content_type)
+    .header(reqwest::header::CONTENT_LENGTH, file_len)
+    .body(reqwest::Body::from(file))
+    .send()
+    .await
+  {
+    Ok(r) => r,
+    Err(e) => {
+      let _ = ep.auth(client.delete(&tmp_url)).timeout(op_timeout).send().await;
+      return Err(net_err(e));
+    }
+  };
+  let (put_status, put_etag) = (put_res.status().as_u16(), header_etag(&put_res));
+  if !(200..=299).contains(&put_status) {
+    let body = put_res.text().await.unwrap_or_default();
+    let _ = ep.auth(client.delete(&tmp_url)).timeout(op_timeout).send().await;
+    return Err(map_http_error(put_status, &body));
+  }
+  let move_res = match ep
+    .auth(client.request(Method::from_bytes(b"MOVE").expect("MOVE"), &tmp_url))
+    .timeout(op_timeout)
+    .header("Destination", &target_url)
+    .header("Overwrite", "T")
+    .send()
+    .await
+  {
+    Ok(r) => r,
+    Err(e) => {
+      let _ = ep.auth(client.delete(&tmp_url)).timeout(op_timeout).send().await;
+      return Err(net_err(e));
+    }
+  };
+  let (move_status, move_etag) = (move_res.status().as_u16(), header_etag(&move_res));
+  if (200..=299).contains(&move_status) {
+    return Ok(move_etag.or(put_etag));
+  }
+  if move_falls_back_to_put(move_status) {
+    let file2 = match tokio::fs::File::open(file_path).await {
+      Ok(f) => f,
+      Err(e) => {
+        let _ = ep.auth(client.delete(&tmp_url)).timeout(op_timeout).send().await;
+        return Err(format!("sync:io:{e}"));
+      }
+    };
+    let direct = match ep
+      .auth(client.put(&target_url))
+      .timeout(put_timeout)
+      .header(reqwest::header::CONTENT_TYPE, content_type)
+      .header(reqwest::header::CONTENT_LENGTH, file_len)
+      .body(reqwest::Body::from(file2))
+      .send()
+      .await
+    {
+      Ok(r) => r,
+      Err(e) => {
+        let _ = ep.auth(client.delete(&tmp_url)).timeout(op_timeout).send().await;
+        return Err(net_err(e));
+      }
+    };
+    let (d_status, d_etag) = (direct.status().as_u16(), header_etag(&direct));
+    let _ = ep.auth(client.delete(&tmp_url)).timeout(op_timeout).send().await;
+    if (200..=299).contains(&d_status) {
+      return Ok(d_etag);
+    }
+    return Err(map_http_error(d_status, &direct.text().await.unwrap_or_default()));
+  }
+  let body = move_res.text().await.unwrap_or_default();
+  let _ = ep.auth(client.delete(&tmp_url)).timeout(op_timeout).send().await;
   Err(map_http_error(move_status, &body))
 }
 
@@ -496,6 +634,32 @@ pub(crate) async fn download_to_file_limited(
   }
   file.sync_all().map_err(|e| format!("sync:io:{e}"))?;
   Ok(total)
+}
+
+pub(crate) async fn download_to_file_sha256(
+  client: &reqwest::Client,
+  ep: &Endpoint,
+  rel_path: &str,
+  dest: &Path,
+  max_bytes: u64,
+) -> Result<(u64, String), String> {
+  use tokio::io::AsyncWriteExt;
+  let mut res = get_checked(client, ep, rel_path, max_bytes).await?;
+  let mut file = tokio::fs::File::create(dest).await.map_err(|e| format!("sync:io:{e}"))?;
+  let mut hasher = Sha256::new();
+  let mut total = 0u64;
+  while let Some(chunk) = res.chunk().await.map_err(net_err)? {
+    total += chunk.len() as u64;
+    if total > max_bytes {
+      return Err("sync:corrupt:too_large".into());
+    }
+    hasher.update(&chunk);
+    file.write_all(&chunk).await.map_err(|e| format!("sync:io:{e}"))?;
+  }
+  file.flush().await.map_err(|e| format!("sync:io:{e}"))?;
+  file.sync_all().await.map_err(|e| format!("sync:io:{e}"))?;
+  let hex: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+  Ok((total, hex))
 }
 
 async fn propfind_dir(client: &reqwest::Client, ep: &Endpoint, subpath: &str) -> Result<Vec<RemoteEntry>, String> {

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { MoreHorizontal, Loader2, Play } from 'lucide-react';
 import { LearningMode, VideoRecord } from '../types';
 import * as VideoStorage from '../utils/videoStorage';
@@ -28,6 +28,8 @@ import { cancelSegments, getSegJob, subscribeSeg } from '../utils/jaSegments';
 import { deckCounts, deleteVideoCards, getAllCards, keepOrphans, subscribeCards } from '../utils/review';
 import { clipVideoNow } from '../utils/clips';
 import { subscribeSyncApplied } from '../utils/syncEngine';
+import { getSyncAudioSnapshot, subscribeSyncAudio } from '../utils/syncAudio';
+import { audioSyncBadgeText, audioSyncMenuItem } from './SyncAudioMenu';
 import WeekStats from './WeekStats';
 import TodayBar from './TodayBar';
 import HomeEmpty from './HomeEmpty';
@@ -64,6 +66,7 @@ const Line: React.FC<{ pct: number; className?: string }> = ({ pct, className = 
 const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsked, onAddHandled, podcastAsked, onPodcastHandled }) => {
   const t = useT();
   const lang = useLang();
+  const audioSnap = useSyncExternalStore(subscribeSyncAudio, getSyncAudioSnapshot);
   const [videos, setVideos] = useState<VideoRecord[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [filter, setFilterState] = useState<LibraryFilter>(getLibraryFilter);
@@ -271,17 +274,21 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
   };
 
   const prepLine = (v: VideoRecord) => {
-    if (!hasAi || v.importJob) return null;
+    if (v.importJob) return null;
     const parts: string[] = [];
-    const seg = getSegJob(v.id);
-    if (seg?.total) parts.push(t('home.prepSegmentRunning', { done: seg.done, total: seg.total }));
-    const one = (job: { done: number; total: number } | undefined, info: PrepInfo | undefined, kind: 'Breakdown' | 'Cloze') => {
-      if (job) parts.push(t(`home.prep${kind}Running`, { done: job.done, total: job.total || '…' }));
-      else if (info && info.eligible > 0 && info.missing < info.eligible)
-        parts.push(info.missing === 0 ? t(`home.prep${kind}Done`) : t(`home.prep${kind}Part`, { done: info.eligible - info.missing, total: info.eligible }));
-    };
-    one(getPrepJob(v.id), prep.get(v.id), 'Breakdown');
-    one(getClozeJob(v.id), cloze.get(v.id), 'Cloze');
+    if (hasAi) {
+      const seg = getSegJob(v.id);
+      if (seg?.total) parts.push(t('home.prepSegmentRunning', { done: seg.done, total: seg.total }));
+      const one = (job: { done: number; total: number } | undefined, info: PrepInfo | undefined, kind: 'Breakdown' | 'Cloze') => {
+        if (job) parts.push(t(`home.prep${kind}Running`, { done: job.done, total: job.total || '…' }));
+        else if (info && info.eligible > 0 && info.missing < info.eligible)
+          parts.push(info.missing === 0 ? t(`home.prep${kind}Done`) : t(`home.prep${kind}Part`, { done: info.eligible - info.missing, total: info.eligible }));
+      };
+      one(getPrepJob(v.id), prep.get(v.id), 'Breakdown');
+      one(getClozeJob(v.id), cloze.get(v.id), 'Cloze');
+    }
+    const audioNote = audioSyncBadgeText(v, audioSnap, t);
+    if (audioNote) parts.push(audioNote);
     return parts.length ? <span> · {parts.join(' · ')}</span> : null;
   };
 
@@ -296,6 +303,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
         if (b) items.push(b);
         if (c) items.push(c);
       }
+      const a = audioSyncMenuItem(v, audioSnap, t);
+      if (a) items.push(a);
       items.push('divider');
     }
     items.push({ label: t('home.deleteRecordTitle'), onClick: () => handleDelete(v), disabled: deletingId === v.id });

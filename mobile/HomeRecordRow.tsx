@@ -1,8 +1,9 @@
 // One practiced or importing record row on phone Home: clickable even when audio is missing
 // (opens Study in Read mode), shows desktop/missing-audio status, and handles web/Android repick.
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useSyncExternalStore } from 'react';
 import type { VideoRecord } from '../types';
 import { useT } from '../utils/i18n';
+import { downloadRemoteAudioNow, formatAudioMB, getSyncAudioSnapshot, subscribeSyncAudio } from '../utils/syncAudio';
 import { patchVideoRecord, updateVideoWith } from '../utils/videoStorage';
 import { blobId } from './backup';
 import { isDesktopPath } from './homeHelpers';
@@ -13,6 +14,7 @@ import type { ProbeTracksResult } from './platform/androidBridge';
 import { clearAndroidJobTmp, extractAndroidRecordAudio, pickAndroidMedia } from './platform/homePlatform';
 import { resumeWayOf } from './resumePos';
 import { putAudio } from './store';
+import { formatSyncError } from './SyncHost';
 import { MAX_BYTES, NO_MEDIA } from './transcribe';
 import { errText, heardPct, sourceOf } from './ui';
 
@@ -52,6 +54,7 @@ export const HomeRecordRow: React.FC<{
   onNeedTrackPick: (req: PendingRepickTrack) => void;
 }> = ({ r, webMissing, androidMissing, android, onOpen, onFixed, onNeedTrackPick }) => {
   const t = useT();
+  const audioSnap = useSyncExternalStore(subscribeSyncAudio, getSyncAudioSnapshot);
   const job = r.importJob;
   const input = useRef<HTMLInputElement>(null);
   const [err, setErr] = useState('');
@@ -126,17 +129,27 @@ export const HomeRecordRow: React.FC<{
   const pct = !job ? heardPct(r) : 0;
   const fromDesktop = isDesktopPath(r.videoPath ?? job?.source);
   const missingLabel = fromDesktop ? t('m.w3FromDesktopNoAudio') : t('m.w3NoAudioHere');
+  const offer = android && !job && isMissing ? audioSnap.remoteAudioOffers[r.id] : undefined;
+  const downloading = !!offer && audioSnap.downloadingIds.includes(r.id);
+  const dlErr = offer ? audioSnap.downloadErrors[r.id] : undefined;
+  const offerBadge = offer ? t('sync.audioReadyBadge', { size: formatAudioMB(offer.bytes) }) : '';
   const metaLine = err
     ? `${sourceOf(r)} · ${err}`
-    : isMissing
-      ? r.podcast
-        ? `${sourceOf(r)} · ${missingLabel}`
-        : pct > 0
-          ? `${missingLabel} · ${t('m.doneRate', { n: pct })}`
-          : missingLabel
-      : job
-        ? `${sourceOf(r)} · ${job.error ? t('m.failed', { why: errText(job.error) }) : jobStageText(job, t)}`
-        : `${sourceOf(r)} · ${t('m.doneRate', { n: pct })}`;
+    : dlErr
+      ? formatSyncError(dlErr, t)
+      : offer
+        ? pct > 0
+          ? `${offerBadge} · ${t('m.doneRate', { n: pct })}`
+          : offerBadge
+        : isMissing
+          ? r.podcast
+            ? `${sourceOf(r)} · ${missingLabel}`
+            : pct > 0
+              ? `${missingLabel} · ${t('m.doneRate', { n: pct })}`
+              : missingLabel
+          : job
+            ? `${sourceOf(r)} · ${job.error ? t('m.failed', { why: errText(job.error) }) : jobStageText(job, t)}`
+            : `${sourceOf(r)} · ${t('m.doneRate', { n: pct })}`;
   const lastWay = !job ? resumeWayOf(r) : null;
 
   return (
@@ -149,7 +162,7 @@ export const HomeRecordRow: React.FC<{
               {t('m.lastWayTag', { way: t(WAY_LABEL_KEY[lastWay]) })}
             </span>
           )}
-          <span className={`text-[13px] ${job?.error || isMissing || err ? 'text-accent' : 'text-mute'}`}>{metaLine}</span>
+          <span className={`text-[13px] ${job?.error || isMissing || err || dlErr ? 'text-accent' : 'text-mute'}`}>{metaLine}</span>
         </span>
       </button>
       {inProgress && (
@@ -170,11 +183,29 @@ export const HomeRecordRow: React.FC<{
           {t('m.retry')}
         </button>
       )}
+      {offer && (
+        <button
+          type="button"
+          data-testid="row-download-audio-btn"
+          disabled={downloading || repicking}
+          className="min-h-[44px] ml-1.5 px-3 rounded-[10px] bg-accent text-white text-[13px] font-medium shrink-0 whitespace-nowrap disabled:opacity-50"
+          onClick={() => {
+            setErr('');
+            void downloadRemoteAudioNow(r.id).then(saved => { if (saved) onFixed(); });
+          }}
+        >
+          {downloading ? t('sync.downloadingAudio') : t('sync.downloadAudio', { size: formatAudioMB(offer.bytes) })}
+        </button>
+      )}
       {(effectiveAndroidMissing || needsReimport) && (
         <button
           type="button"
-          disabled={repicking}
-          className="min-h-[44px] px-3 text-sm text-accent font-medium shrink-0 disabled:opacity-50"
+          disabled={repicking || downloading}
+          className={
+            offer
+              ? 'min-h-[44px] px-2 text-[13px] text-mute font-medium shrink-0 whitespace-nowrap disabled:opacity-50'
+              : 'min-h-[44px] px-3 text-sm text-accent font-medium shrink-0 disabled:opacity-50'
+          }
           onClick={() => { void repickAndroid(); }}
         >
           {t('m.repick')}

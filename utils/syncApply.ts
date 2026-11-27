@@ -23,7 +23,7 @@ import {
 } from './syncSettingsApply';
 import {
   SYNC_FORMAT, type CardSyncMeta, type DeviceSnapshot, type MergeOptions, type MergeResult,
-  type NeededClip, type SyncPlatform, type SyncTombstones, type SyncVideoHeader,
+  type NeededClip, type SyncAudioOffer, type SyncPlatform, type SyncTombstones, type SyncVideoHeader,
 } from './syncTypes';
 import { applyDaysDev, readDaysDev } from './today';
 
@@ -63,7 +63,14 @@ function openReviewDB(): Promise<IDBDatabase> {
 }
 
 export interface BuildSnapshotOptions {
-  platform: SyncPlatform; ownDir: string; clipPacks?: Record<string, string[]>; lastMergedAt?: number; now?: number;
+  platform: SyncPlatform;
+  ownDir: string;
+  clipPacks?: Record<string, string[]>;
+  audioOffers?: Record<string, SyncAudioOffer>;
+  audioHave?: string[];
+  audioAck?: Record<string, string>;
+  lastMergedAt?: number;
+  now?: number;
 }
 export interface LocalSnapshotBundle {
   snapshot: DeviceSnapshot; subsByHash: Record<string, string>; localClipFiles: string[];
@@ -93,6 +100,18 @@ export async function buildLocalSnapshot(opts: BuildSnapshotOptions): Promise<Lo
   const settings = collectSafeSettings(prevSettingsMeta, devId, now);
   const localClipFiles = clipFiles(review.cards);
 
+  const audioOffers = opts.audioOffers && Object.keys(opts.audioOffers).length > 0 ? opts.audioOffers : undefined;
+  const audioHave = opts.audioHave
+    ? [...new Set(opts.audioHave.filter(x => typeof x === 'string' && !!x))].sort()
+    : [];
+  const audioAck: Record<string, string> = {};
+  if (opts.audioAck) {
+    for (const k of Object.keys(opts.audioAck).sort()) {
+      const v = opts.audioAck[k];
+      if (k && typeof v === 'string' && v) audioAck[k] = v;
+    }
+  }
+
   const snapshot: DeviceSnapshot = {
     v: SYNC_FORMAT, devId, platform: opts.platform, ownDir: opts.ownDir,
     exportedAt: now, lastMergedAt: opts.lastMergedAt ?? 0,
@@ -106,6 +125,9 @@ export async function buildLocalSnapshot(opts: BuildSnapshotOptions): Promise<Lo
     ...(Object.keys(idRedirects).length > 0 ? { idRedirects } : {}),
     ...(Object.keys(settings).length > 0 ? { settings } : {}),
     ...(opts.clipPacks && Object.keys(opts.clipPacks).length > 0 ? { clipPacks: opts.clipPacks } : {}),
+    ...(audioOffers ? { audioOffers } : {}),
+    ...(audioHave.length > 0 ? { audioHave } : {}),
+    ...(Object.keys(audioAck).length > 0 ? { audioAck } : {}),
   };
   return { snapshot, subsByHash, localClipFiles, rawVideos, rawCards: review.cards, pendingClips };
 }
@@ -397,7 +419,35 @@ export function parsePeerSnapshot(raw: string): DeviceSnapshot | null {
     const obj = JSON.parse(raw) as Partial<DeviceSnapshot> | null;
     if (!isRecord(obj) || typeof obj.devId !== 'string' || !obj.devId || typeof obj.v !== 'number') return null;
     if (!Array.isArray(obj.videos) || !Array.isArray(obj.cards)) return null;
-    return obj as DeviceSnapshot;
+    const snap = obj as DeviceSnapshot;
+    if ('audioHave' in snap) {
+      snap.audioHave = Array.isArray(snap.audioHave)
+        ? snap.audioHave.filter((x): x is string => typeof x === 'string' && !!x)
+        : undefined;
+    }
+    if ('audioAck' in snap) {
+      if (isRecord(snap.audioAck)) {
+        const clean: Record<string, string> = {};
+        for (const [k, v] of Object.entries(snap.audioAck)) if (k && typeof v === 'string' && v) clean[k] = v;
+        snap.audioAck = clean;
+      } else snap.audioAck = undefined;
+    }
+    if ('audioOffers' in snap) {
+      if (isRecord(snap.audioOffers)) {
+        const clean: Record<string, SyncAudioOffer> = {};
+        for (const [k, v] of Object.entries(snap.audioOffers)) {
+          if (!k || !isRecord(v)) continue;
+          if (typeof v.file !== 'string' || !v.file || typeof v.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(v.sha256) ||
+            typeof v.bytes !== 'number' || !Number.isFinite(v.bytes) || v.bytes < 0 ||
+            typeof v.durSec !== 'number' || !Number.isFinite(v.durSec) || v.durSec < 0 ||
+            typeof v.createdAt !== 'number' || !Number.isFinite(v.createdAt)) continue;
+          const offerId = typeof v.offerId === 'string' && v.offerId ? v.offerId : undefined;
+          clean[k] = { file: v.file, sha256: v.sha256, bytes: v.bytes, durSec: v.durSec, createdAt: v.createdAt, ...(offerId ? { offerId } : {}) };
+        }
+        snap.audioOffers = clean;
+      } else snap.audioOffers = undefined;
+    }
+    return snap;
   } catch { return null; }
 }
 

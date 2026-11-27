@@ -9,33 +9,14 @@ import type { ReviewCard } from './review';
 import { compareStamp } from './syncClock';
 import { mergeCard } from './syncCardMerge';
 import {
-  buildRedirects,
-  buildWinnerAlignmentIndex,
-  mergeDaysDev,
-  mergeSettings,
-  mergeTwoVideos,
-  remapCardIdString,
-  remapSnapshot,
-  resolveVideoPathForLocal,
-  sortObj,
+  buildRedirects, buildWinnerAlignmentIndex, isHttpUrl, mergeDaysDev, mergeSettings, mergeTwoVideos,
+  remapCardIdString, remapSnapshot, resolveVideoPathForLocal, sortObj,
 } from './syncRekey';
 import {
-  ACTIVE_PEER_WINDOW_MS,
-  SYNC_FORMAT,
-  TOMBSTONE_GC_AGE_MS,
-  type CardSyncMeta,
-  type DeviceSnapshot,
-  type MergeOptions,
-  type MergeResult,
-  type NeededClip,
-  type PosAtMap,
-  type SafetyAlert,
-  type SyncPlatform,
-  type SyncPositions,
-  type SyncTombstones,
-  type SyncVideoHeader,
-  type VideoPosAt,
-  type VideoTombstone,
+  ACTIVE_PEER_WINDOW_MS, AUDIO_ACTIVE_ANDROID_WINDOW_MS, AUDIO_OFFER_TTL_MS, SYNC_FORMAT, TOMBSTONE_GC_AGE_MS,
+  type CardSyncMeta, type DeviceSnapshot, type MergeOptions, type MergeResult, type NeededClip,
+  type PosAtMap, type RemoteAudioOffer, type SafetyAlert, type SyncAudioOffer, type SyncPlatform,
+  type SyncPositions, type SyncTombstones, type SyncVideoHeader, type VideoPosAt, type VideoTombstone,
 } from './syncTypes';
 
 export * from './syncTypes';
@@ -98,12 +79,7 @@ function mergePositions(
     return out;
   };
 
-  const specs = [
-    ['watch', 'watch', 'watchBy'],
-    ['custom', 'custom', 'customBy'],
-    ['read', 'read', 'readBy'],
-    ['lastWay', 'lastWay', 'lastWayBy'],
-  ] as const;
+  const specs = [['watch', 'watch', 'watchBy'], ['custom', 'custom', 'customBy'], ['read', 'read', 'readBy'], ['lastWay', 'lastWay', 'lastWayBy']] as const;
 
   for (const [field, tsField, byField] of specs) {
     const localMap = extract(local, local.positions?.[field] as Record<string, unknown>, tsField, byField);
@@ -119,8 +95,7 @@ function mergePositions(
       }
       if (!best) continue;
       (positions[field] as Record<string, unknown>)[vid] = best.val;
-      if (!posAt[vid]) posAt[vid] = {};
-      const entry = posAt[vid] as VideoPosAt;
+      const entry = (posAt[vid] ??= {}) as VideoPosAt;
       if (best.ts > 0) { entry[tsField] = best.ts; entry[byField] = best.by; }
       if (field === 'watch') {
         const prevLocal = localMap.get(vid);
@@ -130,12 +105,7 @@ function mergePositions(
   }
 
   return {
-    positions: {
-      watch: sortObj(positions.watch),
-      custom: sortObj(positions.custom),
-      read: sortObj(positions.read),
-      lastWay: sortObj(positions.lastWay),
-    },
+    positions: { watch: sortObj(positions.watch), custom: sortObj(positions.custom), read: sortObj(positions.read), lastWay: sortObj(positions.lastWay) },
     posAt: sortObj(posAt),
     watchPosUpdatedIds: watchPosUpdatedIds.sort(),
   };
@@ -265,8 +235,7 @@ export function mergeSnapshots(
     if (tomb && tomb.at >= maxBorn) continue;
     if (tomb && maxBorn > tomb.at) delete mergedVTombs[vid];
 
-    let acc = versions[0].video;
-    let accDev = versions[0].devId;
+    let acc = versions[0].video, accDev = versions[0].devId;
     for (let i = 1; i < versions.length; i++) {
       acc = mergeTwoVideos(acc, accDev, versions[i].video, versions[i].devId);
       accDev = acc.updatedBy ?? accDev;
@@ -277,8 +246,7 @@ export function mergeSnapshots(
       .filter((x): x is { video: SyncVideoHeader; platform: SyncPlatform; ownDir: string } => !!x.video);
     const resolvedPath = resolveVideoPathForLocal(acc, mappedLocal.videos.get(vid), peerSources, opts, candidateRemappedPaths);
     const finalVideo: SyncVideoHeader = { ...acc };
-    if (resolvedPath !== undefined) finalVideo.videoPath = resolvedPath;
-    else delete finalVideo.videoPath;
+    if (resolvedPath !== undefined) finalVideo.videoPath = resolvedPath; else delete finalVideo.videoPath;
     mergedVideosMap.set(vid, finalVideo);
   }
 
@@ -408,19 +376,15 @@ export function mergeSnapshots(
   ).sort();
 
   // 8. Summary & safety circuit breaker
-  let addedVideos = 0, updatedVideos = 0, removedVideos = 0;
+  let addedVideos = 0, updatedVideos = 0, removedVideos = 0, addedCards = 0, updatedCards = 0, removedCards = 0;
   for (const [vid, v] of mergedVideosMap) {
     const prev = origLocalVideos.get(vid);
-    if (!prev) addedVideos++;
-    else if (videoChanged(prev, v)) updatedVideos++;
+    if (!prev) addedVideos++; else if (videoChanged(prev, v)) updatedVideos++;
   }
   for (const vid of origLocalVideos.keys()) if (!mergedVideosMap.has(vid)) removedVideos++;
-
-  let addedCards = 0, updatedCards = 0, removedCards = 0;
   for (const [cid, c] of mergedCardsMap) {
     const prev = origLocalCards.get(cid);
-    if (!prev) addedCards++;
-    else if (cardChanged(prev, c)) updatedCards++;
+    if (!prev) addedCards++; else if (cardChanged(prev, c)) updatedCards++;
   }
   for (const cid of origLocalCards.keys()) if (!mergedCardsMap.has(cid)) removedCards++;
 
@@ -430,37 +394,106 @@ export function mergeSnapshots(
     (removedCards >= 20 && removedCards / Math.max(1, local.cards.length) > 0.2) ||
     (removedVideos >= 5 && removedVideos / Math.max(1, local.videos.length) > 0.3);
   const safetyAlert: SafetyAlert | null = firstSync || massDeletion
-    ? {
-        kind: firstSync ? 'firstSync' : 'massDeletion',
-        firstSync, massDeletion,
-        localVideos: local.videos.length, localCards: local.cards.length,
-        dropVideos: removedVideos, dropCards: removedCards, summary,
-      }
+    ? { kind: firstSync ? 'firstSync' : 'massDeletion', firstSync, massDeletion, localVideos: local.videos.length, localCards: local.cards.length, dropVideos: removedVideos, dropCards: removedCards, summary }
     : null;
+  const tombstones: SyncTombstones = { videos: sortObj(mergedVTombs), cards: sortObj(mergedCTombs), ...(gcFloorAt > 0 ? { gcFloorAt } : {}) };
 
-  const tombstones: SyncTombstones = {
-    videos: sortObj(mergedVTombs),
-    cards: sortObj(mergedCTombs),
-    ...(gcFloorAt > 0 ? { gcFloorAt } : {}),
+  // 8.5 Compressed audio relay (desktop -> android, offerId ack & delete-on-delivery)
+  const cleanOffer = (o: unknown): SyncAudioOffer | null => {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+    const x = o as Record<string, unknown>;
+    if (typeof x.file !== 'string' || !x.file || typeof x.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(x.sha256) ||
+      typeof x.bytes !== 'number' || !Number.isFinite(x.bytes) || x.bytes < 0 ||
+      typeof x.durSec !== 'number' || !Number.isFinite(x.durSec) || x.durSec < 0 ||
+      typeof x.createdAt !== 'number' || !Number.isFinite(x.createdAt)) return null;
+    return {
+      file: x.file, sha256: x.sha256, bytes: x.bytes, durSec: x.durSec, createdAt: x.createdAt,
+      ...(typeof x.offerId === 'string' && x.offerId ? { offerId: x.offerId } : {}),
+    };
   };
+  const safeIds = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x) : []);
+  const safeObj = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.entries(v as Record<string, unknown>) : []);
+
+  const androidPeers = validPeers.filter(p => p.platform === 'android');
+  const peerAudioHave = new Map(androidPeers.map(p => [p.devId, new Set(safeIds(p.audioHave).map(resolveId))]));
+  const peerAudioAck = new Map<string, Map<string, string>>();
+  for (const p of androidPeers) {
+    if (p.audioAck && typeof p.audioAck === 'object' && !Array.isArray(p.audioAck)) {
+      const m = new Map<string, string>();
+      for (const [k, val] of Object.entries(p.audioAck)) if (k && typeof val === 'string' && val) m.set(resolveId(k), val);
+      peerAudioAck.set(p.devId, m);
+    }
+  }
+  const activeAndroidPeers = androidPeers.filter(p => Math.max(p.exportedAt, p.lastMergedAt) >= opts.now - AUDIO_ACTIVE_ANDROID_WINDOW_MS);
+  const peerAcked = (p: DeviceSnapshot, vid: string, offer: SyncAudioOffer) => {
+    const ackMap = peerAudioAck.get(p.devId);
+    return offer.offerId && ackMap
+      ? ackMap.get(vid) === offer.offerId
+      : peerAudioHave.get(p.devId)!.has(vid) && Math.max(p.exportedAt, p.lastMergedAt) > offer.createdAt;
+  };
+
+  const localAudioOffers: Record<string, SyncAudioOffer> = {}, staleAudioVideoIds: string[] = [], pendingOfferVids = new Set<string>();
+  for (const [rawVid, rawOffer] of safeObj(local.audioOffers)) {
+    const offer = cleanOffer(rawOffer);
+    if (!rawVid || !offer) continue;
+    localAudioOffers[rawVid] = offer;
+    const vid = resolveId(rawVid);
+    if (!mergedVideosMap.has(vid) || opts.now - offer.createdAt > AUDIO_OFFER_TTL_MS ||
+      (!opts.peersIncomplete && !newerFormat && activeAndroidPeers.length > 0 && activeAndroidPeers.every(p => peerAcked(p, vid, offer)))) {
+      staleAudioVideoIds.push(rawVid);
+    } else pendingOfferVids.add(vid);
+  }
+  staleAudioVideoIds.sort();
+
+  const deliveredSet = new Set<string>();
+  for (const s of peerAudioHave.values()) for (const vid of s) if (mergedVideosMap.has(vid) && !pendingOfferVids.has(vid)) deliveredSet.add(vid);
+  const deliveredAudioIds = Array.from(deliveredSet).sort();
+
+  const localAudioHaveSet = new Set(Array.from(opts.localAudioHave ?? safeIds(local.audioHave)).filter((x): x is string => typeof x === 'string' && !!x).map(resolveId));
+  const localAudioAck: Record<string, string> = {}, bestOffers = new Map<string, RemoteAudioOffer>();
+  if (opts.localPlatform === 'android') {
+    for (const [k, val] of safeObj(local.audioAck)) {
+      const vid = resolveId(k);
+      if (k && typeof val === 'string' && val && mergedVideosMap.has(vid) && localAudioHaveSet.has(vid)) localAudioAck[vid] = val;
+    }
+    for (const p of validPeers) {
+      for (const [rawVid, rawOffer] of safeObj(p.audioOffers)) {
+        const offer = cleanOffer(rawOffer);
+        if (!rawVid || !offer) continue;
+        const vid = resolveId(rawVid), v = mergedVideosMap.get(vid);
+        if (!v || v.podcast || isHttpUrl(v.videoPath)) continue;
+        const cand: RemoteAudioOffer = { ...offer, videoId: vid, fromDevId: p.devId }, prev = bestOffers.get(vid);
+        if (!prev || cand.createdAt > prev.createdAt || (cand.createdAt === prev.createdAt && cand.fromDevId < prev.fromDevId)) bestOffers.set(vid, cand);
+      }
+    }
+  }
+  const availableAudioOffers: RemoteAudioOffer[] = [];
+  for (const cand of bestOffers.values()) {
+    if (localAudioHaveSet.has(cand.videoId)) { if (cand.offerId) localAudioAck[cand.videoId] = cand.offerId; }
+    else availableAudioOffers.push(cand);
+  }
+  availableAudioOffers.sort((a, b) => (a.videoId < b.videoId ? -1 : a.videoId > b.videoId ? 1 : 0));
+  const localAudioHaveOut = Array.from(new Set(safeIds(local.audioHave).map(resolveId))).sort(), sortedLocalAck = sortObj(localAudioAck);
 
   const snapshot: DeviceSnapshot = {
     v: SYNC_FORMAT, devId: local.devId, platform: opts.localPlatform, ownDir: opts.localOwnDir,
     exportedAt: opts.now, lastMergedAt: opts.now,
-    videos: Array.from(mergedVideosMap.values()),
-    cards: Array.from(mergedCardsMap.values()),
-    cardMeta: sortObj(mergedCardMeta),
-    tombstones, daysDev, positions, posAt,
+    videos: Array.from(mergedVideosMap.values()), cards: Array.from(mergedCardsMap.values()),
+    cardMeta: sortObj(mergedCardMeta), tombstones, daysDev, positions, posAt,
     ...(Object.keys(mergedReadLooked).length > 0 ? { readLooked: mergedReadLooked } : {}),
     ...(Object.keys(mergedReadGloss).length > 0 ? { readGloss: mergedReadGloss } : {}),
     ...(keptOrphans.length > 0 ? { keptOrphans } : {}),
     ...(Object.keys(idRedirects).length > 0 ? { idRedirects } : {}),
     ...(Object.keys(mergedSettings).length > 0 ? { settings: mergedSettings } : {}),
     ...(local.clipPacks ? { clipPacks: local.clipPacks } : {}),
+    ...(Object.keys(localAudioOffers).length > 0 ? { audioOffers: sortObj(localAudioOffers) } : {}),
+    ...(localAudioHaveOut.length > 0 ? { audioHave: localAudioHaveOut } : {}),
+    ...(Object.keys(sortedLocalAck).length > 0 ? { audioAck: sortedLocalAck } : {}),
   };
 
   return {
     snapshot, projectedDays, rekeys, keptOrphans, watchPosUpdatedIds, neededClips, neededSubs,
-    candidateRemappedPaths: sortObj(candidateRemappedPaths), newerFormat, summary, safetyAlert,
+    candidateRemappedPaths: sortObj(candidateRemappedPaths),
+    availableAudioOffers, staleAudioVideoIds, deliveredAudioIds, localAudioAck: sortedLocalAck, newerFormat, summary, safetyAlert,
   };
 }

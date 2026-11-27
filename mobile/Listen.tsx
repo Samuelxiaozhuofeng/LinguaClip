@@ -20,7 +20,7 @@ import { useWordLookup, cardWordForFirst, firstFields, saveWordCard, type Keep }
 import { Blind, DrillBar, HeardAsk, PassSheet, StepBar, Summary } from './ListenParts';
 import { LineCard, Transcript } from './LineView';
 import { WordSheet } from './WordSheet';
-import { btnPlain, btnPrimary, errText } from './ui';
+import { btnPrimary, errText } from './ui';
 
 const JaBanner: React.FC = () => {
   const t = useT();
@@ -46,7 +46,7 @@ const WebMediaSession: React.FC<{
 const Icon: React.FC<{ d: string; fill?: boolean; size?: number }> = ({ d, fill, size = 26 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill={fill ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
 );
-const round = 'w-[52px] h-[52px] flex items-center justify-center';
+const round = 'w-11 h-11 flex items-center justify-center';
 
 type Word = { word: string; cardWord?: string; key: string; line: Subtitle; fields: Keep | null; kept: boolean };
 
@@ -141,6 +141,9 @@ export const Listen: React.FC<{
   const markPrev = () => { const i = L.markPrevIndex(); if (i < 0) L.say(t('listen.noPrev')); else L.flipMark(lines[i].id, t('m.w1MarkedPrevReview'), t('listen.unmarked')); };
   const marked = useMemo(() => new Set(L.marks.keys()), [L.marks]);
   const [toast, setToast] = useState<string | null>(null);
+  const [freeMore, setFreeMore] = useState(false);
+  useEffect(() => { if (!L.free) setFreeMore(false); }, [L.free]);
+  const freeActiveCount = (L.throughPref ? 1 : 0) + (L.loopLine ? 1 : 0) + (L.autoPause ? 1 : 0);
   useEffect(() => { if (!L.note) return; setToast(L.note.text); const id = window.setTimeout(() => setToast(null), 1800); return () => window.clearTimeout(id); }, [L.note]);
 
   const inSec = section ? section.subtitles.findIndex(l => l.id === cur?.id) : -1;
@@ -166,7 +169,7 @@ export const Listen: React.FC<{
       <LineCard {...lineProps} lines={section!.subtitles} at={peekAt} onAgain={() => L.playLine(section!.subtitles[peekAt])} />
     </>
     : effMode === 'hide' ? <Blind lines={section?.subtitles ?? []} at={inSec} marked={marked} hint={L.free ? null : L.queue ? t('m.drillHint', { n: L.tries }) : t('m.blindHint')} embedded={embedded} multiSection={L.sections.length > 1} />
-    : <Transcript ref={scroller} {...lineProps} lines={section?.subtitles ?? []} cur={cur?.id ?? null} hint={!L.free ? t('m.checkHint') : null}
+    : <Transcript ref={scroller} {...lineProps} lines={section?.subtitles ?? []} cur={cur?.id ?? null}
       onPlay={l => { setFollow(true); L.seek(l.startTime, true); }} onScroll={leave} />;
 
   return (
@@ -193,44 +196,105 @@ export const Listen: React.FC<{
       )}
       {!embedded && ja && <JaBanner />}
       {L.free ? (
-        <div className="mx-5 mt-1 flex gap-2 flex-wrap">
-          {embedded && <button onClick={() => L.goFree(false)} className="min-h-[44px] px-3.5 rounded-full text-[13px] bg-page shadow-card text-mute">{t('listen.route')}</button>}
-          {(['hide', 'show'] as const).map(m => <button key={m} aria-pressed={L.mode === m} onClick={() => L.setMode(m)} className={`min-h-[44px] px-3.5 rounded-full text-[13px] ${L.mode === m ? 'bg-ink text-white' : 'bg-page shadow-card text-mute'}`}>{t(`listen.mode_${m}`)}</button>)}
-          <button aria-pressed={L.throughPref} onClick={L.toggleThrough} className={`min-h-[44px] px-3.5 rounded-full text-[13px] ${L.throughPref ? 'bg-accent-soft text-accent' : 'bg-page shadow-card text-mute'}`}>{t('listen.through')}</button>
-          <button aria-pressed={L.loopLine} onClick={L.toggleLoopLine} className={`min-h-[44px] px-3.5 rounded-full text-[13px] ${L.loopLine ? 'bg-accent-soft text-accent' : 'bg-page shadow-card text-mute'}`}>{t(L.loopLine ? 'm.loopOff' : 'm.loopOn')}</button>
-          <button aria-pressed={L.autoPause} onClick={L.toggleAutoPause} className={`min-h-[44px] px-3.5 rounded-full text-[13px] ${L.autoPause ? 'bg-accent-soft text-accent' : 'bg-page shadow-card text-mute'}`}>{t('m.autoPause')}</button>
-          <button onClick={() => L.goStep(3)} className="min-h-[44px] px-3.5 rounded-full text-[13px] bg-page shadow-card">{t('listen.done')}</button>
+        <div className="mx-4 mt-1 flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <div className="inline-flex items-center bg-page rounded-full p-0.5 shadow-card shrink-0">
+              {(['hide', 'show'] as const).map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={L.mode === m}
+                  onClick={() => L.setMode(m)}
+                  className={`min-h-[40px] px-3 rounded-full text-xs whitespace-nowrap ${
+                    L.mode === m ? 'bg-ink text-white font-medium' : 'text-mute'
+                  }`}
+                >
+                  {t(`listen.mode_${m}`)}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              data-testid="listen-free-options"
+              aria-expanded={freeMore}
+              onClick={() => setFreeMore(v => !v)}
+              className={`min-h-[40px] px-3 rounded-full text-xs whitespace-nowrap flex items-center gap-1 shrink-0 ${
+                freeMore || freeActiveCount > 0 ? 'bg-accent-soft text-accent font-medium' : 'bg-page shadow-card text-mute'
+              }`}
+            >
+              <span>{t('m.listenOptions')}{freeActiveCount > 0 ? ` · ${freeActiveCount}` : ''}</span>
+              <span aria-hidden="true" className="text-[10px] leading-none">{freeMore ? '▴' : '▾'}</span>
+            </button>
+            {embedded && (
+              <button
+                type="button"
+                onClick={() => { setFreeMore(false); L.goFree(false); }}
+                className="ml-auto min-h-[40px] px-2 text-xs text-mute shrink-0 whitespace-nowrap"
+              >
+                {t('listen.route')}
+              </button>
+            )}
+          </div>
+          {freeMore && (
+            <div className="flex gap-1.5 flex-wrap pb-0.5">
+              <button type="button" aria-pressed={L.throughPref} onClick={L.toggleThrough} className={`min-h-[40px] px-3 rounded-full text-xs ${L.throughPref ? 'bg-accent-soft text-accent font-medium' : 'bg-page shadow-card text-mute'}`}>{t('listen.through')}</button>
+              <button type="button" aria-pressed={L.loopLine} onClick={L.toggleLoopLine} className={`min-h-[40px] px-3 rounded-full text-xs ${L.loopLine ? 'bg-accent-soft text-accent font-medium' : 'bg-page shadow-card text-mute'}`}>{t(L.loopLine ? 'm.loopOff' : 'm.loopOn')}</button>
+              <button type="button" aria-pressed={L.autoPause} onClick={L.toggleAutoPause} className={`min-h-[40px] px-3 rounded-full text-xs ${L.autoPause ? 'bg-accent-soft text-accent font-medium' : 'bg-page shadow-card text-mute'}`}>{t('m.autoPause')}</button>
+              <button type="button" onClick={() => { setFreeMore(false); L.goStep(3); }} className="min-h-[40px] px-3 rounded-full text-xs bg-page shadow-card text-ink">{t('listen.done')}</button>
+            </div>
+          )}
         </div>
       ) : embedded ? (
-        <div className="mx-5 mt-1 flex items-center gap-2">
+        <div className="mx-4 mt-0.5 flex items-center gap-2">
           <StepBar step={step} onStep={L.goStep} className="flex-1" />
-          <button onClick={() => L.goFree(true)} className="min-h-[44px] px-2 text-xs text-mute shrink-0">{t('listen.free')}</button>
+          <button type="button" onClick={() => L.goFree(true)} className="min-h-[40px] px-2 text-xs text-mute shrink-0">{t('listen.free')}</button>
         </div>
       ) : <StepBar step={step} onStep={L.goStep} />}
 
       <div className="flex-1 min-h-0 overflow-y-auto relative">{body}</div>
       {toast && <p role="status" className={`fixed left-1/2 -translate-x-1/2 ${embedded ? 'top-[calc(env(safe-area-inset-top)+112px)]' : 'top-[calc(env(safe-area-inset-top)+64px)]'} z-20 px-4 py-2 rounded-full bg-ink text-white text-sm`}>{toast}</p>}
 
-      <div className="px-5 pt-3 flex flex-col gap-2.5">
+      <div className="px-4 pt-2">
         {L.inDrill ? <DrillBar n={L.qAt + 1} total={L.queue!.length} play={L.play} tries={L.tries} shown={L.shown} onShow={L.drillShow} onNext={L.drillNext} />
-          : !failed && <>
-            <div className={`grid ${effMode === 'hide' && peekAt < 0 ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
-              <button className={btnPlain} onClick={markPrev}>{t('m.markPrev')}</button>
-              {effMode === 'hide' && peekAt < 0 && <button className={btnPlain} onClick={L.openPeek} disabled={!cur}>{t('listen.peek')}</button>}
+          : !failed && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="h-[50px] px-2.5 rounded-[14px] bg-page text-ink text-[13px] font-medium shadow-card shrink-0 leading-tight active:bg-shade"
+                onClick={markPrev}
+              >
+                {t('m.markPrev')}
+              </button>
+              <button
+                type="button"
+                className={`${btnPrimary} h-[50px] flex-1 min-w-0 px-2.5 text-[14px] leading-tight`}
+                onClick={markNow}
+                disabled={!cur}
+                aria-pressed={!!cur && marked.has(cur.id)}
+              >
+                {cur && marked.has(cur.id) ? t('m.unmarkNow') : t('m.markNow')}
+              </button>
+              {effMode === 'hide' && peekAt < 0 && (
+                <button
+                  type="button"
+                  className="h-[50px] px-2.5 rounded-[14px] bg-page text-ink text-[13px] font-medium shadow-card shrink-0 leading-tight disabled:opacity-50 active:bg-shade"
+                  onClick={L.openPeek}
+                  disabled={!cur}
+                >
+                  {t('listen.peek')}
+                </button>
+              )}
             </div>
-            <button className={`${btnPrimary} h-16 text-[17px]`} onClick={markNow} disabled={!cur} aria-pressed={!!cur && marked.has(cur.id)}>
-              {cur && marked.has(cur.id) ? t('m.unmarkNow') : t('m.markNow')}
-            </button>
-          </>}
+          )}
       </div>
-      <div className="px-7 pt-3 pb-[max(20px,env(safe-area-inset-bottom))] flex items-center justify-between">
-        <button className={`${round} text-[13px] text-mute`} onClick={L.cycleSpeed} aria-label={t('m.speed')}>{L.speed === 1 ? '1.0' : L.speed}×</button>
-        <button className={round} aria-label={t('m.prevLine')} onClick={L.prev}><Icon d="M15 18l-6-6 6-6M6 6v12" /></button>
-        <button className="w-[72px] h-[72px] rounded-full bg-ink text-white flex items-center justify-center" aria-label={t(L.playing ? 'm.pause' : 'm.play')} onClick={L.toggle} disabled={!L.ready || !!failed}>
-          {L.playing ? <Icon d="M9 6v12M15 6v12" /> : <Icon d="M7 4l13 8-13 8z" fill />}
+      <div className="px-5 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] flex items-center justify-between">
+        <button type="button" className={`${round} text-[13px] text-mute`} onClick={L.cycleSpeed} aria-label={t('m.speed')}>{L.speed === 1 ? '1.0' : L.speed}×</button>
+        <button type="button" className={round} aria-label={t('m.prevLine')} onClick={L.prev}><Icon d="M15 18l-6-6 6-6M6 6v12" size={22} /></button>
+        <button type="button" className="w-[60px] h-[60px] rounded-full bg-ink text-white flex items-center justify-center" aria-label={t(L.playing ? 'm.pause' : 'm.play')} onClick={L.toggle} disabled={!L.ready || !!failed}>
+          {L.playing ? <Icon d="M9 6v12M15 6v12" size={24} /> : <Icon d="M7 4l13 8-13 8z" fill size={24} />}
         </button>
-        <button className={round} aria-label={t('m.nextLine')} onClick={nextBtn}><Icon d="M9 18l6-6-6-6M18 6v12" /></button>
-        <button className={round} aria-label={t('m.replayLine')} onClick={L.replay}><Icon d="M1 4v6h6M3.5 15a9 9 0 1 0 2.1-9.4L1 10" size={24} /></button>
+        <button type="button" className={round} aria-label={t('m.nextLine')} onClick={nextBtn}><Icon d="M9 18l6-6-6-6M18 6v12" size={22} /></button>
+        <button type="button" className={round} aria-label={t('m.replayLine')} onClick={L.replay}><Icon d="M1 4v6h6M3.5 15a9 9 0 1 0 2.1-9.4L1 10" size={21} /></button>
       </div>
 
       {L.passCard && !L.summary && (

@@ -10,6 +10,7 @@ import android.view.View
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
@@ -24,10 +25,19 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     val contentView = findViewById<View>(android.R.id.content)
+    // The content view already pads away the system bars, cutout and keyboard. Hand the WebView insets with
+    // the bars / cutout zeroed, or it reports them again as CSS env(safe-area-inset-*) and the page
+    // pads the status bar twice (≈10% blank strip on top). The IME inset passes through unchanged.
     ViewCompat.setOnApplyWindowInsetsListener(contentView) { view, insets ->
-      val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
+      val bars = insets.getInsets(
+        WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime(),
+      )
       view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-      insets
+      WindowInsetsCompat.Builder(insets)
+        .setInsets(WindowInsetsCompat.Type.systemBars(), Insets.NONE)
+        .setInsets(WindowInsetsCompat.Type.displayCutout(), Insets.NONE)
+        .setDisplayCutout(null)
+        .build()
     }
     persistDeviceIdentity()
     captureShareIntent(intent)

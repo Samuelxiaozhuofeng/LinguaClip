@@ -83,7 +83,7 @@ export const PastePairSheet: React.FC<{
     if (!parsed || busy) return;
     setBusy(true); setErr('');
     try {
-      const res = await testAndEnableSync({ ...parsed, enabled: true });
+      const res = await testAndEnableSync({ ...parsed, wifiOnlyAudio: parsed.wifiOnlyAudio ?? true, enabled: true });
       const msg = res.existingDevices > 0 ? t('sync.connectedWithPeers', { n: res.existingDevices }) : t('sync.connected');
       onApplied(msg);
       onClose();
@@ -143,7 +143,14 @@ export const ConfigSyncSheet: React.FC<{
   const canSubmit = !!form.url.trim() && !!form.username.trim() && !!form.password;
   const submit = async () => {
     if (busy || !canSubmit) return;
-    const cfg: WebDavConfig = { ...form, url: form.url.trim(), username: form.username.trim(), rootDir: form.rootDir.trim() || 'LinguaClip', enabled: true };
+    const cfg: WebDavConfig = {
+      ...form,
+      url: form.url.trim(),
+      username: form.username.trim(),
+      rootDir: form.rootDir.trim() || 'LinguaClip',
+      wifiOnlyAudio: form.wifiOnlyAudio ?? true,
+      enabled: true,
+    };
     if (!isSafeWebDavUrl(cfg.url)) { setErr(t('sync.errInsecure')); return; }
     setBusy(true); setErr('');
     try {
@@ -195,6 +202,14 @@ export const ConfigSyncSheet: React.FC<{
           <span className="text-[14px] text-ink">{t('sync.wifiOnlyClips')}</span>
           <input type="checkbox" checked={form.wifiOnlyClips} disabled={busy || !form.syncClips} className="w-5 h-5 shrink-0 accent-accent"
             onChange={e => setForm(f => ({ ...f, wifiOnlyClips: e.target.checked }))} />
+        </label>
+        <label className="pt-1 flex items-start justify-between gap-3">
+          <span className="flex flex-col gap-0.5">
+            <span className="text-[14px] text-ink">{t('sync.wifiOnlyAudio')}</span>
+            <span className="text-[12px] text-mute leading-relaxed">{t('sync.wifiOnlyAudioHint')}</span>
+          </span>
+          <input type="checkbox" checked={form.wifiOnlyAudio ?? true} disabled={busy} className="w-5 h-5 mt-0.5 shrink-0 accent-accent"
+            onChange={e => setForm(f => ({ ...f, wifiOnlyAudio: e.target.checked }))} />
         </label>
       </div>
       {err && <p role="alert" className="text-[13px] text-accent leading-relaxed">{err}</p>}

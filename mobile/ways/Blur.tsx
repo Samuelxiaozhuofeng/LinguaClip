@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Subtitle } from '../../types';
 import { useSavedLines } from '../../hooks/useSavedLines';
+import { canCloze } from '../../utils/aiDrills';
 import { detectLang } from '../../utils/dictionary';
 import { useT } from '../../utils/i18n';
 import { loadJa, useJaVersion } from '../../utils/japanese';
@@ -186,29 +187,21 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
     ? (player.errorCode === 'listen.failed' ? t('listen.failed') : errText(player.errorCode))
     : '';
   const isSaved = !!line && savedIds.has(line.id);
+  const hasAi = canCloze();
   let wi = 0;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-paper" data-blur-missed={missedCount}>
       <PlayerAudio player={player} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 pb-4 flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2 px-1">
-          <p className="text-xs text-mute">{t('m.blurHint')}</p>
-          {missedHere && (
-            <span className="text-xs text-accent shrink-0" data-testid="blur-missed-badge">
-              {t('m.blurRevealedMark')}
-            </span>
-          )}
-        </div>
-
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-2 pb-4 flex flex-col gap-2.5">
         {audioErr && (
           <p role="alert" className="text-xs text-accent px-1">
             {audioErr}
           </p>
         )}
 
-        <div className="bg-page rounded-2xl shadow-card px-4 py-6 flex flex-col gap-5">
+        <div className="bg-page rounded-2xl shadow-card px-4 py-4 flex flex-col gap-3">
           <div className="font-serif text-[24px] leading-[1.7] flex flex-wrap items-baseline gap-y-2" data-testid="blur-line">
             {tokens.map(tk => {
               if (tk.type === TokenType.SPACE) {
@@ -243,53 +236,60 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
           {allShown && trans?.[idx] && (
             <p
               data-testid="blur-trans"
-              className="text-[14px] leading-relaxed text-mute border-t border-shade pt-3"
+              className="text-[14px] leading-relaxed text-mute border-t border-shade pt-2.5"
             >
               {trans[idx]}
             </p>
           )}
 
-          <button
-            type="button"
-            aria-pressed={allShown}
-            onClick={handleToggleAll}
-            className={`w-full min-h-[48px] rounded-xl text-[15px] font-semibold ${
-              allShown ? 'bg-shade text-ink' : 'bg-ink text-white'
-            }`}
-          >
-            {allShown ? t('m.blurHideAll') : t('m.blurRevealAll')}
-          </button>
-
           {line && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => { player.pause(); setShowBreakdown(true); }}
-                className="flex-1 min-h-[44px] px-3 rounded-xl bg-shade text-ink text-[14px] font-medium"
-              >
-                {t('studio.breakdown')}
-              </button>
-              <button
-                type="button"
-                aria-pressed={isSaved}
-                onClick={() => toggleSave(line)}
-                className={`flex-1 min-h-[44px] px-3 rounded-xl text-[14px] font-medium ${
-                  isSaved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
-                }`}
-              >
-                {isSaved ? t('m.saved') : t('m.dictSaveLine')}
-              </button>
+            <div className="pt-1 border-t border-shade flex items-center justify-between gap-2 -mb-1" data-testid="blur-actions">
+              {missedHere ? (
+                <span className="text-[11px] text-accent shrink-0" data-testid="blur-missed-badge">
+                  {t('m.blurRevealedMark')}
+                </span>
+              ) : <span />}
+              <div className="flex items-center gap-1.5">
+                {hasAi && (
+                  <button
+                    type="button"
+                    onClick={() => { player.pause(); setShowBreakdown(true); }}
+                    className="min-h-[40px] inline-flex items-center active:opacity-80"
+                  >
+                    <span className="h-[34px] px-3 rounded-lg bg-shade text-ink text-[13px] font-medium inline-flex items-center whitespace-nowrap">
+                      {t('studio.breakdown')}
+                    </span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  aria-pressed={isSaved}
+                  onClick={() => toggleSave(line)}
+                  className="min-h-[40px] inline-flex items-center active:opacity-80"
+                >
+                  <span
+                    className={`h-[34px] px-3 rounded-lg text-[13px] font-medium inline-flex items-center whitespace-nowrap ${
+                      isSaved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
+                    }`}
+                  >
+                    {isSaved ? t('m.saved') : t('m.dictSaveLine')}
+                  </span>
+                </button>
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      <div className="shrink-0 bg-page border-t border-line px-5 pt-3 pb-[max(16px,env(safe-area-inset-bottom))] flex items-center justify-between gap-2">
+      <div
+        data-testid="blur-dock"
+        className="shrink-0 bg-page border-t border-line px-3 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] flex items-center gap-1.5"
+      >
         <button
           type="button"
           onClick={cycleSpeed}
           aria-label={t('m.speed')}
-          className={`min-w-[52px] min-h-[48px] px-2 rounded-xl text-[13px] font-medium tabular-nums ${
+          className={`shrink-0 min-w-[44px] min-h-[44px] px-1.5 rounded-xl text-[12px] font-medium tabular-nums ${
             player.rate !== 1 ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
           }`}
         >
@@ -301,16 +301,16 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
           disabled={idx <= 0}
           onClick={goPrev}
           aria-label={t('m.prevLine')}
-          className="min-h-[48px] px-4 rounded-xl bg-shade text-ink text-[14px] font-medium disabled:opacity-40"
+          className="w-10 shrink-0 min-h-[44px] rounded-xl bg-shade text-ink text-[18px] leading-none flex items-center justify-center disabled:opacity-40 active:opacity-80"
         >
-          {t('m.prevLine')}
+          <span aria-hidden>‹</span>
         </button>
 
         <button
           type="button"
           onClick={() => (player.playing ? player.pause() : player.playLine(idx, pad))}
           aria-label={t(player.playing ? 'm.pause' : 'm.replayLine')}
-          className="min-w-[84px] min-h-[52px] px-5 rounded-full bg-ink text-white text-[15px] font-semibold flex items-center justify-center gap-1"
+          className="flex-auto min-h-[44px] px-3 rounded-full bg-ink text-white text-[13px] font-semibold flex items-center justify-center gap-1 whitespace-nowrap active:opacity-80"
         >
           <span aria-hidden>{player.playing ? '⏸' : '▶'}</span>
           <span>{player.playing ? t('m.pause') : t('m.dictReplay')}</span>
@@ -318,12 +318,24 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
 
         <button
           type="button"
+          aria-pressed={allShown}
+          onClick={handleToggleAll}
+          data-testid="blur-toggle-all"
+          className={`flex-auto min-h-[44px] px-2.5 rounded-xl text-[13px] font-medium whitespace-nowrap active:opacity-80 ${
+            allShown ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
+          }`}
+        >
+          {allShown ? t('m.blurHideAll') : t('m.blurRevealAll')}
+        </button>
+
+        <button
+          type="button"
           disabled={idx + 1 >= lines.length}
           onClick={goNext}
           aria-label={t('m.nextLine')}
-          className="min-h-[48px] px-4 rounded-xl bg-accent text-white text-[14px] font-semibold disabled:opacity-40"
+          className="shrink-0 min-h-[44px] px-3 rounded-xl bg-accent text-white text-[13px] font-semibold whitespace-nowrap disabled:opacity-40 active:opacity-85"
         >
-          {t('m.nextLine')}
+          {t('m.w2Next')}
         </button>
       </div>
 

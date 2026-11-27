@@ -21,6 +21,7 @@ import { splitLongLines } from './splitLong';
 import { engineArgs, getTranscribeConfig } from './transcribeConfig';
 import * as VideoStorage from './videoStorage';
 import { getAllVideosFromDB } from './fileSystemAccess';
+import { maybeQueueAutoAudioSync } from './syncAudio';
 
 type ImportProgressPayload = {
   id: string;
@@ -375,6 +376,7 @@ async function applyProgress(payload: ImportProgressPayload): Promise<void> {
     else if (jaCheckOn() && hasKana(subtitleText)) {
       prepareSegments(rec.id, linesOf(subtitleText)).catch(err => console.error(err));
     }
+    if (!finished.podcast) maybeQueueAutoAudioSync(finished);
     return;
   }
 

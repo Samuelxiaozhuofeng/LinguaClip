@@ -4,6 +4,7 @@
  *
  * Pure localStorage / string logic — zero @tauri-apps/* imports, ES2020-compatible.
  */
+import type { RemoteAudioOffer, SyncAudioOffer } from './syncTypes';
 
 export const SYNC_DEVICE_KEY = 'linguaclip_sync_device';
 export const SYNC_AUTH_KEY = 'linguaclip_sync_auth';
@@ -28,11 +29,13 @@ export interface WebDavConfig {
   rootDir: string;
   syncClips: boolean;
   wifiOnlyClips: boolean;
+  autoSyncAudio?: boolean;
+  wifiOnlyAudio?: boolean;
 }
 
 export type PairConfig = Pick<
   WebDavConfig,
-  'preset' | 'url' | 'username' | 'password' | 'rootDir' | 'syncClips' | 'wifiOnlyClips'
+  'preset' | 'url' | 'username' | 'password' | 'rootDir' | 'syncClips' | 'wifiOnlyClips' | 'wifiOnlyAudio'
 >;
 
 export interface SyncState {
@@ -46,6 +49,12 @@ export interface SyncState {
   uploadedClips: Record<string, string>;
   clipPackSeq: number;
   clipPacks: Record<string, string[]>;
+  audioOffers: Record<string, SyncAudioOffer>;
+  remoteAudioOffers: Record<string, RemoteAudioOffer>;
+  audioMonthly: { ym: string; bytes: number };
+  audioAutoPending: string[];
+  deliveredAudioIds: string[];
+  audioAck: Record<string, string>;
   authFailed: boolean;
   failCount: number;
   backoffUntil: number;
@@ -65,6 +74,8 @@ const DEFAULT_CONFIG: WebDavConfig = {
   rootDir: 'LinguaClip',
   syncClips: true,
   wifiOnlyClips: false,
+  autoSyncAudio: false,
+  wifiOnlyAudio: true,
 };
 
 const DEFAULT_STATE: SyncState = {
@@ -78,6 +89,12 @@ const DEFAULT_STATE: SyncState = {
   uploadedClips: {},
   clipPackSeq: 0,
   clipPacks: {},
+  audioOffers: {},
+  remoteAudioOffers: {},
+  audioMonthly: { ym: '', bytes: 0 },
+  audioAutoPending: [],
+  deliveredAudioIds: [],
+  audioAck: {},
   authFailed: false,
   failCount: 0,
   backoffUntil: 0,
@@ -147,6 +164,59 @@ function asStrListMap(v: unknown): Record<string, string[]> {
   return out;
 }
 
+function asStrList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const x of v) {
+    if (typeof x === 'string' && x && !seen.has(x)) { seen.add(x); out.push(x); }
+  }
+  return out;
+}
+
+function asAudioOffer(v: unknown): SyncAudioOffer | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.file !== 'string' || !o.file || typeof o.sha256 !== 'string') return null;
+  if (typeof o.bytes !== 'number' || !Number.isFinite(o.bytes) || o.bytes < 0) return null;
+  if (typeof o.durSec !== 'number' || !Number.isFinite(o.durSec) || o.durSec < 0) return null;
+  if (typeof o.createdAt !== 'number' || !Number.isFinite(o.createdAt)) return null;
+  const offerId = typeof o.offerId === 'string' && o.offerId ? o.offerId : undefined;
+  return { file: o.file, sha256: o.sha256, bytes: o.bytes, durSec: o.durSec, createdAt: o.createdAt, ...(offerId ? { offerId } : {}) };
+}
+
+function asAudioOfferMap(v: unknown): Record<string, SyncAudioOffer> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  const out: Record<string, SyncAudioOffer> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    const parsed = asAudioOffer(val);
+    if (k && parsed) out[k] = parsed;
+  }
+  return out;
+}
+
+function asRemoteAudioOfferMap(v: unknown): Record<string, RemoteAudioOffer> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  const out: Record<string, RemoteAudioOffer> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    const base = asAudioOffer(val);
+    if (!k || !base) continue;
+    const o = val as Record<string, unknown>;
+    const videoId = typeof o.videoId === 'string' && o.videoId ? o.videoId : k;
+    if (typeof o.fromDevId !== 'string' || !o.fromDevId) continue;
+    out[k] = { ...base, videoId, fromDevId: o.fromDevId };
+  }
+  return out;
+}
+
+function asAudioMonthly(v: unknown): { ym: string; bytes: number } {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return { ym: '', bytes: 0 };
+  const o = v as Record<string, unknown>;
+  const ym = typeof o.ym === 'string' && /^\d{4}-\d{2}$/.test(o.ym) ? o.ym : '';
+  const bytes = typeof o.bytes === 'number' && Number.isFinite(o.bytes) && o.bytes >= 0 ? o.bytes : 0;
+  return { ym, bytes: ym ? bytes : 0 };
+}
+
 export function getSyncConfig(storage: StorageLike | null = defaultStorage()): WebDavConfig {
   try {
     const raw = storage?.getItem(SYNC_AUTH_KEY);
@@ -162,6 +232,8 @@ export function getSyncConfig(storage: StorageLike | null = defaultStorage()): W
       rootDir: asStr(p.rootDir, DEFAULT_CONFIG.rootDir),
       syncClips: asBool(p.syncClips, DEFAULT_CONFIG.syncClips),
       wifiOnlyClips: asBool(p.wifiOnlyClips, DEFAULT_CONFIG.wifiOnlyClips),
+      autoSyncAudio: asBool(p.autoSyncAudio, false),
+      wifiOnlyAudio: asBool(p.wifiOnlyAudio, true),
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -196,6 +268,12 @@ export function createFreshSyncState(targetKey = ''): SyncState {
     uploadedCaches: [],
     uploadedClips: {},
     clipPacks: {},
+    audioOffers: {},
+    remoteAudioOffers: {},
+    audioMonthly: { ym: '', bytes: 0 },
+    audioAutoPending: [],
+    deliveredAudioIds: [],
+    audioAck: {},
     ...(targetKey ? { targetKey } : {}),
   };
 }
@@ -232,6 +310,12 @@ export function getSyncState(storage: StorageLike | null = defaultStorage()): Sy
       uploadedClips: asStrMap(p.uploadedClips),
       clipPackSeq: asNum(p.clipPackSeq, 0),
       clipPacks: asStrListMap(p.clipPacks),
+      audioOffers: asAudioOfferMap(p.audioOffers),
+      remoteAudioOffers: asRemoteAudioOfferMap(p.remoteAudioOffers),
+      audioMonthly: asAudioMonthly(p.audioMonthly),
+      audioAutoPending: asStrList(p.audioAutoPending),
+      deliveredAudioIds: asStrList(p.deliveredAudioIds),
+      audioAck: asStrMap(p.audioAck),
       authFailed: asBool(p.authFailed, false),
       failCount: asNum(p.failCount, 0),
       backoffUntil: asNum(p.backoffUntil, 0),
@@ -334,6 +418,7 @@ export function encodePairCode(cfg: PairConfig): string {
     d: cfg.rootDir,
     c: cfg.syncClips ? 1 : 0,
     f: cfg.wifiOnlyClips ? 1 : 0,
+    ...(cfg.wifiOnlyAudio !== undefined ? { a: cfg.wifiOnlyAudio ? 1 : 0 } : {}),
   };
   return PAIR_PREFIX + utf8ToBase64Url(JSON.stringify(payload));
 }
@@ -374,8 +459,10 @@ export function decodePairCode(raw: string): PairConfig | null {
 
   const rawClips = o.c !== undefined ? o.c : o.syncClips;
   const rawWifi = o.f !== undefined ? o.f : o.wifiOnlyClips;
+  const rawWifiAudio = o.a !== undefined ? o.a : o.wifiOnlyAudio;
   const syncClips = rawClips === undefined ? true : rawClips === 1 || rawClips === true;
   const wifiOnlyClips = rawWifi === undefined ? false : rawWifi === 1 || rawWifi === true;
+  const wifiOnlyAudio = rawWifiAudio === undefined ? true : rawWifiAudio === 1 || rawWifiAudio === true;
 
-  return { preset, url, username, password, rootDir, syncClips, wifiOnlyClips };
+  return { preset, url, username, password, rootDir, syncClips, wifiOnlyClips, wifiOnlyAudio };
 }

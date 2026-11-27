@@ -235,10 +235,6 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
     setIdx(prevIdx);
   }, [clearAuto, prevIdx]);
 
-  const handleSkip = useCallback(() => {
-    advance();
-  }, [advance]);
-
   const handleInputChange = (val: string) => {
     setTyped(val);
     if (result && !result.correct) setResult(null);
@@ -317,7 +313,6 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
   const isSaved = !!line && savedIds.has(line.id);
   const curSecStats = getSectionStats(statsBySec, curSecIdx);
   const canHint = !!line && !revealed && !result?.correct && nextHintIndex(line.text, typed, hinted, lenient, lang) >= 0;
-  const needsNext = revealed || (result !== null && !result.correct);
   const answered = revealed || result !== null;
 
   return (
@@ -327,18 +322,20 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
     >
       <PlayerAudio player={player} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-2.5 pb-3 flex flex-col gap-2.5" data-testid="dict-scroll">
-        <p className="text-[13px] text-mute px-1">
-          {t('m.dictPrompt', { n: wordCount })}
-        </p>
-
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-2 pb-3 flex flex-col gap-2" data-testid="dict-scroll">
         {audioErr && (
           <p role="alert" className="text-[13px] text-accent px-1">
             {audioErr}
           </p>
         )}
 
-        <div className="bg-page rounded-2xl shadow-card px-4 py-4 flex flex-col gap-3">
+        <div className="relative bg-page rounded-2xl shadow-card px-4 pt-5 pb-3.5 flex flex-col gap-2.5">
+          {wordCount > 0 && (
+            <span className="absolute top-2 right-3.5 text-[11px] text-mute/75 tabular-nums pointer-events-none">
+              {wordCount === 1 ? t('home.reviewWordOne') : t('home.reviewWord', { n: wordCount })}
+            </span>
+          )}
+
           <GradedLine
             tokens={tokens}
             hinted={hinted}
@@ -377,10 +374,8 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
         revealDisabled={revealed || !!result?.correct}
         onPrev={handlePrev}
         prevDisabled={prevIdx === null}
-        onSkip={handleSkip}
-        skipDisabled={answered}
         onNext={advance}
-        nextHighlight={needsNext}
+        nextHighlight={answered}
         submitDisabled={!!result?.correct}
         keyboardOpen={kbInset > 0}
         inputRef={inputRef}

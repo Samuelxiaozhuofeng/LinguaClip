@@ -11,6 +11,7 @@ import {
   type Token,
 } from '../../utils/textTokenizer';
 import { slotWidthEm } from './drillCommon';
+import { useJustShown } from '../justShown';
 
 export interface ClozeLineProps {
   tokens: Token[];
@@ -183,17 +184,19 @@ export const ClozeBar: React.FC<ClozeBarProps> = ({
 }) => {
   const t = useT();
   const isSlow = rate < 0.99;
+  const nextTooSoon = useJustShown(submitted);
 
   return (
     <div
-      className={`shrink-0 bg-page border-t border-line px-4 pt-2.5 flex items-center gap-2 ${
-        kbInset > 0 ? 'pb-2.5' : 'pb-[max(14px,env(safe-area-inset-bottom))]'
+      data-testid="cloze-dock"
+      className={`shrink-0 bg-page border-t border-line px-3 pt-2 flex items-center gap-1.5 ${
+        kbInset > 0 ? 'pb-2' : 'pb-[max(10px,env(safe-area-inset-bottom))]'
       }`}
     >
       <button
         type="button"
         onClick={onReplay}
-        className="min-h-[44px] px-4 rounded-xl bg-ink text-white text-[14px] font-medium flex items-center gap-1 whitespace-nowrap"
+        className="min-h-[42px] px-3.5 rounded-xl bg-ink text-white text-[13px] font-medium flex items-center gap-1 whitespace-nowrap active:opacity-80"
       >
         <span aria-hidden>▶</span>
         <span>{t('m.dictReplay')}</span>
@@ -202,7 +205,7 @@ export const ClozeBar: React.FC<ClozeBarProps> = ({
         type="button"
         aria-pressed={isSlow}
         onClick={onToggleSlow}
-        className={`min-h-[44px] px-3 rounded-xl text-[13px] font-medium tabular-nums ${
+        className={`min-h-[42px] px-2.5 rounded-xl text-[13px] font-medium tabular-nums ${
           isSlow ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
         }`}
       >
@@ -215,19 +218,32 @@ export const ClozeBar: React.FC<ClozeBarProps> = ({
             disabled={submitted}
             onClick={onReveal}
             data-testid="cloze-reveal"
-            className="min-h-[44px] px-3 rounded-xl bg-shade text-ink text-[13px] font-medium whitespace-nowrap disabled:opacity-40"
+            className="min-h-[42px] px-3 rounded-xl bg-shade text-ink text-[13px] font-medium whitespace-nowrap disabled:opacity-40"
           >
             {t('m.dictShowLine')}
           </button>
-          <button
-            type="button"
-            disabled={submitted || !canSubmit}
-            onClick={onSubmit}
-            data-testid="cloze-submit"
-            className="ml-auto min-h-[44px] px-4 rounded-xl bg-accent text-white text-[14px] font-semibold whitespace-nowrap disabled:opacity-40"
-          >
-            {t('m.check')}
-          </button>
+          {submitted ? (
+            <button
+              key="next"
+              type="button"
+              onClick={() => { if (!nextTooSoon()) onNext(); }}
+              data-testid="cloze-next"
+              className="ml-auto min-h-[42px] px-4 rounded-xl bg-accent text-white text-[14px] font-semibold whitespace-nowrap active:opacity-85"
+            >
+              {t('m.w2Next')}
+            </button>
+          ) : (
+            <button
+              key="submit"
+              type="button"
+              disabled={!canSubmit}
+              onClick={onSubmit}
+              data-testid="cloze-submit"
+              className="ml-auto min-h-[42px] px-4 rounded-xl bg-accent text-white text-[14px] font-semibold whitespace-nowrap disabled:opacity-40 active:opacity-85"
+            >
+              {t('m.check')}
+            </button>
+          )}
         </>
       ) : (
         <div className="ml-auto flex items-center gap-1.5">
@@ -235,7 +251,7 @@ export const ClozeBar: React.FC<ClozeBarProps> = ({
             type="button"
             disabled={!canPrev}
             onClick={onPrev}
-            className="min-h-[44px] px-3 rounded-xl bg-shade text-ink text-[13px] font-medium disabled:opacity-40"
+            className="min-h-[42px] px-3 rounded-xl bg-shade text-ink text-[13px] font-medium disabled:opacity-40"
           >
             {t('m.prevLine')}
           </button>
@@ -243,7 +259,7 @@ export const ClozeBar: React.FC<ClozeBarProps> = ({
             type="button"
             disabled={!canNext}
             onClick={onNext}
-            className="min-h-[44px] px-3 rounded-xl bg-shade text-ink text-[13px] font-medium disabled:opacity-40"
+            className="min-h-[42px] px-3 rounded-xl bg-shade text-ink text-[13px] font-medium disabled:opacity-40"
           >
             {t('m.nextLine')}
           </button>

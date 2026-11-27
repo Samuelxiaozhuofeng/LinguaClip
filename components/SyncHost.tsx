@@ -81,6 +81,9 @@ export function formatSyncError(err: string, translate: typeof tr): string {
   if (err === 'sync:ratelimit') return translate('sync.errRateLimit');
   if (err === 'sync:insecure_url') return translate('sync.errInsecure');
   if (err === 'sync:newer_format') return translate('sync.newerFormat');
+  if (err === 'sync:audio_missing_src' || err === 'audio:missing') return translate('sync.audioErrMissing');
+  if (err === 'sync:audio_too_large') return translate('sync.audioErrTooLarge');
+  if (err === 'sync:audio_no_track' || err === 'extract:no audio track') return translate('sync.audioErrNoTrack');
   if (err.startsWith('sync:network:')) return translate('sync.errNetwork', { why: err.slice('sync:network:'.length) || err });
   if (err.startsWith('sync:pre_failed:')) return translate('sync.preFailed', { why: err.slice('sync:pre_failed:'.length) || err });
   if (err.startsWith('sync:corrupt:')) return translate('sync.packBad', { why: err.slice('sync:corrupt:'.length) || err });

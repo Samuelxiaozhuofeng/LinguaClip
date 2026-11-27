@@ -7,6 +7,7 @@
  */
 import { build } from 'esbuild';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -146,16 +147,26 @@ const cloud = {
   etagSeq: 1,
   reqCount: 0,
   forceError: null,
+  uploadAudioError: null,
+  wifiOk: true,
+  nextAudioBytes: null,
   onDownloadClipPack: null,
   onPutGz: null,
+  onList: null,
+  onUploadAudio: null,
   reset() {
     this.files.clear();
     this.packs.clear();
     this.jsonPacks.clear();
     this.reqCount = 0;
     this.forceError = null;
+    this.uploadAudioError = null;
+    this.wifiOk = true;
+    this.nextAudioBytes = null;
     this.onDownloadClipPack = null;
     this.onPutGz = null;
+    this.onList = null;
+    this.onUploadAudio = null;
   },
   put(relPath, content) {
     const etag = `"etag-${this.etagSeq++}"`;
@@ -175,6 +186,7 @@ globalThis.__SYNC_BRIDGE__ = {
   syncWebdavList: async (_cfg, subpath) => {
     cloud.reqCount++;
     if (cloud.forceError) throw new Error(cloud.forceError);
+    if (cloud.onList) await cloud.onList(subpath);
     const prefix = `${subpath}/`;
     const out = [];
     for (const [k, v] of cloud.files.entries()) {
@@ -201,6 +213,32 @@ globalThis.__SYNC_BRIDGE__ = {
   syncWebdavDelete: async (_cfg, relPath) => {
     cloud.reqCount++;
     cloud.files.delete(relPath);
+  },
+  syncUploadAudio: async (_cfg, srcPath, relPath, maxBytes) => {
+    cloud.reqCount++;
+    if (cloud.onUploadAudio) await cloud.onUploadAudio(srcPath, relPath, maxBytes);
+    if (cloud.forceError) throw new Error(cloud.forceError);
+    if (cloud.uploadAudioError) throw new Error(cloud.uploadAudioError);
+    assert.match(relPath, /^audio\/[0-9a-f-]+__[A-Za-z0-9_-]+__[0-9a-f]{12}\.m4a$/, `3-segment offerId audio filename: ${relPath}`);
+    const payload = activeDev.media.get(srcPath) ?? `M4A_AUDIO:${srcPath}`;
+    const sha256 = createHash('sha256').update(payload).digest('hex');
+    const bytes = cloud.nextAudioBytes ?? Buffer.byteLength(payload);
+    if (typeof maxBytes === 'number' && bytes > maxBytes) throw new Error('sync:audio_budget');
+    cloud.put(relPath, payload);
+    const entry = cloud.files.get(relPath);
+    if (entry) entry.size = bytes;
+    return { file: relPath.replace(/^audio\//, ''), sha256, bytes, durSec: 120 };
+  },
+  syncDownloadAudio: async (_cfg, relPath, videoId, expectedSha256) => {
+    cloud.reqCount++;
+    if (cloud.forceError) throw new Error(cloud.forceError);
+    const entry = cloud.files.get(relPath);
+    if (!entry) throw new Error('sync:notfound');
+    const actualSha = createHash('sha256').update(entry.content).digest('hex');
+    if (!expectedSha256 || !/^[0-9a-f]{64}$/.test(expectedSha256) || actualSha !== expectedSha256) throw new Error('sync:corrupt:sha256');
+    const savedPath = `${activeDev.ownDir}/media/${videoId}.m4a`;
+    activeDev.media.set(savedPath, entry.content);
+    return savedPath;
   },
   syncUploadClipPack: async (_cfg, relPath, files) => {
     cloud.reqCount++;
@@ -277,7 +315,7 @@ globalThis.__SYNC_BRIDGE__ = {
     }
     return { moved, mediaPaths };
   },
-  syncClipNetworkOk: async () => true,
+  syncClipNetworkOk: async wifiOnly => (wifiOnly ? cloud.wifiOk : true),
   readCacheText: async (id, kind) => activeDev.caches.get(`${id}.${kind}`) ?? null,
   writeCacheText: async (id, kind, text) => { activeDev.caches.set(`${id}.${kind}`, text); },
   pickSyncPackDest: async name => `${activeDev.ownDir}/${name}`,
@@ -299,6 +337,8 @@ const mockDesktopPlugin = {
         export const syncWebdavGetGz = (...a) => B().syncWebdavGetGz(...a);
         export const syncWebdavPutGz = (...a) => B().syncWebdavPutGz(...a);
         export const syncWebdavDelete = (...a) => B().syncWebdavDelete(...a);
+        export const syncUploadAudio = (...a) => B().syncUploadAudio(...a);
+        export const syncDownloadAudio = (...a) => B().syncDownloadAudio(...a);
         export const syncUploadClipPack = (...a) => B().syncUploadClipPack(...a);
         export const syncDownloadClipPack = (...a) => B().syncDownloadClipPack(...a);
         export const syncWriteMergePack = (...a) => B().syncWriteMergePack(...a);
@@ -328,6 +368,7 @@ await build({
     contents: `
       export * from './utils/syncApply';
       export * from './utils/syncEngine';
+      export * from './utils/syncAudio';
       export * from './utils/syncConfig';
       export * from './utils/syncClock';
       export * from './utils/syncMeta';
@@ -1023,4 +1064,440 @@ const runOptsFor = (dev, over = {}) => ({
   assert.ok((await M.getAllVideosFromDB()).some(v => v.id === phLose), 'importJob placeholder must NOT allow rekey deletion when winner sub is missing');
 }
 
-console.log('test-sync-engine: all 10 scenarios passed');
+// =========================================================================
+// Test 11 (Scenario A): Desktop manual send + Android Wi-Fi auto-download + delete-on-delivery
+// =========================================================================
+{
+  cloud.reset();
+  const desk = makeDeviceEnv('AudioDeskA', 'mac', '/Users/a/Movies/LinguaClip');
+  const phone = makeDeviceEnv('AudioPhoneA', 'android', '/data/user/0/com.linguaclip.app/files/LinguaClip');
+  const deskSrc = '/Users/a/Movies/LinguaClip/va1.mp4';
+  desk.media.set(deskSrc, 'DESKTOP_AUDIO_PAYLOAD_VA1');
+
+  activeDev = desk;
+  await M.testAndEnableSync({ ...DAV_CFG, autoSyncAudio: false, wifiOnlyAudio: true });
+  await M.saveVideoToDB(makeVideoRec('va1', SRT_1, { videoPath: deskSrc }));
+  const sendRes = await M.sendVideoAudioToPhone('va1');
+  assert.equal(sendRes.ok, true, 'manual send succeeds');
+  const offerRel = `audio/${sendRes.offer.file}`;
+  assert.ok(cloud.files.has(offerRel), 'audio uploaded to WebDAV audio/');
+  assert.equal(M.getDesktopVideoAudioState('va1').status, 'pending');
+
+  // Desktop pushes snapshot carrying audioOffers
+  const rDesk1 = await M.runWebDavSync(runOptsFor(desk, { manual: true }));
+  assert.equal(rDesk1.status, 'ok');
+  assert.equal(rDesk1.uploaded, true);
+
+  // Android syncs on Wi-Fi -> auto-downloads audio, patches videoPath, publishes audioHave
+  activeDev = phone;
+  cloud.wifiOk = true;
+  await M.testAndEnableSync({ ...DAV_CFG, wifiOnlyAudio: true });
+  const rPhone1 = await M.runWebDavSync(runOptsFor(phone, { manual: true, pathExists: async p => phone.media.has(p) }));
+  assert.equal(rPhone1.status, 'ok');
+  const expectedPhonePath = `${phone.ownDir}/media/va1.m4a`;
+  const phoneRec = await M.getVideoFromDB('va1');
+  assert.equal(phoneRec.videoPath, expectedPhonePath, 'Android videoPath patched after Wi-Fi auto-download');
+  assert.equal(phone.media.get(expectedPhonePath), 'DESKTOP_AUDIO_PAYLOAD_VA1', 'audio bytes landed on Android disk');
+  assert.equal(M.getRemoteAudioOffer('va1'), null, 'remoteAudioOffers cleared after download');
+
+  // Desktop syncs again -> sees Android audioHave -> deletes cloud audio/ file, clears offer, marks delivered
+  activeDev = desk;
+  const rDesk2 = await M.runWebDavSync(runOptsFor(desk, { manual: true }));
+  assert.equal(rDesk2.status, 'ok');
+  assert.equal(cloud.files.has(offerRel), false, 'cloud audio/ file deleted on delivery');
+  assert.equal(M.getSyncState().audioOffers.va1, undefined, 'desktop audioOffers cleared');
+  assert.ok(M.getSyncState().deliveredAudioIds.includes('va1'), 'deliveredAudioIds contains va1');
+  assert.equal(M.getDesktopVideoAudioState('va1').status, 'delivered');
+}
+
+// =========================================================================
+// Test 12 (Scenario B): Android cellular skips auto-download + manual downloadRemoteAudioNow
+// =========================================================================
+{
+  cloud.reset();
+  const desk = makeDeviceEnv('AudioDeskB', 'mac', '/Users/b/Movies/LinguaClip');
+  const phone = makeDeviceEnv('AudioPhoneB', 'android', '/data/user/0/com.linguaclip.app/files/LinguaClip');
+  const deskSrc = '/Users/b/Movies/LinguaClip/vb1.mp4';
+  desk.media.set(deskSrc, 'DESKTOP_AUDIO_PAYLOAD_VB1');
+
+  activeDev = desk;
+  await M.testAndEnableSync({ ...DAV_CFG, autoSyncAudio: false, wifiOnlyAudio: true });
+  await M.saveVideoToDB(makeVideoRec('vb1', SRT_1, { videoPath: deskSrc }));
+  const sendRes = await M.sendVideoAudioToPhone('vb1');
+  assert.equal(sendRes.ok, true);
+  assert.equal((await M.runWebDavSync(runOptsFor(desk, { manual: true }))).status, 'ok');
+
+  // Android on cellular with wifiOnlyAudio: true -> does NOT auto-download, keeps remoteAudioOffers
+  activeDev = phone;
+  cloud.wifiOk = false;
+  await M.testAndEnableSync({ ...DAV_CFG, wifiOnlyAudio: true });
+  const rCell = await M.runWebDavSync(runOptsFor(phone, { manual: true, pathExists: async p => phone.media.has(p) }));
+  assert.equal(rCell.status, 'ok');
+  assert.equal((await M.getVideoFromDB('vb1')).videoPath, undefined, 'cellular skips auto-download');
+  assert.equal(phone.media.size, 0, 'no audio file downloaded on cellular');
+  const keptOffer = M.getRemoteAudioOffer('vb1');
+  assert.ok(keptOffer && keptOffer.file === sendRes.offer.file, 'remoteAudioOffers preserves offer for manual download');
+
+  // User manually triggers downloadRemoteAudioNow on cellular -> succeeds, patches videoPath, clears offer
+  const savedPath = await M.downloadRemoteAudioNow('vb1');
+  assert.equal(savedPath, `${phone.ownDir}/media/vb1.m4a`);
+  assert.equal((await M.getVideoFromDB('vb1')).videoPath, savedPath);
+  assert.equal(phone.media.get(savedPath), 'DESKTOP_AUDIO_PAYLOAD_VB1');
+  assert.equal(M.getRemoteAudioOffer('vb1'), null, 'remoteAudioOffers cleared after manual download');
+  assert.equal(M.getSyncState().dirty, true, 'manual download marks dirty to notify desktop');
+}
+
+// =========================================================================
+// Test 13 (Scenario C): Auto-sync switch + 600 MB monthly budget guard + offline audioAutoPending retry
+// =========================================================================
+{
+  cloud.reset();
+  const MB = 1024 * 1024;
+  const desk = makeDeviceEnv('AudioDeskC', 'mac', '/Users/c/Movies/LinguaClip');
+  activeDev = desk;
+  await M.testAndEnableSync({ ...DAV_CFG, autoSyncAudio: true, wifiOnlyAudio: true });
+  assert.equal((await M.runWebDavSync(runOptsFor(desk, { manual: true }))).status, 'ok');
+
+  // 1. Auto-upload vc1 (60 MB, within 100 MB single-file cap) via maybeQueueAutoAudioSync
+  const vc1 = makeVideoRec('vc1', SRT_1, { videoPath: '/Users/c/Movies/LinguaClip/vc1.mp4' });
+  await M.saveVideoToDB(vc1);
+  cloud.nextAudioBytes = 60 * MB;
+  M.maybeQueueAutoAudioSync(vc1);
+  const rAuto1 = await M.sendVideoAudioToPhone('vc1', { auto: true });
+  assert.equal(rAuto1.ok, true, 'auto upload vc1 succeeds');
+  assert.ok(cloud.files.has(`audio/${rAuto1.offer.file}`));
+  assert.equal(M.getMonthlyAudioUsage().bytes, 60 * MB);
+  assert.deepEqual(M.getSyncState().audioAutoPending, [], 'vc1 removed from audioAutoPending after upload');
+
+  // 2. Offline failure for vc2 (80 MB, with 520 MB already used this month) persists in audioAutoPending and auto-retries on next sync
+  M.saveSyncState({ ...M.getSyncState(), audioMonthly: { ym: M.currentYearMonth(), bytes: 520 * MB } });
+  const vc2 = makeVideoRec('vc2', SRT_2, { videoPath: '/Users/c/Movies/LinguaClip/vc2.mp4' });
+  await M.saveVideoToDB(vc2);
+  cloud.nextAudioBytes = 80 * MB;
+  cloud.forceError = 'sync:network:offline';
+  M.maybeQueueAutoAudioSync(vc2);
+  const rOffline = await M.sendVideoAudioToPhone('vc2', { auto: true });
+  assert.equal(rOffline.ok, false);
+  assert.equal(rOffline.reason, 'sync:network:offline');
+  assert.deepEqual(M.getSyncState().audioAutoPending, ['vc2'], 'offline failure kept in audioAutoPending');
+
+  // Network recovers -> non-manual sync picks up audioAutoPending and uploads vc2
+  cloud.forceError = null;
+  const rRetry = await M.runWebDavSync(runOptsFor(desk, { manual: false }));
+  assert.equal(rRetry.status, 'ok');
+  assert.ok(M.getSyncState().audioOffers.vc2, 'vc2 auto-uploaded on next sync');
+  assert.deepEqual(M.getSyncState().audioAutoPending, [], 'audioAutoPending cleared after retry');
+  assert.equal(M.getMonthlyAudioUsage().bytes, 600 * MB);
+  assert.equal(M.getMonthlyAudioUsage().exceeded, true, '600 MB monthly budget reached');
+
+  // 3. Budget hit: auto-sync pauses and sets budgetNotice=true, while manual send still works
+  const vc3 = makeVideoRec('vc3', SRT_1, { videoPath: '/Users/c/Movies/LinguaClip/vc3.mp4' });
+  await M.saveVideoToDB(vc3);
+  cloud.nextAudioBytes = 10 * MB;
+  M.maybeQueueAutoAudioSync(vc3);
+  assert.equal(M.getSyncAudioSnapshot().budgetNotice, true, 'budgetNotice raised at 600 MB limit');
+  assert.equal(M.getSyncState().audioOffers.vc3, undefined, 'auto upload paused over budget');
+  assert.deepEqual(M.getSyncState().audioAutoPending, [], 'vc3 not queued when over budget');
+  const rAutoBlocked = await M.sendVideoAudioToPhone('vc3', { auto: true });
+  assert.deepEqual(rAutoBlocked, { ok: false, reason: 'budget' });
+
+  const rManualOverride = await M.sendVideoAudioToPhone('vc3');
+  assert.equal(rManualOverride.ok, true, 'manual send still allowed after monthly auto budget hit');
+  assert.ok(cloud.files.has(`audio/${rManualOverride.offer.file}`));
+  assert.ok(M.getSyncState().audioOffers.vc3);
+  assert.equal(M.getMonthlyAudioUsage().bytes, 600 * MB, 'manual send MUST NOT consume monthly auto budget');
+}
+
+// =========================================================================
+// Test 14: Regression suite for R2 protocol & concurrency race fixes
+// =========================================================================
+{
+  const MB = 1024 * 1024;
+  const DAY = 86_400_000;
+
+  // 14a. Concurrent manual send during background unchanged sync must NOT be overwritten by stale state
+  {
+    cloud.reset();
+    const desk = makeDeviceEnv('RaceDesk', 'mac', '/Users/r/Movies/LinguaClip');
+    const src = '/Users/r/Movies/LinguaClip/vrace.mp4';
+    desk.media.set(src, 'RACE_AUDIO');
+    activeDev = desk;
+    await M.testAndEnableSync({ ...DAV_CFG, autoSyncAudio: false });
+    await M.saveVideoToDB(makeVideoRec('vrace', SRT_1, { videoPath: src }));
+    assert.equal((await M.runWebDavSync(runOptsFor(desk, { manual: true }))).status, 'ok');
+    assert.equal(M.getSyncState().dirty, false);
+
+    let fired = false;
+    cloud.onList = async subpath => {
+      if (subpath === 'devices' && !fired) {
+        fired = true;
+        const r = await M.sendVideoAudioToPhone('vrace');
+        assert.equal(r.ok, true);
+      }
+    };
+    const rBg = await M.runWebDavSync(runOptsFor(desk, { manual: false }));
+    cloud.onList = null;
+    assert.equal(rBg.status, 'ok');
+    assert.ok(M.getSyncState().audioOffers.vrace, 'concurrent manual offer preserved (never overwritten by unchanged fast-path)');
+  }
+
+  // 14b. Phone clears local audio -> Desktop re-sends (new offerId) -> Desktop sync does NOT delete -> Phone re-downloads & acks -> Desktop deletes
+  {
+    cloud.reset();
+    const desk = makeDeviceEnv('ResendDesk', 'mac', '/Users/rs/Movies/LinguaClip');
+    const phone = makeDeviceEnv('ResendPhone', 'android', '/data/user/0/com.linguaclip.app/files/LinguaClip');
+    const src = '/Users/rs/Movies/LinguaClip/vrs1.mp4';
+    desk.media.set(src, 'PAYLOAD_VRS1');
+
+    activeDev = desk;
+    await M.testAndEnableSync({ ...DAV_CFG, autoSyncAudio: false, wifiOnlyAudio: true });
+    await M.saveVideoToDB(makeVideoRec('vrs1', SRT_1, { videoPath: src }));
+    const s1 = await M.sendVideoAudioToPhone('vrs1');
+    assert.equal(s1.ok, true);
+    assert.ok(s1.offer.offerId);
+    assert.equal((await M.runWebDavSync(runOptsFor(desk, { manual: true }))).status, 'ok');
+
+    // Phone downloads vrs1 (offer 1) and acks offerId 1
+    activeDev = phone;
+    cloud.wifiOk = true;
+    await M.testAndEnableSync({ ...DAV_CFG, wifiOnlyAudio: true });
+    assert.equal((await M.runWebDavSync(runOptsFor(phone, { manual: true, pathExists: async p => phone.media.has(p) }))).status, 'ok');
+    const phonePath = `${phone.ownDir}/media/vrs1.m4a`;
+    assert.equal((await M.getVideoFromDB('vrs1')).videoPath, phonePath);
+    assert.equal(M.getSyncState().audioAck.vrs1, s1.offer.offerId);
+
+    // Desktop syncs -> deletes offer 1
+    activeDev = desk;
+    assert.equal((await M.runWebDavSync(runOptsFor(desk, { manual: true }))).status, 'ok');
+    assert.equal(cloud.files.has(`audio/${s1.offer.file}`), false, 'offer 1 deleted after ack');
+
+    // Phone clears local audio file on disk (stale videoPath still remains in IDB!)
+    phone.media.delete(phonePath);
+
+    // Desktop re-sends vrs1 (offer 2 with brand-new offerId) and syncs BEFORE phone syncs
+    const s2 = await M.sendVideoAudioToPhone('vrs1');
+    assert.equal(s2.ok, true);
+    assert.notEqual(s2.offer.offerId, s1.offer.offerId, 'new send generates distinct offerId');
+    assert.notEqual(s2.offer.file, s1.offer.file, 'distinct filename avoids same-name race');
+    assert.equal((await M.runWebDavSync(runOptsFor(desk, { manual: true }))).status, 'ok');
+    assert.ok(cloud.files.has(`audio/${s2.offer.file}`), 'first desktop sync MUST NOT delete re-sent offer based on old phone snapshot');
+    assert.ok(M.getSyncState().audioOffers.vrs1, 'desktop keeps offer 2 pending');
+
+    // Phone syncs -> pathExists is false -> re-downloads offer 2 despite stale videoPath and acks offerId 2
+    activeDev = phone;
+    assert.equal((await M.runWebDavSync(runOptsFor(phone, { manual: true, pathExists: async p => phone.media.has(p) }))).status, 'ok');
+    assert.equal(phone.media.get(phonePath), 'PAYLOAD_VRS1', 'phone re-downloaded audio after disk file cleared');
+    assert.equal(M.getSyncState().audioAck.vrs1, s2.offer.offerId, 'phone acked new offerId');
+
+    // Desktop syncs again -> sees new offerId ack -> deletes offer 2
+    activeDev = desk;
+    assert.equal((await M.runWebDavSync(runOptsFor(desk, { manual: true }))).status, 'ok');
+    assert.equal(cloud.files.has(`audio/${s2.offer.file}`), false, 'offer 2 deleted after new offerId ack');
+    assert.equal(M.getSyncState().audioOffers.vrs1, undefined);
+    assert.ok(M.getSyncState().deliveredAudioIds.includes('vrs1'));
+  }
+
+  // 14c. Target switch while audio upload is in-flight must NOT pollute new target SyncState
+  {
+    cloud.reset();
+    const desk = makeDeviceEnv('SwitchAudio', 'mac', '/Users/sa/Movies/LinguaClip');
+    const src = '/Users/sa/Movies/LinguaClip/vsw_a.mp4';
+    desk.media.set(src, 'SWITCH_AUDIO');
+    activeDev = desk;
+    await M.testAndEnableSync({ ...DAV_CFG, rootDir: 'AcctA', autoSyncAudio: false });
+    await M.saveVideoToDB(makeVideoRec('vsw_a', SRT_1, { videoPath: src }));
+
+    let releaseUpload;
+    cloud.onUploadAudio = () => new Promise(res => { releaseUpload = res; });
+    const sendPromise = M.sendVideoAudioToPhone('vsw_a');
+    await new Promise(r => setTimeout(r, 10));
+    await M.testAndEnableSync({ ...DAV_CFG, rootDir: 'AcctB', autoSyncAudio: false });
+    releaseUpload();
+    cloud.onUploadAudio = null;
+    const sendRes = await sendPromise;
+    assert.deepEqual(sendRes, { ok: false, reason: 'target_changed' });
+    assert.deepEqual(M.getSyncState().audioOffers, {}, 'in-flight upload from AcctA must NOT pollute AcctB state');
+  }
+
+  // 14d. Audio upload persistent network error must NOT block cards & subtitles from syncing to peer
+  {
+    cloud.reset();
+    const desk = makeDeviceEnv('LightDesk', 'mac', '/Users/l/Movies/LinguaClip');
+    const phone = makeDeviceEnv('LightPhone', 'android', '/data/user/0/com.linguaclip.app/files/LinguaClip');
+    const src = '/Users/l/Movies/LinguaClip/vlight.mp4';
+    desk.media.set(src, 'LIGHT_AUDIO');
+
+    activeDev = desk;
+    await M.testAndEnableSync({ ...DAV_CFG, autoSyncAudio: true });
+    await M.saveVideoToDB(makeVideoRec('vlight', SRT_1, { videoPath: src }));
+    await M.addLine({ videoId: 'vlight', videoName: 'vlight.mp4', text: 'Hello world.', start: 1, end: 3 }, 'saved');
+    // Queue auto audio while audio upload persistently fails with network error
+    cloud.uploadAudioError = 'sync:network:timeout';
+    const cur = M.getSyncState();
+    M.saveSyncState({ ...cur, audioAutoPending: ['vlight'], dirty: true });
+    const rDesk = await M.runWebDavSync(runOptsFor(desk, { manual: true }));
+    assert.equal(rDesk.status, 'ok', 'audio network failure must NOT fail lightweight sync');
+    assert.equal(rDesk.uploaded, true, 'lightweight snapshot still uploaded');
+    assert.deepEqual(M.getSyncState().audioAutoPending, ['vlight'], 'transient audio error keeps video in queue');
+
+    // Phone syncs and receives the video subtitle & card immediately
+    activeDev = phone;
+    await M.testAndEnableSync({ ...DAV_CFG });
+    const rPhone = await M.runWebDavSync(runOptsFor(phone, { manual: true }));
+    assert.equal(rPhone.status, 'ok');
+    assert.equal((await M.getVideoFromDB('vlight'))?.subtitleText, SRT_1, 'subtitle synced despite audio failure');
+    assert.equal((await M.getAllCards()).length, 1, 'card synced despite audio failure');
+    cloud.uploadAudioError = null;
+  }
+
+  // 14e. Budget precision: 590 MB used + 30 MB new auto-upload blocked by maxBytes preflight; manual send succeeds & keeps 590 MB
+  {
+    cloud.reset();
+    const desk = makeDeviceEnv('BudgetDesk', 'mac', '/Users/bd/Movies/LinguaClip');
+    const src = '/Users/bd/Movies/LinguaClip/vbud.mp4';
+    desk.media.set(src, 'BUDGET_AUDIO');
+    activeDev = desk;
+    await M.testAndEnableSync({ ...DAV_CFG, autoSyncAudio: true });
+    const ym = M.currentYearMonth();
+    M.saveSyncState({ ...M.getSyncState(), audioMonthly: { ym, bytes: 590 * MB } });
+    const vbud = makeVideoRec('vbud', SRT_1, { videoPath: src });
+    await M.saveVideoToDB(vbud);
+
+    cloud.nextAudioBytes = 30 * MB;
+    M.maybeQueueAutoAudioSync(vbud);
+    const rAuto = await M.sendVideoAudioToPhone('vbud', { auto: true });
+    assert.deepEqual(rAuto, { ok: false, reason: 'sync:audio_budget' }, '30 MB auto-upload rejected when only 10 MB remains');
+    assert.equal(M.getSyncAudioSnapshot().budgetNotice, true, 'budgetNotice set on sync:audio_budget');
+    assert.deepEqual(M.getSyncState().audioAutoPending, [], 'vbud removed from audioAutoPending on budget hit');
+    assert.equal(Array.from(cloud.files.keys()).filter(k => k.startsWith('audio/')).length, 0, 'blocked file NOT uploaded');
+    assert.equal(M.getMonthlyAudioUsage().bytes, 590 * MB);
+
+    const rMan = await M.sendVideoAudioToPhone('vbud');
+    assert.equal(rMan.ok, true, 'manual send bypasses auto budget');
+    assert.equal(M.getMonthlyAudioUsage().bytes, 590 * MB, 'manual send does NOT alter audioMonthly');
+    cloud.nextAudioBytes = null;
+  }
+
+  // 14f. Expired (>30d) local offer with no other changes bypasses unchanged and auto-cleans WebDAV file
+  {
+    cloud.reset();
+    const desk = makeDeviceEnv('TtlDesk', 'mac', '/Users/ttl/Movies/LinguaClip');
+    const src = '/Users/ttl/Movies/LinguaClip/vttl.mp4';
+    desk.media.set(src, 'TTL_AUDIO');
+    const baseNow = 1_760_000_000_000;
+    activeDev = desk;
+    await M.testAndEnableSync({ ...DAV_CFG, autoSyncAudio: false });
+    await M.saveVideoToDB(makeVideoRec('vttl', SRT_1, { videoPath: src }));
+    const s = await M.sendVideoAudioToPhone('vttl');
+    assert.equal(s.ok, true);
+    // Stamp offer createdAt at baseNow and complete sync so dirty=false & initialized=true
+    const st0 = M.getSyncState();
+    M.saveSyncState({ ...st0, audioOffers: { vttl: { ...st0.audioOffers.vttl, createdAt: baseNow } } });
+    assert.equal((await M.runWebDavSync(runOptsFor(desk, { manual: true, now: () => baseNow + 1000 }))).status, 'ok');
+    assert.equal(M.getSyncState().dirty, false);
+    assert.ok(cloud.files.has(`audio/${s.offer.file}`));
+
+    // 31 days later, non-manual sync with no other edits bypasses unchanged and deletes expired audio file
+    const rTtl = await M.runWebDavSync(runOptsFor(desk, { manual: false, now: () => baseNow + 31 * DAY }));
+    assert.equal(rTtl.status, 'ok');
+    assert.equal(cloud.files.has(`audio/${s.offer.file}`), false, 'expired >30d cloud audio auto-deleted bypassing unchanged');
+    assert.equal(M.getSyncState().audioOffers.vttl, undefined);
+  }
+
+  // 14g. 401 preserves audioAutoPending (resumes after password fix); permanent encode error drops from queue
+  {
+    cloud.reset();
+    const desk = makeDeviceEnv('AuthQueueDesk', 'mac', '/Users/aq/Movies/LinguaClip');
+    activeDev = desk;
+    await M.testAndEnableSync({ ...DAV_CFG, autoSyncAudio: true });
+    assert.equal((await M.runWebDavSync(runOptsFor(desk, { manual: true }))).status, 'ok');
+
+    const vAuth = makeVideoRec('vauth', SRT_1, { videoPath: '/Users/aq/Movies/LinguaClip/vauth.mp4' });
+    const vBad = makeVideoRec('vbadenc', SRT_2, { videoPath: '/Users/aq/Movies/LinguaClip/vbadenc.mp4' });
+    await M.saveVideoToDB(vAuth);
+    await M.saveVideoToDB(vBad);
+
+    // 401 during auto-queue keeps vauth in audioAutoPending
+    cloud.uploadAudioError = 'sync:auth';
+    M.maybeQueueAutoAudioSync(vAuth);
+    const r401 = await M.sendVideoAudioToPhone('vauth', { auto: true });
+    assert.deepEqual(r401, { ok: false, reason: 'sync:auth' });
+    assert.deepEqual(M.getSyncState().audioAutoPending, ['vauth'], '401 MUST preserve audioAutoPending');
+
+    // Permanent encode error drops vbadenc from audioAutoPending
+    cloud.uploadAudioError = 'sync:audio_encode:ffmpeg exit 1';
+    M.maybeQueueAutoAudioSync(vBad);
+    const rPerm = await M.sendVideoAudioToPhone('vbadenc', { auto: true });
+    assert.deepEqual(rPerm, { ok: false, reason: 'sync:audio_encode:ffmpeg exit 1' });
+    assert.deepEqual(M.getSyncState().audioAutoPending, ['vauth'], 'permanent encode error removed from queue while vauth stays');
+
+    // User fixes password (same target) -> next sync auto-uploads vauth
+    cloud.uploadAudioError = null;
+    await M.testAndEnableSync({ ...DAV_CFG, password: 'fixed-password', autoSyncAudio: true });
+    assert.deepEqual(M.getSyncState().audioAutoPending, ['vauth'], 'same-target password fix keeps audioAutoPending');
+    const rFix = await M.runWebDavSync(runOptsFor(desk, { manual: false }));
+    assert.equal(rFix.status, 'ok');
+    assert.ok(M.getSyncState().audioOffers.vauth, 'vauth auto-uploaded after password fix');
+    assert.deepEqual(M.getSyncState().audioAutoPending, []);
+  }
+
+  // 14h. Switching WebDAV target A -> B -> A aborts stale in-flight manual upload from first A session
+  {
+    cloud.reset();
+    const desk = makeDeviceEnv('RoundTripDesk', 'mac', '/Users/rt/Movies/LinguaClip');
+    activeDev = desk;
+    await M.testAndEnableSync({ ...DAV_CFG, rootDir: 'BucketA' });
+    const vRt = makeVideoRec('vrt', SRT_1, { videoPath: '/Users/rt/Movies/LinguaClip/vrt.mp4' });
+    await M.saveVideoToDB(vRt);
+
+    let releaseUpload;
+    const uploadStarted = new Promise(res => {
+      cloud.onUploadAudio = async () => { cloud.onUploadAudio = null; res(); await new Promise(r => { releaseUpload = r; }); };
+    });
+    const sendPromise = M.sendVideoAudioToPhone('vrt');
+    await uploadStarted;
+
+    // Switch A -> B -> A while old upload is still in flight
+    await M.testAndEnableSync({ ...DAV_CFG, rootDir: 'BucketB' });
+    await M.testAndEnableSync({ ...DAV_CFG, rootDir: 'BucketA' });
+    releaseUpload();
+    const sendRes = await sendPromise;
+    assert.equal(sendRes.ok, false, 'stale upload from previous A session must abort after A->B->A');
+    assert.equal(sendRes.reason, 'target_changed');
+    assert.equal(M.getSyncState().audioOffers.vrt, undefined, 're-initialized A state stays clean');
+  }
+
+  // 14i. Corrupt audio download skips bad offer instead of blocking subsequent valid offers
+  {
+    cloud.reset();
+    const desk = makeDeviceEnv('CorruptDesk', 'mac', '/Users/cd/Movies/LinguaClip');
+    const phone = makeDeviceEnv('CorruptPhone', 'android', '/data/user/0/app');
+    activeDev = desk;
+    await M.testAndEnableSync({ ...DAV_CFG, autoSyncAudio: false });
+    const v1 = makeVideoRec('v1corrupt', SRT_1, { videoPath: '/Users/cd/Movies/LinguaClip/v1.mp4' });
+    const v2 = makeVideoRec('v2good', SRT_2, { videoPath: '/Users/cd/Movies/LinguaClip/v2.mp4' });
+    await M.saveVideoToDB(v1);
+    await M.saveVideoToDB(v2);
+    const s1 = await M.sendVideoAudioToPhone('v1corrupt');
+    const s2 = await M.sendVideoAudioToPhone('v2good');
+    assert.equal(s1.ok, true);
+    assert.equal(s2.ok, true);
+    assert.equal((await M.runWebDavSync(runOptsFor(desk, { manual: true }))).status, 'ok');
+
+    // Corrupt v1's cloud file so SHA-256 check fails, while v2 remains intact
+    const f1 = cloud.files.get(`audio/${s1.offer.file}`);
+    f1.content = Buffer.from('TAMPERED-CORRUPT-BYTES');
+
+    activeDev = phone;
+    cloud.wifiOk = true;
+    await M.testAndEnableSync({ ...DAV_CFG, wifiOnlyAudio: true });
+    const rPhone = await M.runWebDavSync(runOptsFor(phone, { manual: true }));
+    assert.equal(rPhone.status, 'ok');
+    const got1 = await M.getVideoFromDB('v1corrupt');
+    const got2 = await M.getVideoFromDB('v2good');
+    assert.equal(got1.videoPath, undefined, 'corrupt offer rejected');
+    assert.equal(got2.videoPath, '/data/user/0/app/media/v2good.m4a', 'subsequent valid offer still auto-downloads');
+  }
+}
+
+console.log('test-sync-engine: all 14 scenarios passed (including L2b audio relay A/B/C & R2 race/protocol regressions)');
