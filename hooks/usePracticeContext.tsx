@@ -1,6 +1,7 @@
 import React, { createContext, useContext } from 'react';
-import { PracticeMode, Subtitle, VideoSection, AnkiConfig, LearningMode, BlurPlaybackMode } from '../types';
+import { PracticeMode, Subtitle, VideoRecord, VideoSection, AnkiConfig, LearningMode, BlurPlaybackMode } from '../types';
 import type { DictLang } from '../utils/dictionary';
+import type { StudyWay } from '../utils/studyWays';
 
 export interface PracticeContextPractice {
   videoId: string | null;
@@ -17,6 +18,9 @@ export interface PracticeContextPractice {
   videoName: string;
   videoLang?: DictLang;
   watch: Set<number> | null; // custom set: ids of lines only watched; null = section by section
+  practiceRecord?: Pick<VideoRecord, 'podcast' | 'videoPath' | 'videoFileName'> | null;
+  hasReader?: boolean;
+  hasListen?: boolean;
 }
 
 export interface PracticeContextVideo {
@@ -25,6 +29,7 @@ export interface PracticeContextVideo {
   isPlaying: boolean;
   volume: number;
   playbackSpeed: number;
+  slowReplay?: boolean;
   progress: number;
 }
 
@@ -47,7 +52,7 @@ export interface PracticeContextActions {
   onSwitchSection: (index: number) => void;
   onToggleSavedList: (show: boolean) => void;
   onTogglePlay: () => void;
-  onReplayCurrent: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number) => void;
+  onReplayCurrent: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number, fromLoop?: boolean) => void;
   onToggleLoop: () => void;
   onSetStepReplay: (play: (() => void) | null) => void; // non-null: replays call this instead
   onSkip: (direction: 'prev' | 'next') => void;
@@ -66,6 +71,7 @@ export interface PracticeContextActions {
   onDeleteSavedItem: (id: number, e: React.MouseEvent) => void;
   onJumpToSaved: (id: number) => void;
   onSetBlurPlaybackMode: (mode: BlurPlaybackMode) => void;
+  onSwitchWay?: (way: StudyWay) => void;
 }
 
 export interface PracticeContextValue {

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowLeft } from 'lucide-react';
 import type { Subtitle, VideoRecord } from '../types';
 import { Btn, Seg, useToast } from '../components/ui';
+import WayBar from '../components/WayBar';
+import type { StudyWay } from '../utils/studyWays';
 import ReaderLine from './ReaderLine';
 import DefinitionPanel from '../components/DefinitionPanel';
 import WatchSummary from '../components/WatchSummary';
@@ -29,19 +31,15 @@ import { recordRate } from './listenLevel';
 import PodcastPicker from './PodcastPicker';
 import type { Pick } from './podcastShows';
 
-// Intensive listening to something with no picture — a podcast episode or a sound file
-// (docs/private/podcast.md). One section at a time, in three steps: blind (S / A / V mark lines hard),
-// the hard lines each looped blind until "got it" or its text shows (none marked and little followed:
-// the whole transcript), then the summary — hard and saved lines to dictate, words to keep.
-// "Free listening" leaves the steps. This file: playback and its stops, the steps, keys, layout;
-// the transcript's scrolling / translation is useListenText, lookups and review useListenWords,
-// the coaching cards ListenCoach. Opens at the start of the section left in, on step 1.
+// Intensive listening for audio-only records (docs/private/podcast.md): 3 steps per section
+// (blind + mark hard -> loop hard lines blind until got-it/text -> summary), plus free mode.
+// Transcript: useListenText; words/review: useListenWords; coaching cards: ListenCoach.
 
 const MODES: WatchSubs[] = ['hide', 'show'];
 const SEEK = 5;
 type Mark = 'open' | 'ok' | 'more'; // a hard line: not worked on yet / got it now / needs more work
 
-const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice: () => void; onOpen?: (r: VideoRecord) => void }> = ({ record, onExit, onPractice, onOpen }) => {
+const ListenPage: React.FC<{ record: VideoRecord; startSec?: number; hasReader?: boolean; onSwitchWay?: (way: StudyWay, sec: number) => void; onExit: () => void; onPractice: () => void; onOpen?: (r: VideoRecord) => void }> = ({ record, startSec, hasReader, onSwitchWay, onExit, onPractice, onOpen }) => {
   const t = useT();
   const lines = useMemo(() => [...parseSRT(record.subtitleText)].sort((a, b) => a.startTime - b.startTime), [record.subtitleText]);
   const sections = useMemo(() => buildSections(lines, sectionLengthOf(record)), [lines]);
@@ -201,13 +199,20 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const next = () => jump(at + 1);
   const replay = () => { if (cur) seek(cur.startTime, true); };
 
+  const loadedRef = useRef(false);
   const onLoaded = () => {
     const a = audio.current;
     if (!a) return;
+    loadedRef.current = true;
     setDuration(a.duration);
     a.playbackRate = speed;
-    const pos = getWatchPos(record.id); // back at the start of that section, step 1
-    if (pos > 0 && pos < a.duration - 3 && sections.length) seek(sectionStart(sections[sectionAt(sections, pos)]));
+    if (startSec !== undefined) {
+      const i = lineAt(lines, startSec), to = i >= 0 ? lines[i].startTime : startSec;
+      if (to > 0) seek(Math.min(to, Math.max(0, a.duration - 0.1)));
+    } else {
+      const pos = getWatchPos(record.id); // back at the start of that section, step 1
+      if (pos > 0 && pos < a.duration - 3 && sections.length) seek(sectionStart(sections[sectionAt(sections, pos)]));
+    }
     if (!cards.blocking.current) a.play().catch(() => {});
   };
   const lastSaved = useRef(0);
@@ -218,9 +223,14 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   };
   useEffect(() => {
     const a = audio.current;
-    return () => { if (a && !a.ended && a.currentTime > 0) setWatchPos(record.id, a.currentTime); };
-  }, [record.id]);
+    return () => {
+      if (!a || a.ended) return;
+      const pos = loadedRef.current ? a.currentTime : startSec;
+      if (pos !== undefined && (pos > 0 || startSec !== undefined)) setWatchPos(record.id, pos);
+    };
+  }, [record.id, startSec]);
   useEffect(() => { if (audio.current) audio.current.playbackRate = speed; }, [speed]);
+  const switchWay = (way: StudyWay) => { audio.current?.pause(); stopGap(); onSwitchWay?.(way, !loadedRef.current ? (startSec ?? getWatchPos(record.id)) : (cur?.startTime ?? audio.current?.currentTime ?? 0)); };
 
   const curId = cur?.id ?? null;
   const { scroller, follow, setFollow, armBack, leave, hasTrans, trans, transBusy, openT, onTrans } = useListenText(record, lines, audio, curId, effMode, sec, playing);
@@ -241,11 +251,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     stopGap();
     noteWord(word, line);
   }, [record.id, ja]); // eslint-disable-line react-hooks/exhaustive-deps
-  const closeLookup = () => {
-    closeDef();
-    if (resumeAfter.current && !summaryRef.current) seek(resumeFrom.current, true);
-    resumeAfter.current = false;
-  };
+  const closeLookup = () => { closeDef(); if (resumeAfter.current && !summaryRef.current) seek(resumeFrom.current, true); resumeAfter.current = false; };
   // --- Saved lines (the same star as reading / watching) ---
   const { savedIds, savedItems, toggleSave } = useSavedLines({ videoId: record.id, fullSubtitles: lines, videoFileName: record.videoFileName });
   const saveRef = useRef(toggleSave);
@@ -286,10 +292,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     passSec.current = sec;
     setPass(1); setPassMode(null); setPassCard(null); setQueue(null); armed.current = null; summed.current = -1;
   }, [sec]);
-  function openPass() {
-    audio.current?.pause(); stopGap();
-    armed.current = opts.current.pass + 1; setPassCard(opts.current.pass);
-  }
+  function openPass() { audio.current?.pause(); stopGap(); armed.current = opts.current.pass + 1; setPassCard(opts.current.pass); }
   // Step 2 works on the lines marked hard — unless little was followed: then marking missed too much, the whole transcript.
   const secMarks = section ? section.subtitles.filter(l => marks.has(l.id)) : [];
   const hard = said.get(sec)?.a === 'little' ? 0 : secMarks.length;
@@ -381,11 +384,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
     e.preventDefault();
     act();
   };
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => keys.current(e);
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  useEffect(() => { const onKey = (e: KeyboardEvent) => keys.current(e); window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey); }, []);
 
   const inSec = section ? section.subtitles.findIndex(l => l.id === curId) : -1;
   const sumSaved = summary ? savedItems.filter(l => heard(l.id) && !marks.has(l.id)) : [];
@@ -397,10 +396,11 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
       <audio ref={audio} crossOrigin="anonymous" preload="auto" src={videoSrcFromPath(record.videoPath!)}
         onLoadedMetadata={onLoaded} onTimeUpdate={onTime} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={onEnded} onError={() => setFailed(true)} />
 
-      <header className={`h-16 shrink-0 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-6 flex items-center gap-4 bg-page border-b border-line`} data-tauri-drag-region>
-        <button type="button" onClick={onExit} className="press h-10 pl-3 pr-4 flex items-center gap-1.5 min-w-0 max-w-[30%] rounded-full bg-page border border-line text-ink text-[13px] hover:bg-shade">
+      <header className={`h-16 shrink-0 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-6 flex items-center gap-3 bg-page border-b border-line`} data-tauri-drag-region>
+        <button type="button" onClick={onExit} className="press h-10 pl-3 pr-4 flex items-center gap-1.5 min-w-0 max-w-[26%] rounded-full bg-page border border-line text-ink text-[13px] hover:bg-shade">
           <ArrowLeft size={16} className="shrink-0" /><span className="truncate">{record.podcast ? `${record.podcast.show} · ${record.displayName}` : record.displayName}</span>
         </button>
+        {onSwitchWay && <WayBar current="watch" record={record} hasReader={!!hasReader} hasListen variant="compact" blocked={!!drill || !!summary || !!pickerShow || cards.open || def.word !== null || passCard !== null || inDrill} onSelect={switchWay} />}
         <div className="flex-1 flex justify-center">
           {passes ? <StepBar step={summary ? 3 : pass} onStep={goStep} onHelp={help} />
             : <Seg<WatchSubs> size="sm" value={effMode} onChange={changeMode} options={MODES.map(m => ({ value: m, label: t(`listen.mode_${m}` as DictKey), title: t('listen.modeKey') }))} />}

@@ -1748,4 +1748,21 @@ export const zh: Record<keyof typeof en, string> = {
   'import.needCookiesWindows': "YouTube 要求登录才能下这个视频，Windows 版暂时不支持登录下载。",
   'import.failedYtSetup': "YouTube 组件没下载完：{detail}。点重试会接着下",
   'import.stageYtSetup': "下载 YouTube 组件 {pct}%",
+
+  // --- 页内切换练法与重听自动放慢 (docs/watch.md) ---
+  'way.label': '切换练法',
+  'way.read': '读字幕',
+  'way.watch': '看剧',
+  'way.listen': '精听',
+  'way.blur': '模糊',
+  'way.dict': '听写',
+  'way.switched': '已切到{way} · {time}',
+  'shortcuts.gWay': '切换练法',
+  'keys.way1': '读字幕',
+  'keys.way2': '看剧 / 精听',
+  'keys.way3': '模糊',
+  'keys.way4': '听写',
+  'settingsGeneral.slowReplay': '同一句重听第 2 次起自动放慢（0.75×）',
+  'settingsGeneral.slowReplayHint': '只放慢这一次重听，播完自动恢复原速，不改全局倍速。',
+  'studio.slowReplayPill': '0.75× 慢放',
 } as const;

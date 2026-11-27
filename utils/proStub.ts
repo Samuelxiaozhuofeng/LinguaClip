@@ -1,10 +1,18 @@
 import type React from 'react';
 import type { VideoRecord } from '../types';
 import type { ReadBy } from './storage';
+import type { StudyWay } from './studyWays';
 
 // What `@pro` gives when the pro/ folder isn't there (the open-source build): no
 // reader, nothing to cancel. pro/index.ts exports the same names.
-export type ProReader = React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: number) => void }>;
+export type ProReader = React.FC<{
+  record: VideoRecord;
+  by: ReadBy;
+  startSec?: number;
+  hasListen?: boolean;
+  onSwitchWay?: (way: StudyWay, sec: number) => void;
+  onExit: (looked: number) => void;
+}>;
 
 export const Reader: ProReader | null = null;
 export const cancelTrans = async (_id: string): Promise<void> => {};
@@ -12,7 +20,15 @@ export const cancelTrans = async (_id: string): Promise<void> => {};
 // records with no picture. null = no podcast tab, "watch" as before.
 export type ProPodcastPicker = React.FC<{ onClose?: () => void; onOpen: (r: VideoRecord) => void }>;
 export const PodcastPicker: ProPodcastPicker | null = null;
-export type ProListen = React.FC<{ record: VideoRecord; onExit: () => void; onPractice: () => void; onOpen?: (r: VideoRecord) => void }>;
+export type ProListen = React.FC<{
+  record: VideoRecord;
+  startSec?: number;
+  hasReader?: boolean;
+  onSwitchWay?: (way: StudyWay, sec: number) => void;
+  onExit: () => void;
+  onPractice: () => void;
+  onOpen?: (r: VideoRecord) => void;
+}>;
 export const Listen: ProListen | null = null;
 export const podcastRate = (_r: VideoRecord): string | null => null; // an episode card's speaking rate
 // Bottom line of Settings; null = the sponsor link stays.

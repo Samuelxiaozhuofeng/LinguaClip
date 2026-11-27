@@ -48,6 +48,11 @@ export const ACTIONS: Def[] = [
   dict('revealLine', k('KeyD', true), 'keys.revealLine', 'shortcuts.gTools'), // blur mode only (BlurLine)
   { ...dict('mask', k('KeyU', true), 'keys.mask', 'shortcuts.gTools'), live: getSubtitleMaskOn }, // lift the hard-subtitle mask for now (components/SubtitleMask.tsx)
   dict('close', k('Escape'), 'keys.closeDict', 'shortcuts.gTools'),
+  // In-place way switching across all four study views (docs/watch.md「页内切换练法」).
+  dict('way1', k('Digit1', true), 'keys.way1', 'shortcuts.gWay', ['dictOut', 'dictBlank', 'watch', 'reader']),
+  dict('way2', k('Digit2', true), 'keys.way2', 'shortcuts.gWay', ['dictOut', 'dictBlank', 'watch', 'reader']),
+  dict('way3', k('Digit3', true), 'keys.way3', 'shortcuts.gWay', ['dictOut', 'dictBlank', 'watch', 'reader']),
+  dict('way4', k('Digit4', true), 'keys.way4', 'shortcuts.gWay', ['dictOut', 'dictBlank', 'watch', 'reader']),
   blank('jump', k('Space'), 'keys.blankJump'),
   blank('skip', k('ArrowRight'), 'keys.skipWord'),
   blank('submit', k('Enter'), 'keys.blankSubmit'),

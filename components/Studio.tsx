@@ -32,14 +32,15 @@ import { usePracticeClock } from '../utils/today';
 import ReviewSession from './ReviewSession';
 import { useTimedWords } from '../utils/wordTimes';
 import { useTopAutoHide } from '../hooks/useTopAutoHide';
+import WayBar from './WayBar';
 
 // The practice room: the video fills the top, a white sheet overlaps it from below with
 // the part's timeline, the line you work on (centred), and the remote (Transport).
 const Studio: React.FC = () => {
   const t = useT();
   const { practice, video, saved, anki, actions } = usePracticeContext();
-  const { videoId, subtitles, fullSubtitles, sections, currentSectionIndex, currentSubtitleIndex, mode, showSectionComplete, showComplete, learningMode, blurPlaybackMode, videoName, videoLang, watch } = practice;
-  const { videoRef, videoSrc, isPlaying } = video;
+  const { videoId, subtitles, fullSubtitles, sections, currentSectionIndex, currentSubtitleIndex, mode, showSectionComplete, showComplete, learningMode, blurPlaybackMode, videoName, videoLang, watch, practiceRecord, hasReader, hasListen } = practice;
+  const { videoRef, videoSrc, isPlaying, slowReplay } = video;
   const loopOn = useLoop().on; // a looping line never stops by itself: keep the way on
   const { savedIds, showSavedList } = saved;
   const { ankiStatus } = anki;
@@ -126,7 +127,7 @@ const Studio: React.FC = () => {
   const bdLast = !!bdActive && bdActive.step === bdActive.steps.length - 1;
   // The last step is the whole line: finishing it moves on like a normal line.
   const bdNext = () => { if (!bd.next()) { bd.cancel(); actions.onContinue(); } };
-  const bdReplay = () => { if (!bd.play()) actions.onReplayCurrent(); };
+  const bdReplay = (silent = false) => { if (!bd.play()) actions.onReplayCurrent(undefined, undefined, undefined, silent); };
 
   // --- Review library: lines the learner got stuck on go into the sentence deck ---
   const { stuck, retry, offer, autoUndo, record, undoAutoAdd, dismissUndo, keepWord, openRetry, clearStuck, closeRetry } = useStudioReview({
@@ -140,7 +141,7 @@ const Studio: React.FC = () => {
 
   useEffect(() => {
     actions.onSetStepReplay(bdStep && !bdLast ? () => bd.play() : null);
-    if (bdStep) bdReplay();
+    if (bdStep) bdReplay(true);
   }, [bdStep]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => actions.onSetStepReplay(null), []); // eslint-disable-line react-hooks/exhaustive-deps
   // A correct line is replaying on its way to the next one; stop it so that
@@ -213,7 +214,8 @@ const Studio: React.FC = () => {
   }, [showSavedList, def.word, actions]);
 
   const defOpen = def.word !== null;
-  const showCenterPlay = !isPlaying && mode === PracticeMode.LISTENING && ankiStatus !== 'recording' && !showSectionComplete && !showComplete;
+  const recording = ankiStatus === 'recording';
+  const showCenterPlay = !isPlaying && mode === PracticeMode.LISTENING && !recording && !showSectionComplete && !showComplete;
 
   const menuItems: MenuItem[] = [
     { label: <><Bookmark size={15} /> {t('studio.savedLinesFromVideo')}{savedIds.size > 0 && <span className="ml-auto text-mute">{savedIds.size}</span>}</>, onClick: () => actions.onToggleSavedList(true) },
@@ -265,9 +267,12 @@ const Studio: React.FC = () => {
       {/* --- The video fills the top; the back pill floats on it (clear of the Mac's traffic lights) --- */}
       <div className="relative min-h-0 flex items-center justify-center" style={{ flex: `${videoShare} 1 0` }}>
         {videoSrc ? (
-          <video ref={videoRef} crossOrigin="anonymous" src={videoSrc} onLoadedMetadata={() => actions.onReplayCurrent()} className="block w-full h-full object-contain" />
+          <video ref={videoRef} crossOrigin="anonymous" src={videoSrc} onLoadedMetadata={() => actions.onReplayCurrent(false, 0, undefined, true)} className="block w-full h-full object-contain" />
         ) : (
           <p className="text-white/70 text-sm">{t('studio.noVideoLoaded')}</p>
+        )}
+        {slowReplay && (
+          <span className="pointer-events-none absolute right-4 bottom-3 z-20 px-2.5 py-1 rounded-full bg-ink/80 text-white text-xs font-medium">{t('studio.slowReplayPill')}</span>
         )}
         {showCenterPlay && (
           <button onClick={actions.onTogglePlay} className="absolute inset-0 flex items-center justify-center" aria-label={t('studio.playAriaLabel')}>
@@ -277,7 +282,7 @@ const Studio: React.FC = () => {
         <SubtitleMask videoId={videoId} media={videoRef} peekKey="dict.mask" onTap={showCenterPlay ? actions.onTogglePlay : undefined} />
         <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 lg:pr-6 flex items-center justify-between gap-2 text-[13px] [&>*]:relative [&>*]:z-20 [&>*]:transition-opacity [&:focus-within>*]:opacity-100 [&:focus-within>*]:pointer-events-auto ${topBar.showTop ? '' : '[&>*]:opacity-0 [&>*]:pointer-events-none'}`} data-tauri-drag-region="deep">
           {/* Same pill as the top bar on the other pages, on the same centre line as the traffic lights. */}
-          <div className="flex items-center gap-0.5 p-1 rounded-full bg-page border border-line text-ink min-w-0 max-w-[60%]">
+          <div className="flex items-center gap-0.5 p-1 rounded-full bg-page border border-line text-ink min-w-0 max-w-[42%]">
             <button type="button" onClick={actions.onExit} title={t('studio.backToVideos')} aria-label={t('studio.backToVideos')}
               className="h-8 pl-2.5 pr-3.5 flex items-center gap-1.5 min-w-0 rounded-full hover:bg-shade">
               <ArrowLeft size={16} className="shrink-0" /><span className="truncate" title={videoName}>{videoName}</span>
@@ -290,6 +295,10 @@ const Studio: React.FC = () => {
               </div>
             )}
           </div>
+          {actions.onSwitchWay && practiceRecord && (
+            <WayBar current={isBlur ? 'blur' : 'dict'} record={practiceRecord} hasReader={!!hasReader} hasListen={!!hasListen} variant="cinema"
+              disabled={recording} blocked={recording || showComplete || showSectionComplete || !!bdActive || showSavedList || defOpen || !!retry} onSelect={actions.onSwitchWay} />
+          )}
           <span className="shrink-0 h-[42px] px-4 rounded-full bg-page border border-line text-ink flex items-center tabular-nums">
             {t('studio.lineCount', { current: stripAt + 1, total: stripLines.length })}
           </span>
@@ -338,7 +347,7 @@ const Studio: React.FC = () => {
                     targetText={bdStep.text}
                     mode={bdActive.reviewing ? PracticeMode.FEEDBACK : PracticeMode.INPUT}
                     onComplete={() => (bdActive.reviewing ? bdNext() : bd.review())}
-                    onReplay={allRight => { if (allRight) bd.review(); bdReplay(); }}
+                    onReplay={(allRight, _f, _t, silent) => { if (allRight) bd.review(); bdReplay(silent); }}
                     onLookup={lookup}
                     nextLabel={bdLast ? undefined : t('dictation.nextStep')}
                   />

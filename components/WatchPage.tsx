@@ -8,6 +8,8 @@ import WatchSummary, { Looked } from './WatchSummary';
 import DefinitionPanel from './DefinitionPanel';
 import ReviewSession from './ReviewSession';
 import SubtitleMask, { useMaskMenu } from './SubtitleMask';
+import WayBar from './WayBar';
+import type { StudyWay } from '../utils/studyWays';
 import { useLookup, aroundOf } from '../hooks/useLookup';
 import { useSavedLines } from '../hooks/useSavedLines';
 import { useAnkiIntegration } from '../hooks/useAnkiIntegration';
@@ -34,7 +36,14 @@ const IDLE_MS = 2500; // the pointer hides after this long still; both bars show
 const TOP_ZONE = 88; // px from the top edge that bring the back button up
 const BOTTOM_ZONE = 44; // px from the bottom edge that bring the controls up: below the subtitle, so aiming at a word doesn't
 
-const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ record, onExit }) => {
+const WatchPage: React.FC<{
+  record: VideoRecord;
+  startSec?: number;
+  hasReader?: boolean;
+  hasListen?: boolean;
+  onSwitchWay?: (way: StudyWay, sec: number) => void;
+  onExit: () => void;
+}> = ({ record, startSec, hasReader, hasListen, onSwitchWay, onExit }) => {
   const t = useT();
   usePracticeClock();
   const combos = useShortcuts();
@@ -138,13 +147,19 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   const next = () => jump(cur.at + 1);
   const replay = () => { if (target) seek(target.startTime, true); };
 
-  // Resume where the last watch stopped (the end counts as the start).
+  // Resume where the last watch stopped (or `startSec` when switched from another way; the end counts as the start on normal resume).
+  const loadedRef = useRef(false);
   const onLoaded = () => {
     const v = videoRef.current;
     if (!v) return;
+    loadedRef.current = true;
     setDuration(v.duration);
-    const pos = getWatchPos(record.id);
-    if (pos > 0 && pos < v.duration - 3) seek(pos);
+    if (startSec !== undefined) {
+      if (startSec > 0) seek(Math.min(startSec, Math.max(0, v.duration - 0.1)));
+    } else {
+      const pos = getWatchPos(record.id);
+      if (pos > 0 && pos < v.duration - 3) seek(pos);
+    }
     v.play().catch(() => {});
   };
   const lastSaved = useRef(0);
@@ -159,8 +174,12 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   };
   useEffect(() => {
     const v = videoRef.current;
-    return () => { if (v && !v.ended && v.currentTime > 0) setWatchPos(record.id, v.currentTime); };
-  }, [record.id]);
+    return () => {
+      if (!v || v.ended) return;
+      const pos = loadedRef.current ? v.currentTime : startSec;
+      if (pos !== undefined && (pos > 0 || startSec !== undefined)) setWatchPos(record.id, pos);
+    };
+  }, [record.id, startSec]);
   useEffect(() => { if (videoRef.current) videoRef.current.defaultPlaybackRate = videoRef.current.playbackRate = speed; }, [speed]);
 
   // --- Lookup: pauses the video; closing the card resumes it if it was playing ---
@@ -224,6 +243,12 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
 
   // --- Summary: only at the end; leaving midway never asks (the saved lines are review cards already) ---
   const leave = () => { if (!busy()) onExit(); };
+  const switchWay = (way: StudyWay) => {
+    if (busy()) return;
+    videoRef.current?.pause();
+    const sec = !loadedRef.current ? (startSec ?? getWatchPos(record.id)) : (target?.startTime ?? videoRef.current?.currentTime ?? 0);
+    onSwitchWay?.(way, sec);
+  };
   const onEnded = () => {
     if (busy()) return; // an Anki clip ran to the very end: not a finished watch
     setWatchPos(record.id, 0);
@@ -366,11 +391,13 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
       )}
 
       {/* Back, on the traffic lights' centre line like the practice page */}
-      <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 flex items-center [&>*]:relative [&>*]:z-20 transition-opacity ${showTop ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} data-tauri-drag-region="deep">
+      <header className={`absolute inset-x-0 top-0 h-16 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-4 flex items-center justify-between gap-2 [&>*]:relative [&>*]:z-20 transition-opacity [&:focus-within]:opacity-100 [&:focus-within]:pointer-events-auto ${showTop ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} data-tauri-drag-region="deep">
         <button type="button" onClick={leave} disabled={recording} title={t('studio.backToVideos')} aria-label={t('studio.backToVideos')}
-          className="h-10 pl-3 pr-4 flex items-center gap-1.5 min-w-0 max-w-[60%] rounded-full bg-page border border-line text-ink text-[13px] hover:bg-shade disabled:opacity-60">
+          className="h-10 pl-3 pr-4 flex items-center gap-1.5 min-w-0 max-w-[42%] rounded-full bg-page border border-line text-ink text-[13px] hover:bg-shade disabled:opacity-60">
           <ArrowLeft size={16} className="shrink-0" /><span className="truncate">{record.displayName}</span>
         </button>
+        {onSwitchWay && <WayBar current="watch" record={record} hasReader={!!hasReader} hasListen={!!hasListen} variant="cinema" disabled={recording} blocked={recording || wordRecording.current || !!drill || summary || def.word !== null} onSelect={switchWay} />}
+        {onSwitchWay && <span className="w-28 min-w-0 shrink-[99] pointer-events-none" />}
       </header>
 
       {toast.view}

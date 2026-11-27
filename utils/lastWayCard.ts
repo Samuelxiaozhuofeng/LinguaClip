@@ -2,7 +2,7 @@ import { LearningMode, VideoRecord } from '../types';
 import { isAudioRecord } from './desktop';
 import type { DictKey } from './i18n';
 import { getReadPos } from './readLooked';
-import { formatTimeCode, getCustomPos, getWatchPos, LastWay } from './storage';
+import { formatTimeCode, getCustomPos, getWatchPos, getWatchPrefs, LastWay } from './storage';
 
 // What a home card says about the way a click goes on (docs/watch.md, 点视频直接开播):
 // where that way stopped and its name. Both follow getLastWay, like the click itself.
@@ -11,10 +11,12 @@ import { formatTimeCode, getCustomPos, getWatchPos, LastWay } from './storage';
 export const lastWaySec = (videoId: string, way: LastWay | null): number | undefined =>
   way === 'custom' ? getCustomPos(videoId) : way === 'watch' ? getWatchPos(videoId) : way === 'read' ? getReadPos(videoId) : undefined;
 
-// The i18n key naming what a click starts; dictation / blur by the video's practice mode.
-export const lastWayName = (v: VideoRecord, way: LastWay | null): DictKey =>
-  way === 'watch' ? (isAudioRecord(v) ? 'custom.listen' : 'custom.watch') : way === 'read' ? 'home.readMode'
+// The i18n key naming what a click starts; matches defaultChoiceForNew when `way` is null.
+export const lastWayName = (v: VideoRecord, way: LastWay | null, hasListen = true): DictKey => {
+  const eff = way ?? (isAudioRecord(v) || getWatchPrefs().chosen ? 'watch' : 'all');
+  return eff === 'watch' ? (hasListen && isAudioRecord(v) ? 'custom.listen' : 'custom.watch') : eff === 'read' ? 'home.readMode'
     : v.learningMode === LearningMode.BLUR ? 'home.blur' : 'home.dictate';
+};
 
 // Where a record sits, worked out on Home from its subtitles and getLastWay.
 export type ShelfPos = { part: number; parts: number; line: number; lines: number; customSec?: number; customPct?: number; listen?: boolean; watch?: boolean; read?: boolean };

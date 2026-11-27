@@ -66,7 +66,8 @@ export const getWeekStats = () => getPracticeConfig().weekStats !== false;
 export const getTodayBar = () => getPracticeConfig().todayBar !== false;
 export const getLooseJudge = () => getPracticeConfig().looseJudge !== false;
 export const getSubtitleMaskOn = () => getPracticeConfig().subtitleMask !== false;
-export const setPracticeFlag = (key: 'masteredBtn' | 'weekStats' | 'todayBar' | 'looseJudge' | 'subtitleMask', on: boolean) => savePracticeConfig({ ...getPracticeConfig(), [key]: on });
+export const getSlowReplay = () => getPracticeConfig().slowReplay !== false;
+export const setPracticeFlag = (key: 'masteredBtn' | 'weekStats' | 'todayBar' | 'looseJudge' | 'subtitleMask' | 'slowReplay', on: boolean) => savePracticeConfig({ ...getPracticeConfig(), [key]: on });
 
 // --- Audio Padding Config Storage ---
 
@@ -239,16 +240,31 @@ export const getWatchPrefs = (): WatchPrefs => {
     const v = JSON.parse(localStorage.getItem(STORAGE_KEY_WATCH_PREFS) || '{}') ?? {};
     const pct = typeof v.listPct === 'number' && Number.isFinite(v.listPct) ? Math.min(LIST_PCT.max, Math.max(LIST_PCT.min, v.listPct)) : LIST_PCT.def;
     return {
-      subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen === true, pin: v.pin === true, list: v.list === true, listPct: pct, readBy: v.readBy === 'section' ? 'section' : 'all', kana: v.kana !== false, autoClip: v.autoClip === true,
+      subs: v.subs === 'blur' || v.subs === 'hide' ? v.subs : 'show', autoPause: v.autoPause === true, chosen: v.chosen !== false, pin: v.pin === true, list: v.list === true, listPct: pct, readBy: v.readBy === 'section' ? 'section' : 'all', kana: v.kana !== false, autoClip: v.autoClip === true,
       listenSubs: v.listenSubs === 'blur' || v.listenSubs === 'show' ? 'show' : 'hide', podLang: typeof v.podLang === 'string' ? v.podLang : '', listenThrough: v.listenThrough === true, listenIntro: v.listenIntro === true, listenTries: LISTEN_TRIES.includes(v.listenTries) ? v.listenTries : 3,
       readerSize: v.readerSize === 's' || v.readerSize === 'l' ? v.readerSize : 'm', phraseMarks: v.phraseMarks === true,
     };
   } catch {
-    return { subs: 'show', autoPause: false, chosen: false, pin: false, list: false, listPct: LIST_PCT.def, readBy: 'all', kana: true, autoClip: false, listenSubs: 'hide', podLang: '', listenThrough: false, listenIntro: false, listenTries: 3, readerSize: 'm', phraseMarks: false };
+    return { subs: 'show', autoPause: false, chosen: true, pin: false, list: false, listPct: LIST_PCT.def, readBy: 'all', kana: true, autoClip: false, listenSubs: 'hide', podLang: '', listenThrough: false, listenIntro: false, listenTries: 3, readerSize: 'm', phraseMarks: false };
   }
 };
 
 export const saveWatchPrefs = (patch: Partial<WatchPrefs>) => {
   try { localStorage.setItem(STORAGE_KEY_WATCH_PREFS, JSON.stringify({ ...getWatchPrefs(), ...patch })); } catch { /* stays for this session only */ }
   touchSyncSetting(STORAGE_KEY_WATCH_PREFS);
+};
+
+// Local-only write for `chosen` (never synced): writes raw JSON without filling
+// defaults (`subs`/`autoPause`/etc.) or bumping `settingAt`, so switching ways on a
+// fresh device never overwrites another device's watch/listen preferences on first sync.
+export const saveLocalWatchChosen = (chosen: boolean) => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_WATCH_PREFS);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      localStorage.setItem(STORAGE_KEY_WATCH_PREFS, JSON.stringify({ chosen }));
+      return;
+    }
+    localStorage.setItem(STORAGE_KEY_WATCH_PREFS, JSON.stringify({ ...parsed, chosen }));
+  } catch { /* stays for this session only */ }
 };

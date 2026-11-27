@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Subtitle, AnkiConfig, AnkiCardTemplateConfig } from '../types';
 import * as Anki from '../utils/anki';
 import * as Storage from '../utils/storage';
@@ -84,6 +84,32 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
 
   const [ankiConfig, setAnkiConfig] = useState<AnkiConfig | null>(Anki.getAnkiConfig());
   const [ankiStatus, setAnkiStatus] = useState<AnkiStatus>('idle');
+  const statusRef = useRef<AnkiStatus>('idle');
+  const resetTimerRef = useRef<number | null>(null);
+
+  const setStatus = useCallback((s: AnkiStatus) => {
+    if (resetTimerRef.current !== null) {
+      window.clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+    statusRef.current = s;
+    setAnkiStatus(s);
+  }, []);
+
+  const scheduleIdle = useCallback((ms: number) => {
+    if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
+    resetTimerRef.current = window.setTimeout(() => {
+      resetTimerRef.current = null;
+      if (statusRef.current === 'success' || statusRef.current === 'error') {
+        statusRef.current = 'idle';
+        setAnkiStatus('idle');
+      }
+    }, ms);
+  }, []);
+
+  useEffect(() => () => {
+    if (resetTimerRef.current !== null) window.clearTimeout(resetTimerRef.current);
+  }, []);
 
   // Reload config from storage
   const reloadConfig = useCallback(() => {
@@ -240,7 +266,7 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
       dialog.alert(t('anki.notConnectedTitle'), t('anki.notConnectedBody'));
       return;
     }
-    if (ankiStatus !== 'idle') return;
+    if (statusRef.current !== 'idle') return;
 
     const template = ankiConfig.card;
 
@@ -250,21 +276,20 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
     }
 
     const needsAudio = Object.values(template.fieldMapping).includes('audio');
-    if (needsAudio) setAnkiStatus('recording');
-    else setAnkiStatus('adding');
+    setStatus(needsAudio ? 'recording' : 'adding');
 
     let media: Awaited<ReturnType<typeof captureMedia>>;
     try {
         media = await captureMedia(subtitle, template);
     } catch (e) {
-        setAnkiStatus('error');
+        setStatus('error');
         if (e instanceof AudioCaptureError) alertAudioFailed(e);
-        setTimeout(() => setAnkiStatus('idle'), 3000);
+        scheduleIdle(3000);
         return;
     }
     const { screenshotBase64, audioBase64, audioExt } = media;
 
-    setAnkiStatus('adding');
+    setStatus('adding');
     try {
         await Anki.addNote(ankiConfig.url, await withLangDeck(template, videoId), {
             sentence: subtitle.text,
@@ -275,15 +300,15 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
             audioExt,
         });
         if (videoId) markAnkiSent(lineCardId(videoId, subtitle.startTime), Date.now()).catch(console.error);
-        setAnkiStatus('success');
-        setTimeout(() => setAnkiStatus('idle'), 2000);
+        setStatus('success');
+        scheduleIdle(2000);
     } catch (e: any) {
         console.error(e);
-        setAnkiStatus('error');
+        setStatus('error');
         dialog.alert(t('anki.refusedTitle'), e.message);
-        setTimeout(() => setAnkiStatus('idle'), 3000);
+        scheduleIdle(3000);
     }
-  }, [ankiConfig, ankiStatus, captureMedia, videoFileName, videoId]);
+  }, [ankiConfig, captureMedia, scheduleIdle, setStatus, videoFileName, videoId]);
 
   // Add word with definition to Anki
   const handleWordToAnki = useCallback(async (word: string, definition: string, subtitle: Subtitle, example?: string) => {
@@ -299,12 +324,19 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
         throw new Error('Anki card not configured');
       }
 
+      const needsAudio = Object.values(template.fieldMapping).includes('audio');
+      if (needsAudio) {
+        if (statusRef.current === 'recording' || statusRef.current === 'adding') throw new Error('Anki busy');
+        setStatus('recording');
+      }
       let media: Awaited<ReturnType<typeof captureMedia>>;
       try {
           media = await captureMedia(subtitle, template);
       } catch (e) {
           if (e instanceof AudioCaptureError) alertAudioFailed(e);
           throw e;
+      } finally {
+          if (needsAudio && statusRef.current === 'recording') setStatus('idle');
       }
       const { screenshotBase64, audioBase64, audioExt } = media;
       // The word's own sound, cut from the file (docs/word-audio.md); unknown or guessed place = none.
@@ -333,13 +365,14 @@ export function useAnkiIntegration(params: UseAnkiIntegrationParams): UseAnkiInt
           dialog.alert(t('anki.refusedTitle'), e?.message ?? String(e));
           throw e;
       }
-  }, [ankiConfig, captureMedia, videoFileName, videoId]);
+  }, [ankiConfig, captureMedia, setStatus, videoFileName, videoId]);
 
   // Moving to another line clears the badge, but never one still recording or
   // adding: that card isn't done, and its own finish sets the badge.
   const clearAnkiStatus = useCallback((status: AnkiStatus) => {
-    setAnkiStatus(s => (status === 'idle' && (s === 'recording' || s === 'adding') ? s : status));
-  }, []);
+    if (status === 'idle' && (statusRef.current === 'recording' || statusRef.current === 'adding')) return;
+    setStatus(status);
+  }, [setStatus]);
 
   return {
     ankiConfig,

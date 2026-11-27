@@ -20,6 +20,7 @@ import { useSavedLines } from './hooks/useSavedLines';
 import { useVideoController } from './hooks/useVideoController';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { usePracticeActions } from './hooks/usePracticeActions';
+import { resolveAnchorPos, sectionLengthOf, useWaySwitch } from './hooks/useWaySwitch';
 import * as VideoStorage from './utils/videoStorage';
 import { fileNameFromPath, isAudioRecord, pathExists, pickVideoPath, videoSrcFromPath } from './utils/desktop';
 import { parseSRT } from './utils/srtParser';
@@ -77,7 +78,7 @@ export default function App() {
   // Which shelf a page returns to: the videos, or the podcast tab.
   const homeRef = useRef<AppState.UPLOAD | AppState.PODCASTS>(AppState.UPLOAD);
   if (appState === AppState.UPLOAD || appState === AppState.PODCASTS) homeRef.current = appState;
-  const goHome = () => setAppState(homeRef.current);
+  const goHome = () => { ++launchRef.current; setAppState(homeRef.current); };
   const [homeEmpty, setHomeEmpty] = useState(false); // no videos yet: the top bar drops its add button
   const [addAsked, setAddAsked] = useState(false); // the top bar's "+": Home opens its add dialog
   const [videoFileName, setVideoFileName] = useState<string | null>(null);
@@ -89,9 +90,10 @@ export default function App() {
   const [panel, setPanel] = useState<{ record: VideoRecord; lm: LearningMode; read?: number } | null>(null);
   type CustomSession = { record: VideoRecord; lm: LearningMode; cfg: CustomConfig; watch: Set<number>; end: number };
   const [custom, setCustom] = useState<CustomSession | null>(null);
-  const [watching, setWatching] = useState<VideoRecord | null>(null); // watch mode's video, its path checked
-  const [reading, setReading] = useState<{ record: VideoRecord; lm: LearningMode; by: ReadBy } | null>(null); // the reader's, likewise
-  const [listening, setListening] = useState<{ record: VideoRecord; lm: LearningMode } | null>(null); // no picture: listen instead of watch
+  const [watching, setWatching] = useState<{ record: VideoRecord; startSec?: number } | null>(null); // watch mode's video, its path checked
+  const [reading, setReading] = useState<{ record: VideoRecord; lm: LearningMode; by: ReadBy; startSec?: number } | null>(null); // the reader's, likewise
+  const [listening, setListening] = useState<{ record: VideoRecord; lm: LearningMode; startSec?: number } | null>(null); // no picture: listen instead of watch
+  const [practiceRecord, setPracticeRecord] = useState<VideoRecord | null>(null);
   const customRef = useRef<CustomSession | null>(null);
   // Every write of the record's section progress goes through here, so a custom
   // set can never move the shelf's "part 3 of 12" or where "continue" lands.
@@ -128,7 +130,7 @@ export default function App() {
   const toggleLoopRef = useRef(() => {});
 
   const {
-    videoRef, videoSrc, setVideoSrc, isPlaying, volume, playbackSpeed, progress,
+    videoRef, videoSrc, setVideoSrc, isPlaying, volume, playbackSpeed, slowReplay, progress,
     setIsPlaying, setVolume, setPlaybackSpeed, togglePlay,
     handleProgressSeek: videoPlayerHandleProgressSeek, handleReplayCurrent,
   } = useVideoController({
@@ -171,7 +173,7 @@ export default function App() {
     if (customRef.current) {
       const sub = subtitles[currentSubtitleIndex];
       if (sub) setCustomPos(customRef.current.record.id, sub.startTime);
-    } else if (currentSubtitleIndex > 0) {
+    } else if (currentSectionIndex > 0 || currentSubtitleIndex > 0) {
       const before = sections.slice(0, currentSectionIndex).reduce((n, s) => n + s.subtitles.length, 0);
       saveProgress(currentVideoId, currentSubtitleIndex, currentSectionIndex, before + currentSubtitleIndex);
     }
@@ -181,20 +183,20 @@ export default function App() {
 
   const startPractice = async (
     videoName: string, videoPath: string, sf: File, lm: LearningMode, bpm: BlurPlaybackMode,
-    startIndex?: number, startSectionIndex?: number, videoId?: string, pick?: number[], stale?: () => boolean,
-  ) => {
+    startIndex?: number, startSectionIndex?: number, videoId?: string, pick?: number[], stale?: () => boolean, sectionLength?: number,
+  ): Promise<boolean> => {
     let subText: string;
     try {
       subText = await sf.text();
     } catch {
       dialog.alert(t('app.subtitleReadFailTitle'), t('app.subtitleReadFailBody'));
-      return;
+      return false;
     }
-    if (stale?.()) return;
-    const result = initializePractice(subText, startIndex, startSectionIndex, pick);
+    if (stale?.()) return false;
+    const result = initializePractice(subText, startIndex, startSectionIndex, pick, sectionLength);
     if (!result) {
       dialog.alert(t('app.noSubtitlesTitle'), t('app.noSubtitlesBody', { name: sf.name }));
-      return;
+      return false;
     }
 
     setLearningMode(lm);
@@ -216,6 +218,7 @@ export default function App() {
     setVideoSrc(videoSrcFromPath(videoPath));
     setShowComplete(false);
     setAppState(AppState.PRACTICE);
+    return true;
   };
 
   // Only the latest start wins: two starts in quick succession must not mix one
@@ -233,76 +236,83 @@ export default function App() {
     });
   };
   const otherWay = (r: VideoRecord) => setPanel({ record: r, lm: r.learningMode ?? LearningMode.DICTATION });
-  const openPractice = async (record: VideoRecord, lm: LearningMode, choice: PanelChoice) => {
-    const launch = ++launchRef.current;
+  const openPractice = async (record: VideoRecord, lm: LearningMode, choice: PanelChoice, anchorSec?: number, existingToken?: number): Promise<boolean> => {
+    const launch = existingToken ?? ++launchRef.current;
     const stale = () => launchRef.current !== launch;
+    const clearViews = () => { setWatching(null); setReading(null); setListening(null); };
     try {
       let videoPath = record.videoPath;
       if (!videoPath || !(await pathExists(videoPath))) {
+        if (stale()) return false;
         const ok = await dialog.confirm(t('app.pickVideoTitle'), t('app.pickVideoBody', { name: record.videoFileName }), { ok: t('app.pickVideoOk') });
-        if (!ok) return;
+        if (!ok || stale()) return false;
         const picked = await pickVideoPath();
-        if (!picked) return;
+        if (!picked || stale()) return false;
         videoPath = picked;
         await VideoStorage.patchVideoRecord(record.id, { videoPath });
       }
+      if (stale()) return false;
 
       if (choice.kind === 'watch' || choice.kind === 'listen' || choice.kind === 'read') {
-        if (stale()) return;
         if (parseSRT(record.subtitleText).length === 0) {
           dialog.alert(t('app.noSubtitlesTitle'), t('app.noSubtitlesBody', { name: record.videoFileName }));
-          return;
+          return false;
         }
+        clearViews(); customRef.current = null; setCustom(null); setPracticeRecord(null); setShowComplete(false); setIsPlaying(false);
+        const withPath = { ...record, videoPath };
         if (choice.kind === 'read') { // before practice: the record is left as it is, only the last way is kept
           if (!record.podcast) setLastWay(record.id, 'read');
-          setReading({ record: { ...record, videoPath }, lm, by: choice.by });
+          setReading({ record: withPath, lm, by: choice.by, startSec: anchorSec });
           setAppState(AppState.READ);
-          return;
+          return true;
         }
         // Watching (or listening) moves the video up the shelf; its practice mode and progress stay.
         VideoStorage.patchVideoRecord(record.id, { lastPracticed: Date.now() }).catch(console.error);
         if (!record.podcast) setLastWay(record.id, 'watch');
         if (choice.kind === 'listen') {
-          setListening({ record: { ...record, videoPath }, lm });
+          setListening({ record: withPath, lm, startSec: anchorSec });
           setAppState(AppState.LISTEN);
-          return;
+          return true;
         }
-        setWatching({ ...record, videoPath });
+        setWatching({ record: withPath, startSec: anchorSec });
         setAppState(AppState.WATCH);
-        return;
+        return true;
       }
 
-      if (record.learningMode !== lm) await VideoStorage.patchVideoRecord(record.id, { learningMode: lm });
-      if (!record.podcast) setLastWay(record.id, choice.kind === 'custom' ? 'custom' : 'all');
-      if (stale()) return;
-      setVideoLang(record.lang);
+      const secLen = sectionLengthOf(record);
       const bpm = record.blurPlaybackMode ?? BlurPlaybackMode.SENTENCE_BY_SENTENCE;
+      const withPath = { ...record, videoPath, learningMode: lm };
       if (choice.kind === 'custom') {
         const { lines, practise } = choice.pick;
         const keep = new Set(practise);
         const subs = parseSRT(record.subtitleText);
         const session: CustomSession = {
-          record: { ...record, videoPath }, lm, cfg: choice.cfg,
+          record: withPath, lm, cfg: choice.cfg,
           watch: new Set(lines.filter(i => !keep.has(i)).map(i => subs[i].id)),
           end: subs[lines[lines.length - 1]].endTime,
         };
-        customRef.current = session;
-        setCustom(session);
-        // The shelf's "last practised" moves; its section progress does not.
-        VideoStorage.patchVideoRecord(record.id, { lastPracticed: Date.now() }).catch(console.error);
-        await startPractice(record.videoFileName, videoPath, getSubtitleFileFromRecord(record), lm, bpm, 0, 0, record.id, lines, stale);
-        return;
+        const started = await startPractice(record.videoFileName, videoPath, getSubtitleFileFromRecord(record), lm, bpm, 0, 0, record.id, lines, stale, secLen);
+        if (!started || stale()) return false;
+        clearViews(); setVideoLang(record.lang); customRef.current = session; setCustom(session); setPracticeRecord(withPath);
+        if (!record.podcast) setLastWay(record.id, 'custom');
+        VideoStorage.patchVideoRecord(record.id, { learningMode: lm, lastPracticed: Date.now() }).catch(console.error);
+        return true;
       }
-      customRef.current = null;
-      setCustom(null);
+      const anchor = anchorSec !== undefined ? resolveAnchorPos(withPath, anchorSec) : null;
       const finished = record.completionRate >= 100;
-      await startPractice(
-        record.videoFileName, videoPath, getSubtitleFileFromRecord(record), lm, bpm,
-        finished ? 0 : record.currentSubtitleIndex, finished ? 0 : record.currentSectionIndex, record.id, undefined, stale,
-      );
+      const startSub = anchor ? anchor.subtitleIndex : finished ? 0 : record.currentSubtitleIndex;
+      const startSecIdx = anchor ? anchor.sectionIndex : finished ? 0 : record.currentSectionIndex;
+      const started = await startPractice(record.videoFileName, videoPath, getSubtitleFileFromRecord(record), lm, bpm, startSub, startSecIdx, record.id, undefined, stale, secLen);
+      if (!started || stale()) return false;
+      clearViews(); setVideoLang(record.lang); customRef.current = null; setCustom(null); setPracticeRecord(withPath);
+      if (!record.podcast) setLastWay(record.id, 'all');
+      VideoStorage.patchVideoRecord(record.id, { learningMode: lm }).catch(console.error);
+      if (anchor) saveProgress(record.id, anchor.subtitleIndex, anchor.sectionIndex, anchor.absIndex);
+      return true;
     } catch (error) {
       console.error('Failed to continue from library:', error);
       dialog.alert(t('app.openVideoFailTitle'), t('app.openVideoFailBody'));
+      return false;
     }
   };
 
@@ -328,9 +338,9 @@ export default function App() {
   // the transport's replay button) plays the current step's clip instead.
   const stepReplayRef = useRef<(() => void) | null>(null);
   const setStepReplay = useCallback((play: (() => void) | null) => { stepReplayRef.current = play; }, []);
-  const replayCurrent = useCallback((autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number) => {
+  const replayCurrent = useCallback((autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number, fromLoop?: boolean) => {
     if (stepReplayRef.current) stepReplayRef.current();
-    else handleReplayCurrent(autoAdvanceAfter, fromRatio, toRatio);
+    else handleReplayCurrent(autoAdvanceAfter, fromRatio, toRatio, fromLoop);
   }, [handleReplayCurrent]);
   // The line loop waits while a breakdown step or an Anki recording owns playback.
   loopOkRef.current = () => !stepReplayRef.current && ankiStatus !== 'recording';
@@ -340,7 +350,7 @@ export default function App() {
     if (blurContinuous) return;
     const on = !getLoop().on;
     setLoopOn(on);
-    if (on && !isPlaying && mode !== PracticeMode.FEEDBACK) replayCurrent();
+    if (on && !isPlaying && mode !== PracticeMode.FEEDBACK) replayCurrent(false, 0, undefined, true);
   };
   toggleLoopRef.current = toggleLoop;
   const togglePlayOrStep = useCallback(() => {
@@ -348,16 +358,21 @@ export default function App() {
     else togglePlay();
   }, [togglePlay, isPlaying]);
 
-  const exitPractice = () => { setShowComplete(false); goHome(); customRef.current = null; setCustom(null); };
+  const exitPractice = () => { setShowComplete(false); goHome(); customRef.current = null; setCustom(null); setPracticeRecord(null); };
+  const { switchWay, wayToast } = useWaySwitch({
+    appState, currentVideoId, learningMode, mode, hasListen: !!Listen, launchRef, customRef,
+    setLearningMode, setMode, setPracticeRecord, openPractice,
+  });
 
   // "Next set" on the custom done overlay: same choices, from where this set ended.
   const nextSet = async () => {
     const c = customRef.current;
     if (!c) return;
-    const pick = await nextPick(c.record, c.cfg, paceOf(c.lm, blurPlaybackMode));
+    const lm = learningMode;
+    const pick = await nextPick(c.record, c.cfg, paceOf(lm, blurPlaybackMode));
     if (customRef.current !== c) return; // left the page meanwhile
-    // The playback style may have changed mid-set (the record snapshot predates it).
-    if (pick) openPractice({ ...c.record, blurPlaybackMode }, c.lm, { kind: 'custom', cfg: c.cfg, pick });
+    // The playback style or learning mode may have changed mid-set.
+    if (pick) openPractice({ ...c.record, learningMode: lm, blurPlaybackMode }, lm, { kind: 'custom', cfg: c.cfg, pick });
     else exitPractice();
   };
 
@@ -406,16 +421,20 @@ export default function App() {
   // --- Render ---
 
   const currentSub = subtitles[currentSubtitleIndex];
+  const practiceAnchor = currentSub?.startTime ?? videoRef.current?.currentTime ?? 0;
 
   const page = appState === AppState.WATCH && watching ? (
-    <WatchPage key={watching.id} record={watching} onExit={() => { setWatching(null); goHome(); }} />
+    <WatchPage key={watching.record.id} record={watching.record} startSec={watching.startSec} hasReader={!!Reader} hasListen={!!Listen}
+      onSwitchWay={(w, sec) => switchWay(watching.record, w, sec)} onExit={() => { setWatching(null); goHome(); }} />
   ) : appState === AppState.LISTEN && listening && Listen ? (
-    <Listen key={listening.record.id} record={listening.record} onExit={() => { setListening(null); goHome(); }}
-      onPractice={() => { setListening(null); goHome(); setPanel(listening); }}
+    <Listen key={listening.record.id} record={listening.record} startSec={listening.startSec} hasReader={!!Reader}
+      onSwitchWay={(w, sec) => switchWay(listening.record, w, sec)} onExit={() => { setListening(null); goHome(); }}
+      onPractice={() => { setListening(null); goHome(); setPanel({ record: listening.record, lm: listening.lm }); }}
       onOpen={r => { setListening(null); goHome(); handleResume(r, r.learningMode ?? LearningMode.DICTATION); }} />
   ) : appState === AppState.READ && reading && Reader ? (
     // Done reading: back to the panel to pick how to practise.
-    <Reader key={reading.record.id} record={reading.record} by={reading.by}
+    <Reader key={reading.record.id} record={reading.record} by={reading.by} startSec={reading.startSec} hasListen={!!Listen}
+      onSwitchWay={(w, sec) => switchWay(reading.record, w, sec)}
       onExit={n => { setReading(null); goHome(); setPanel({ record: reading.record, lm: reading.lm, read: n }); }} />
   ) : appState !== AppState.PRACTICE ? (
     <Shell active={appState} onNav={setAppState} podcasts={!!PodcastPicker} hideAdd={appState === homeRef.current && homeEmpty} onAdd={() => { setAppState(appState === AppState.PODCASTS ? AppState.PODCASTS : AppState.UPLOAD); setAddAsked(true); }}>
@@ -434,41 +453,29 @@ export default function App() {
   ) : (
     <PracticeProvider
       practice={{
-        videoId: currentVideoId, videoLang,
-        subtitles, fullSubtitles, sections, currentSectionIndex, currentSubtitleIndex, mode,
-        showSectionComplete, showComplete, learningMode, blurPlaybackMode,
-        videoName: videoFileName || 'Video',
-        watch: custom ? custom.watch : null,
+        videoId: currentVideoId, videoLang, subtitles, fullSubtitles, sections, currentSectionIndex, currentSubtitleIndex, mode,
+        showSectionComplete, showComplete, learningMode, blurPlaybackMode, videoName: videoFileName || 'Video',
+        watch: custom ? custom.watch : null, practiceRecord, hasReader: !!Reader, hasListen: !!Listen,
       }}
-      video={{ videoRef, videoSrc, isPlaying, volume, playbackSpeed, progress }}
+      video={{ videoRef, videoSrc, isPlaying, volume, playbackSpeed, slowReplay, progress }}
       saved={{ savedIds, showSavedList, savedItems, isCurrentSaved: savedLinesIsCurrentSaved(currentSub) }}
       anki={{ ankiConfig, ankiStatus }}
       actions={{
-        onExit: exitPractice,
-        onRestart: restartPractice,
-        onNextSet: nextSet,
-        onSwitchSection: unlessRecording((index: number) => switchSection(index, videoRef, setIsPlaying)),
-        onToggleSavedList: setShowSavedList,
-        onTogglePlay: unlessRecording(togglePlayOrStep),
-        onReplayCurrent: unlessRecording(replayCurrent),
-        onToggleLoop: unlessRecording(toggleLoop),
-        onSetStepReplay: setStepReplay,
-        onSkip: unlessRecording(handleSkip),
-        onProgressSeek: unlessRecording(handleProgressSeek),
-        onToggleSaveCurrent: toggleSaveCurrent,
-        onAddToAnki: handleAddToAnki,
-        onWordToAnki: handleWordToAnki,
-        onNextSection: unlessRecording(handleNextSectionClick),
-        onStopAfterSection: stopAfterSection,
-        onSetShowSectionComplete: setShowSectionComplete,
-        onSetVolume: setVolume,
-        onSetPlaybackSpeed: setPlaybackSpeed,
-        onInputComplete: handleInputComplete,
-        onStartInput: () => { if (mode === PracticeMode.LISTENING) setMode(PracticeMode.INPUT); },
-        onContinue: unlessRecording(handleContinue),
-        onDeleteSavedItem: deleteSavedItem,
-        onJumpToSaved: unlessRecording(jumpToSaved),
+        onExit: exitPractice, onRestart: restartPractice, onNextSet: nextSet,
+        onSwitchSection: unlessRecording((index: number) => {
+          switchSection(index, videoRef, setIsPlaying);
+          if (currentVideoId && index >= 0 && index < sections.length) saveProgress(currentVideoId, 0, index, sections.slice(0, index).reduce((n, s) => n + s.subtitles.length, 0));
+        }),
+        onToggleSavedList: setShowSavedList, onTogglePlay: unlessRecording(togglePlayOrStep),
+        onReplayCurrent: unlessRecording(replayCurrent), onToggleLoop: unlessRecording(toggleLoop),
+        onSetStepReplay: setStepReplay, onSkip: unlessRecording(handleSkip), onProgressSeek: unlessRecording(handleProgressSeek),
+        onToggleSaveCurrent: toggleSaveCurrent, onAddToAnki: handleAddToAnki, onWordToAnki: handleWordToAnki,
+        onNextSection: unlessRecording(handleNextSectionClick), onStopAfterSection: stopAfterSection,
+        onSetShowSectionComplete: setShowSectionComplete, onSetVolume: setVolume, onSetPlaybackSpeed: setPlaybackSpeed,
+        onInputComplete: handleInputComplete, onStartInput: () => { if (mode === PracticeMode.LISTENING) setMode(PracticeMode.INPUT); },
+        onContinue: unlessRecording(handleContinue), onDeleteSavedItem: deleteSavedItem, onJumpToSaved: unlessRecording(jumpToSaved),
         onSetBlurPlaybackMode: setBlurPlaybackMode,
+        onSwitchWay: practiceRecord ? unlessRecording(w => switchWay(practiceRecord, w, practiceAnchor)) : undefined,
       }}
     >
       <Studio />
@@ -478,6 +485,7 @@ export default function App() {
   return (
     <>
       {page}
+      {wayToast}
       {panel && (
         <CustomPanel record={panel.record} pace={paceOf(panel.lm, panel.record.blurPlaybackMode)} read={panel.read}
           onCancel={() => setPanel(null)} onStart={choice => { setPanel(null); openPractice(panel.record, panel.lm, choice); }} />

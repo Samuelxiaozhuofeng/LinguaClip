@@ -7,9 +7,10 @@ import { canCloze } from '../utils/aiDrills';
 import { CustomConfig, CustomPick, LEVELS, Level, LineLabel, MINUTE_CHOICES, PaceMode, pickCustom } from '../utils/customPick';
 import { Listen, Reader } from '@pro';
 import { isAudioRecord } from '../utils/desktop';
+import { defaultChoiceForNew } from '../utils/studyWays';
 import { KeywordBlock } from './KeywordCard';
 import { getLevelJob, prepareLevels, readLevels, subscribeLevels } from '../utils/levelPrep';
-import { formatTimeCode, getCustomConfig, getCustomPos, getLastWay, getWatchPrefs, ReadBy, saveCustomConfig, saveWatchPrefs } from '../utils/storage';
+import { formatTimeCode, getCustomConfig, getCustomPos, getLastWay, getWatchPrefs, ReadBy, saveCustomConfig, saveLocalWatchChosen, saveWatchPrefs } from '../utils/storage';
 
 // Asked before every practice session: section by section as before, or a
 // custom set — so many minutes, at a level, from where the last set stopped —
@@ -37,15 +38,15 @@ export async function nextPick(record: VideoRecord, cfg: CustomConfig, pace: Pac
   return pickCustom(subs, labels, cfg, getCustomPos(record.id), pace);
 }
 
-// A click on a video that was started before: the same way again, no panel (docs/watch.md).
-// null = ask with the panel: never started, a custom set whose level this video isn't graded
-// for yet (the level must not be dropped silently), or nothing to pick.
-// `practiceOnly` ("practise with dictation / blur"): a video last watched or read starts section by section.
-// Last read but the Pro reader isn't there: asked with the panel.
+// A click on a video opens straight into its way, no panel (docs/watch.md):
+// last way if started before; for a new record, defaultChoiceForNew (audio -> listen/watch,
+// video -> watchPrefs.chosen, defaulting to watch). null = ask with the panel: a custom set
+// whose level this video isn't graded for yet, nothing to pick, or last read with no Pro reader.
+// `practiceOnly` ("practise with dictation / blur"): starts section by section if never started, watched, or read.
 export async function resumeChoice(record: VideoRecord, lm: LearningMode, practiceOnly = false): Promise<PanelChoice | null> {
   let way = getLastWay(record.id);
   if ((way === 'watch' || way === 'read') && practiceOnly) way = 'all';
-  if (!way) return null;
+  if (!way) return practiceOnly ? { kind: 'all' } : defaultChoiceForNew(record, getWatchPrefs().chosen, !!Listen);
   if (way === 'watch') return { kind: Listen && isAudioRecord(record) ? 'listen' : 'watch' };
   if (way === 'read') return Reader ? { kind: 'read', by: getWatchPrefs().readBy } : null;
   if (way === 'all') return { kind: 'all' };
@@ -106,15 +107,19 @@ const CustomPanel: React.FC<{
   const preview = custom && (!want || labels) ? pickWith(false) : null;
   const empty = custom && (!want || labels) && !preview;
 
+  const saveCfgIfChanged = () => {
+    const prev = getCustomConfig();
+    if (prev.on !== cfg.on || prev.minutes !== cfg.minutes || prev.level !== cfg.level) saveCustomConfig(cfg);
+  };
   const start = (timeOnly = false) => {
-    if (read) { saveWatchPrefs({ readBy }); onStart({ kind: 'read', by: readBy }); return; }
-    if (!isAudioRecord(record)) saveWatchPrefs({ chosen: watch }); // a podcast's / sound file's own default isn't the videos' last choice
+    if (read) { if (readBy !== getWatchPrefs().readBy) saveWatchPrefs({ readBy }); onStart({ kind: 'read', by: readBy }); return; }
+    if (!isAudioRecord(record)) saveLocalWatchChosen(watch); // a podcast's / sound file's own default isn't the videos' last choice
     if (watch) { onStart({ kind: listen ? 'listen' : 'watch' }); return; }
-    if (!cfg.on) { saveCustomConfig(cfg); onStart({ kind: 'all' }); return; }
+    if (!cfg.on) { saveCfgIfChanged(); onStart({ kind: 'all' }); return; }
     if (want && !labels && !timeOnly) { if (!failed) setWaiting(true); return; }
     const pick = pickWith(timeOnly);
     if (!pick) { setWaiting(false); return; } // "no lines suit this level" shows; the user picks another
-    saveCustomConfig(cfg);
+    saveCfgIfChanged();
     // "Time only" holds for this video's next sets too, not just this one.
     onStart({ kind: 'custom', cfg: timeOnly ? { ...cfg, level: null } : cfg, pick });
   };

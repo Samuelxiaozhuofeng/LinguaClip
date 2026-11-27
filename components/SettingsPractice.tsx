@@ -3,7 +3,7 @@ import { Field, Group, Seg } from './ui';
 import { useT } from '../utils/i18n';
 import { JaDictRow } from './JaSetup';
 import { refreshShortcuts } from '../utils/shortcuts';
-import { getWatchPrefs, saveWatchPrefs, LISTEN_TRIES, getWeekStats, getTodayBar, getLooseJudge, getSubtitleMaskOn, setPracticeFlag } from '../utils/storage';
+import { getWatchPrefs, saveWatchPrefs, LISTEN_TRIES, getWeekStats, getTodayBar, getLooseJudge, getSubtitleMaskOn, getSlowReplay, setPracticeFlag } from '../utils/storage';
 
 interface SettingsPracticeProps {
   sectionLength: number;
@@ -21,6 +21,7 @@ const SettingsPractice: React.FC<SettingsPracticeProps> = ({
   const [today, setToday] = useState(getTodayBar);
   const [lenient, setLenient] = useState(getLooseJudge);
   const [mask, setMaskOn] = useState(getSubtitleMaskOn);
+  const [slowReplay, setSlowReplay] = useState(getSlowReplay);
   const SECTION_OPTS = [
     { value: 0, label: t('settingsGeneral.optFull') },
     { value: 1, label: '1' },
@@ -59,6 +60,13 @@ const SettingsPractice: React.FC<SettingsPracticeProps> = ({
             {t('settingsGeneral.subtitleMask')}
           </label>
           <p className="mt-1.5 text-xs text-mute leading-relaxed">{t('settingsGeneral.subtitleMaskHint')}</p>
+        </div>
+        <div>
+          <label className="flex items-center gap-2.5 text-sm cursor-pointer">
+            <input type="checkbox" checked={slowReplay} onChange={e => { setSlowReplay(e.target.checked); setPracticeFlag('slowReplay', e.target.checked); }} className="w-4 h-4 accent-accent" />
+            {t('settingsGeneral.slowReplay')}
+          </label>
+          <p className="mt-1.5 text-xs text-mute leading-relaxed">{t('settingsGeneral.slowReplayHint')}</p>
         </div>
       </Group>
 

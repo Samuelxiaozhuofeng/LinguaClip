@@ -130,9 +130,9 @@ export const updateProgress = async (
         currentSectionIndex,
         lastPracticed: Date.now(),
         totalSubtitles,
-        // Calculate completion rate
+        // Calculate completion rate (never round to 100% until every line is actually done)
         ...(totalSubtitles > 0 && {
-          completionRate: Math.min(100, Math.round((absoluteIndex / totalSubtitles) * 100)),
+          completionRate: absoluteIndex >= totalSubtitles ? 100 : Math.min(99, Math.round((absoluteIndex / totalSubtitles) * 100)),
         }),
       };
     });

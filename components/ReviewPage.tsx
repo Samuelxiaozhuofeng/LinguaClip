@@ -7,6 +7,7 @@ import { parseSRT } from '../utils/srtParser';
 import { buildSections, sectionAt, sectionLengthOf } from '../utils/sections';
 import { getLastWay, getWatchPos } from '../utils/storage';
 import { ShelfPos, cardFinished, cardWhere, lastWayName, lastWaySec } from '../utils/lastWayCard';
+import { Listen } from '@pro';
 import { Play } from 'lucide-react';
 import { Btn, Seg } from './ui';
 import CardsPage from './CardsPage';
@@ -73,7 +74,7 @@ const ReviewPage: React.FC<{ deck: Deck; onResume?: (r: VideoRecord) => void }> 
         const sections = buildSections(subs, sectionLengthOf(v));
         if (sections.length === 0) return v.completionRate >= 100;
         let pos: ShelfPos;
-        if (v.podcast) {
+        if (v.podcast && Listen) {
           pos = { part: sectionAt(sections, getWatchPos(v.id)), parts: sections.length, line: 0, lines: 0, listen: true };
         } else {
           const part = Math.min(Math.max(v.currentSectionIndex, 0), sections.length - 1);
@@ -157,7 +158,7 @@ const ReviewPage: React.FC<{ deck: Deck; onResume?: (r: VideoRecord) => void }> 
           lang={lang}
           resume={onResume && lead ? {
             name: lead.displayName,
-            label: t('home.continueMode', { mode: t(lead.podcast ? 'custom.listen' : lastWayName(lead, getLastWay(lead.id))) }),
+            label: t('home.continueMode', { mode: t(lead.podcast && Listen ? 'custom.listen' : lastWayName(lead, getLastWay(lead.id), !!Listen)) }),
             onClick: () => { setSession(null); onResume(lead); },
           } : undefined}
         />

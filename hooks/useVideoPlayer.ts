@@ -3,6 +3,8 @@ import { Subtitle, PracticeMode, LearningMode, BlurPlaybackMode } from '../types
 import { playSpan } from '../utils/wordTimes';
 import { loopMore, pageLoopHeld, LOOP_GAP_MS } from '../utils/loop';
 import { useSpeed } from '../utils/speedPref';
+import { getSlowReplay } from '../utils/storage';
+import { replayRate } from '../utils/studyWays';
 
 export interface UseVideoPlayerParams {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -27,6 +29,7 @@ export interface UseVideoPlayerReturn {
   isPlaying: boolean;
   volume: number;
   playbackSpeed: number;
+  slowReplay: boolean;
   progress: number;
   setIsPlaying: (value: boolean) => void;
   setVolume: (value: number) => void;
@@ -34,7 +37,7 @@ export interface UseVideoPlayerReturn {
   setProgress: (value: number) => void;
   togglePlay: () => void;
   handleProgressSeek: (e: React.ChangeEvent<HTMLInputElement>, sections: any[], currentSectionIndex: number, onSectionChange: (index: number, subIndex: number) => void) => void;
-  handleReplayCurrent: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number) => void;
+  handleReplayCurrent: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number, fromLoop?: boolean) => void;
 }
 
 export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerReturn {
@@ -58,6 +61,7 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
   const [playbackSpeed, setPlaybackSpeed] = useSpeed('dictation');
+  const [slowReplay, setSlowReplay] = useState(false);
   const [progress, setProgress] = useState(0);
   const requestRef = useRef<number | undefined>(undefined);
   const blurAutoAdvanceRef = useRef(false);
@@ -66,6 +70,25 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
   // "Play just this word": pause here, not at the line's end. Any pause, seek or new line drops it.
   const stopAtRef = useRef<number | null>(null);
   useEffect(() => { if (!isPlaying) stopAtRef.current = null; }, [isPlaying]);
+
+  // Temporary 0.75x slow-down from the 2nd manual replay of the same line (docs/watch.md).
+  // Never writes defaultPlaybackRate or global playbackSpeed, and only restores when tempSlowRef is true
+  // so Anki recording's 1x playback is never disturbed.
+  const manualReplaysRef = useRef(0);
+  const tempSlowRef = useRef(false);
+  const clearTempSlow = useCallback(() => {
+    if (!tempSlowRef.current) return;
+    tempSlowRef.current = false;
+    setSlowReplay(false);
+    if (videoRef.current) videoRef.current.playbackRate = playbackSpeed;
+  }, [playbackSpeed, videoRef]);
+  useEffect(() => {
+    manualReplaysRef.current = 0;
+    clearTempSlow();
+  }, [currentSubtitleIndex, subtitles, playbackSpeed, clearTempSlow]);
+  useEffect(() => {
+    if (mode === PracticeMode.FEEDBACK || !isPlaying) clearTempSlow();
+  }, [mode, isPlaying, clearTempSlow]);
 
   // Line loop (docs/loop.md): full plays of this line so far, and the pending replay.
   const playsRef = useRef(0);
@@ -171,11 +194,13 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
     requestRef.current = requestAnimationFrame(loop);
     const video = videoRef.current;
     video?.addEventListener('timeupdate', checkVideoTime);
+    video?.addEventListener('pause', clearTempSlow);
     return () => {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
       video?.removeEventListener('timeupdate', checkVideoTime);
+      video?.removeEventListener('pause', clearTempSlow);
     };
-  }, [checkVideoTime, videoRef]);
+  }, [checkVideoTime, clearTempSlow, videoRef]);
 
   // Volume and speed apart: a volume change while an Anki clip records at 1× must not put the speed back.
   useEffect(() => { if (videoRef.current) videoRef.current.volume = volume; }, [volume, videoRef]);
@@ -222,6 +247,16 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
     clearLoop();
     if (!fromLoop && fromRatio === 0 && toRatio === undefined) playsRef.current = 0; // a manual replay counts afresh
     if (videoRef.current && sub) {
+      const isManualFullReplay = !fromLoop && !autoAdvanceAfter && fromRatio === 0 && toRatio === undefined && modeRef.current !== PracticeMode.FEEDBACK;
+      if (isManualFullReplay) {
+        manualReplaysRef.current += 1;
+        const { rate, slowed } = replayRate(playbackSpeed, manualReplaysRef.current, getSlowReplay());
+        videoRef.current.playbackRate = rate;
+        tempSlowRef.current = slowed;
+        setSlowReplay(slowed);
+      } else {
+        clearTempSlow();
+      }
       const [from, to] = playSpan(sub.startTime, sub.endTime, fromRatio, toRatio);
       videoRef.current.currentTime = from;
       stopAtRef.current = toRatio === undefined ? null : to;
@@ -229,7 +264,7 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
       videoRef.current.play().catch(e => { console.error("Play blocked", e); setIsPlaying(false); });
       onShouldAutoAdvanceChange?.(autoAdvanceAfter);
     }
-  }, [subtitles, currentSubtitleIndex, videoRef, onShouldAutoAdvanceChange]);
+  }, [subtitles, currentSubtitleIndex, videoRef, onShouldAutoAdvanceChange, playbackSpeed, clearTempSlow]);
   playLineRef.current = () => handleReplayCurrent(false, 0, undefined, true);
 
   const togglePlay = useCallback(() => {
@@ -296,6 +331,7 @@ export function useVideoPlayer(params: UseVideoPlayerParams): UseVideoPlayerRetu
     isPlaying,
     volume,
     playbackSpeed,
+    slowReplay,
     progress,
     setIsPlaying,
     setVolume,

@@ -39,21 +39,23 @@ export default [
       await add.getByRole('button', { name: '选字幕文件' }).click();
       await see(add.getByText('Me at the zoo [jNQXAC9IVRw].srt'), '弹窗里显示选中的字幕');
       await add.getByRole('button', { name: '开始练习' }).click();
-      // A new video asks how to practise first; closing that leaves it on the shelf.
-      await see(page.getByRole('dialog', { name: '这次怎么练' }), '「这次怎么练」面板');
-      await page.keyboard.press('Escape');
+      // A new video opens straight into Watch mode (no "这次怎么练" gate).
+      await see(page.locator('[data-watch-line]'), '看剧页字幕');
+      if (await page.getByRole('dialog', { name: '这次怎么练' }).count()) throw new Error('新视频不应弹「这次怎么练」面板');
+      await page.mouse.move(300, 30);
+      await page.getByRole('button', { name: '回到你的视频列表' }).click();
       await see(page.getByText(NAME), '首页卡片上的视频名');
-      await see(page.getByText('0 / 4 句 · 继续听写'), '卡片进度「0 / 4 句 · 继续听写」');
+      await see(page.getByText(/看到 \d\d:\d\d · 继续看剧/), '卡片进度「看到 mm:ss · 继续看剧」');
     },
   },
   {
     name: '开始练习 → 听写一句 → 判对',
     run: async (ctx) => {
       const { page, see } = ctx;
-      await page.getByRole('button', { name: '继续听写' }).first().click();
-      const panel = page.getByRole('dialog', { name: '这次怎么练' });
-      await panel.getByRole('radio', { name: '按段从头练' }).click();
-      await panel.getByRole('button', { name: '开始练习' }).click();
+      await page.getByRole('button', { name: '继续看剧' }).first().click();
+      await see(page.locator('[data-watch-line]'), '看剧页字幕');
+      await page.mouse.move(300, 30);
+      await page.getByRole('tab', { name: '听写' }).click();
       await see(page.getByText('第 1 / 4 句'), '练习页「第 1 / 4 句」');
       const text = firstLine(ctx.sample);
       await dictate(ctx, text);

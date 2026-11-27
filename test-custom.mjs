@@ -108,9 +108,9 @@ assert.throws(() => parseLevelResponse('sorry', 1));
   assert.match(p, /长度必须等于 2/);
 }
 
-// 10. A click on the card goes on the last way (components/CustomPanel.tsx resumeChoice,
-// docs/watch.md 点视频直接开播), including reading. `@pro` is a stub whose Reader / Listen
-// are switched per case, so "no Pro reader" is checked too.
+// 10. A click on the card opens straight into its way (components/CustomPanel.tsx resumeChoice,
+// docs/watch.md 点视频直接开播), including new records and reading. `@pro` is a stub whose
+// Reader / Listen are switched per case, so "no Pro reader / Listen" is checked too.
 {
   const store = {};
   globalThis.localStorage = { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } };
@@ -122,21 +122,32 @@ assert.throws(() => parseLevelResponse('sorry', 1));
     plugins: [{
       name: 'stubs',
       setup(b) {
-        b.onResolve({ filter: /^@pro$|^@tauri-apps\/plugin-http$/ }, a => ({ path: a.path, namespace: 'stub' }));
+        b.onResolve({ filter: /^@pro$|^@tauri-apps\// }, a => ({ path: a.path, namespace: 'stub' }));
         b.onLoad({ filter: /.*/, namespace: 'stub' }, a => ({
           contents: a.path === '@pro'
             ? 'export const Reader = globalThis.__pro.Reader, Listen = globalThis.__pro.Listen, cancelTrans = async () => {};'
-            : 'export const fetch = globalThis.fetch;',
+            : a.path === '@tauri-apps/plugin-http'
+              ? 'export const fetch = globalThis.fetch;'
+              : 'export const convertFileSrc = p => p, invoke = async () => {}, homeDir = async () => "", join = async (...p) => p.join("/"), getCurrentWebview = () => ({}), getCurrentWindow = () => ({}), listen = async () => () => {}, open = async () => null, save = async () => null, openUrl = async () => {}, revealItemInDir = async () => {}, exists = async () => false, readFile = async () => new Uint8Array(), readTextFile = async () => "", check = async () => null, relaunch = async () => {}, getVersion = async () => "0.0.0";',
         }));
       },
     }],
   });
   const load = async (pro) => { globalThis.__pro = pro; return import(`${out2}?${Math.random()}`); };
-  const rec = { id: 'v1', subtitleText: '1\n00:00:01,000 --> 00:00:02,000\nhi\n', videoPath: '/a.mp4' };
+  const rec = { id: 'v1', subtitleText: '1\n00:00:01,000 --> 00:00:02,000\nhi\n', videoPath: '/a.mp4', videoFileName: 'a.mp4' };
+  const audioRec = { id: 'a1', subtitleText: rec.subtitleText, videoPath: '/a.mp3', videoFileName: 'a.mp3' };
   const withReader = await load({ Reader: () => null, Listen: null });
   const { resumeChoice, getLastWay, setLastWay } = withReader;
 
-  assert.equal(await resumeChoice(rec, 'dictation'), null, 'never started: the panel asks');
+  assert.deepEqual(await resumeChoice(rec, 'dictation'), { kind: 'watch' }, 'new video with no lastWay defaults to watch');
+  assert.deepEqual(await resumeChoice(rec, 'dictation', true), { kind: 'all' }, 'new video with practiceOnly starts section by section');
+  store.linguaclip_watch_prefs = JSON.stringify({ chosen: false });
+  assert.deepEqual(await resumeChoice(rec, 'dictation'), { kind: 'all' }, 'new video with watchPrefs.chosen === false starts section by section');
+  assert.deepEqual(await resumeChoice(audioRec, 'dictation'), { kind: 'watch' }, 'new audio without Listen falls back to watch');
+  const withListen = await load({ Reader: () => null, Listen: () => null });
+  assert.deepEqual(await withListen.resumeChoice(audioRec, 'dictation'), { kind: 'listen' }, 'new audio with Listen defaults to listen');
+  delete store.linguaclip_watch_prefs;
+
   setLastWay('v1', 'read');
   assert.equal(getLastWay('v1'), 'read', 'read is kept');
   assert.deepEqual(await resumeChoice(rec, 'dictation'), { kind: 'read', by: 'all' }, 'last read: reading again, the saved way to read');

@@ -27,6 +27,7 @@ export interface UseVideoControllerReturn {
   isPlaying: boolean;
   volume: number;
   playbackSpeed: number;
+  slowReplay: boolean;
   progress: number;
   
   // Playback Controls
@@ -36,7 +37,7 @@ export interface UseVideoControllerReturn {
   setProgress: (value: number) => void;
   togglePlay: () => void;
   handleProgressSeek: (e: React.ChangeEvent<HTMLInputElement>, sections: VideoSection[], currentSectionIndex: number, onSectionChange: (sectionIndex: number, subIndex: number) => void) => void;
-  handleReplayCurrent: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number) => void;
+  handleReplayCurrent: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number, fromLoop?: boolean) => void;
 }
 
 export function useVideoController(params: UseVideoControllerParams): UseVideoControllerReturn {
@@ -66,6 +67,7 @@ export function useVideoController(params: UseVideoControllerParams): UseVideoCo
     isPlaying,
     volume,
     playbackSpeed,
+    slowReplay,
     progress,
     setIsPlaying,
     setVolume,
@@ -100,6 +102,7 @@ export function useVideoController(params: UseVideoControllerParams): UseVideoCo
     isPlaying,
     volume,
     playbackSpeed,
+    slowReplay,
     progress,
     
     // Playback Controls

@@ -22,7 +22,7 @@ await build({
       export * from './utils/syncMerge';
       export * from './utils/qr';
       export { newCard, schedule, lineCardId, wordCardId, revertAddedLine } from './utils/review';
-      export { enableLocalSaveClipsIfUnset, getPracticeConfig, savePracticeConfig } from './utils/storage';
+      export { enableLocalSaveClipsIfUnset, getPracticeConfig, savePracticeConfig, saveLocalWatchChosen } from './utils/storage';
     `,
     resolveDir: '.',
     loader: 'ts',
@@ -952,6 +952,16 @@ const reviewLocal = (card, meta, revId, grade, at) => {
     // Explicit savePracticeConfig DOES touch settingAt (sanity check)
     S.savePracticeConfig({ sectionLength: 8, clozeLevel: 'medium', saveClips: true });
     assert.ok((S.getSyncState(globalThis.localStorage).settingAt?.linguaclip_practice_config?.at ?? 0) > 0);
+
+    // Local-only saveLocalWatchChosen never fills default watch_prefs or touches sync settingAt
+    mem.clear();
+    S.saveLocalWatchChosen(false);
+    assert.deepEqual(JSON.parse(mem.get('linguaclip_watch_prefs')), { chosen: false });
+    assert.equal(S.getSyncState(globalThis.localStorage).settingAt?.linguaclip_watch_prefs, undefined,
+      'switching ways on fresh device must NOT stamp linguaclip_watch_prefs settingAt');
+    S.saveLocalWatchChosen(true);
+    assert.deepEqual(JSON.parse(mem.get('linguaclip_watch_prefs')), { chosen: true });
+    assert.equal(S.getSyncState(globalThis.localStorage).settingAt?.linguaclip_watch_prefs, undefined);
   } finally {
     if (prevLS === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = prevLS;

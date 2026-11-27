@@ -23,8 +23,8 @@ interface Props {
   onComplete: (wasCorrect: boolean) => void;
   // Typing or IME composition started while LISTENING: switch to INPUT without pausing the video.
   onStartInput?: () => void;
-  // fromRatio / toRatio: 0..1 into the line; toRatio set = stop there (one word).
-  onReplay: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number) => void;
+  // fromRatio / toRatio: 0..1 into the line; toRatio set = stop there (one word). silent: do not count as a manual full-line replay.
+  onReplay: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number, silent?: boolean) => void;
   onLookup: (word: string) => void;
   // Given: Space in an empty blank (and Option+Space on a Mac) plays/pauses instead of moving on (docs/shortcuts.md).
   onTogglePlay?: () => void;
@@ -210,7 +210,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onStartI
       report(true);
       clearReplay();
       // All right: replay once and show the answer, then wait for Enter so words can be looked up.
-      replayTimer.current = window.setTimeout(() => { onReplay(false); onComplete(true); }, 200);
+      replayTimer.current = window.setTimeout(() => { onReplay(false, 0, undefined, true); onComplete(true); }, 200);
       return;
     }
     const nxt = nextOpenBlank(i, next);
@@ -245,7 +245,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onStartI
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (matches(e, 'blank.reveal')) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) reveal(); return; }
     if (matches(e, 'dict.replay')) { e.preventDefault(); e.stopPropagation(); clearReplay(); onReplay(false); return; }
-    if (matches(e, 'dict.playFrom')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, spanOf(i)[0]); return; }
+    if (matches(e, 'dict.playFrom')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, spanOf(i)[0], undefined, true); return; }
     if (matches(e, 'dict.playWord')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, ...spanOf(i)); return; }
     if (matches(e, 'blank.peek')) { e.preventDefault(); showPeek(i); return; }
     // Play/pause and next-blank on one key (Space by default): empty blank = play, text = next.

@@ -3,6 +3,8 @@ import { loose, matches } from '../utils/shortcuts';
 import { ArrowLeft, Pause, Play, RotateCcw, X } from 'lucide-react';
 import type { Subtitle, VideoRecord } from '../types';
 import { Btn, Seg } from '../components/ui';
+import WayBar from '../components/WayBar';
+import type { StudyWay } from '../utils/studyWays';
 import ReaderLine from './ReaderLine';
 import { PhraseCard, usePhrases } from './ReaderPhrases';
 import DefinitionPanel, { keepFields } from '../components/DefinitionPanel';
@@ -58,20 +60,32 @@ type Word = Looked & { key: string; fields?: { definition: string; example: stri
 
 type Clip = { kind: 'line' | 'from' | 'section'; view: boolean; from: number; to: number; line?: Subtitle; section?: number; done?: boolean };
 
-const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: number) => void }> = ({ record, by, onExit }) => {
+const ReaderPage: React.FC<{
+  record: VideoRecord;
+  by: ReadBy;
+  startSec?: number;
+  hasListen?: boolean;
+  onSwitchWay?: (way: StudyWay, sec: number) => void;
+  onExit: (looked: number) => void;
+}> = ({ record, by, startSec, hasListen, onSwitchWay, onExit }) => {
   const t = useT();
   usePracticeClock();
   const lines = useMemo(() => [...parseSRT(record.subtitleText)].sort((a, b) => a.startTime - b.startTime), [record.subtitleText]);
   const sections = useMemo(() => buildSections(lines, sectionLengthOf(record)), [lines]);
   const indexOf = useMemo(() => new Map(lines.map((l, i) => [l.id, i])), [lines]);
-  // Where reading stopped last time: the line to scroll to, and (by section) its section.
+  // Where reading stopped last time (or `startSec` when switched from another way): the line to scroll to, and (by section) its section.
   const [resumeAt] = useState(() => {
+    if (startSec !== undefined) {
+      if (startSec <= 0) return null;
+      const idx = lineAt(lines, startSec);
+      return idx >= 0 ? lines[idx] : null;
+    }
     const pos = getReadPos(record.id);
     const i = pos > 0 ? lines.findIndex(l => l.startTime >= pos - 0.01) : -1;
     return i >= 0 ? lines[i] : null;
   });
   const [sec, setSec] = useState(() => Math.max(0, resumeAt ? sections.findIndex(s => s.subtitles.includes(resumeAt)) : 0)); // "section" mode: the one on the page
-  const [resumeNote, setResumeNote] = useState(!!resumeAt);
+  const [resumeNote, setResumeNote] = useState(startSec === undefined && !!resumeAt);
   const dictLang = useMemo(() => resolveDictLang(record.lang, lines.map(l => l.text)), [record.lang, lines]);
   const ja = dictLang === 'ja';
   const jaVersion = useJaVersion();
@@ -202,9 +216,11 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   const playingId = !clip || done ? null : clip.kind === 'line' ? clip.line!.id : lines[lineAt(lines, now)]?.id ?? null;
   const ours = useRef(0); // when the page last scrolled itself: that is not where the reader is
   const settle = useRef(0); // a scroll of the reader's waiting to be kept
+  const moved = useRef(false); // reader scrolled, jumped, or followed playback past entry anchor
   useEffect(() => {
     if (!clip || clip.kind === 'line' || playingId === null) return;
     ours.current = Date.now();
+    moved.current = true;
     window.clearTimeout(settle.current); // a scroll of the reader's just before this one: the page is not there any more
     settle.current = 0;
     scroller.current?.querySelector(`[data-line="${playingId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -231,6 +247,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   // touches the page (wheel, click, key); until then it stays anchored, also when furigana
   // arriving late makes the lines above it taller.
   const restored = useRef(!resumeAt); // nothing to go back to: every scroll counts from the start
+  const savedPlace = useRef(startSec === undefined); // when entered via way switch, ensure entry place persists if leaving without scrolling
   const noteRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (restored.current) return;
@@ -249,7 +266,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     return el ? lines.find(l => String(l.id) === el.dataset.line) ?? null : null;
   };
   // The first line is the top: kept as 0, so no "picking up" note for it next time.
-  const keepPlace = () => { if (restored.current) { const l = topLine(); if (l) setReadPos(record.id, l === lines[0] ? 0 : l.startTime); } };
+  const keepPlace = () => { if (restored.current) { const l = topLine(); if (l) { moved.current = true; savedPlace.current = true; setReadPos(record.id, l === lines[0] ? 0 : l.startTime); } } };
   // Only the reader's own scrolling counts; the player following its line does not. A long
   // smooth scroll of ours can outlast any fixed window, so ours lasts while the page keeps moving.
   const onScroll = () => {
@@ -265,6 +282,8 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     window.clearTimeout(settle.current);
     settle.current = 0;
     ours.current = Date.now();
+    moved.current = true;
+    savedPlace.current = true;
     setReadPos(record.id, place);
     scroller.current?.scrollTo({ top: 0 });
   };
@@ -278,10 +297,25 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   const [summary, setSummary] = useState(false);
   const [drill, setDrill] = useState<ReviewCard[] | null>(null);
   const [drillMissing, setDrillMissing] = useState(false);
+  const flushPlace = () => {
+    if (settle.current) { window.clearTimeout(settle.current); keepPlace(); }
+    else if (startSec !== undefined && (!restored.current || !savedPlace.current)) {
+      savedPlace.current = true;
+      setReadPos(record.id, resumeAt && resumeAt !== lines[0] ? resumeAt.startTime : 0);
+    }
+  };
   const exit = () => {
-    if (settle.current) { window.clearTimeout(settle.current); keepPlace(); } // a scroll not yet kept
+    flushPlace();
     closePlayer();
     onExit(words.length);
+  };
+  const switchWay = (way: StudyWay) => {
+    const anchored = startSec !== undefined && !moved.current && !settle.current;
+    flushPlace();
+    closePlayer();
+    const sec = clip && !clip.done ? (clip.kind === 'line' ? clip.line!.startTime : now)
+      : anchored ? (resumeAt?.startTime ?? startSec) : (topLine()?.startTime ?? resumeAt?.startTime ?? 0);
+    onSwitchWay?.(way, sec);
   };
   const leave = () => {
     if (activity.current <= shownAt.current) { exit(); return; }
@@ -305,11 +339,13 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
     const i = sections.findIndex(s => s.subtitles.includes(line));
     if (by === 'section' && i >= 0 && i !== sec) setSec(i);
     ours.current = Date.now();
+    moved.current = true;
     // Two frames: a section just turned to is on the page by then.
     requestAnimationFrame(() => requestAnimationFrame(() => scroller.current?.querySelector(`[data-line="${line.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })));
   };
   const goSection = (i: number) => {
     if (by === 'section') { setSec(i); jumpTo(i === 0 ? 0 : sections[i].subtitles[0]?.startTime ?? 0); return; }
+    moved.current = true;
     scroller.current?.querySelector(`[data-section="${i}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
   const shown = by === 'section' ? [sections[sec]] : sections;
@@ -321,10 +357,11 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
 
   return (
     <div className="fixed inset-0 bg-paper flex flex-col" onWheelCapture={touched} onPointerDownCapture={touched} onKeyDownCapture={touched} onTouchStartCapture={touched}>
-      <header className={`h-16 shrink-0 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-6 flex items-center gap-4 bg-page border-b border-line`} data-tauri-drag-region>
-        <button type="button" onClick={leave} className="press h-10 pl-3 pr-4 flex items-center gap-1.5 min-w-0 max-w-[36%] rounded-full bg-page border border-line text-ink text-[13px] hover:bg-shade">
+      <header className={`h-16 shrink-0 ${IS_WINDOWS ? 'pl-4' : 'pl-24'} pr-6 flex items-center gap-3 bg-page border-b border-line`} data-tauri-drag-region>
+        <button type="button" onClick={leave} className="press h-10 pl-3 pr-4 flex items-center gap-1.5 min-w-0 max-w-[28%] rounded-full bg-page border border-line text-ink text-[13px] hover:bg-shade">
           <ArrowLeft size={16} className="shrink-0" /><span className="truncate">{record.displayName}</span>
         </button>
+        {onSwitchWay && <WayBar current="read" record={record} hasReader hasListen={!!hasListen} variant="light" blocked={!!drill || summary || def.word !== null} onSelect={switchWay} />}
         {sections.length > 1 && (
           <Seg<number> size="sm" className="min-w-0 overflow-x-auto" value={by === 'section' ? sec : -1} onChange={goSection}
             options={sections.map((_, i) => ({ value: i, label: t('reader.sectionN', { n: i + 1 }) }))} />

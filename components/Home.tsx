@@ -20,7 +20,7 @@ import { cancelPrep, getPrepJob, prepStatus, prepareBreakdowns, subscribePrep } 
 import { cancelLevels } from '../utils/levelPrep';
 import { forgetKeywords } from '../utils/keywordPrep';
 import { forgetPhrases } from '../utils/phrasePrep';
-import { cancelTrans, HomeStarter } from '@pro';
+import { cancelTrans, HomeStarter, Listen } from '@pro';
 import { forgetLooked } from '../utils/readLooked';
 import { forgetMask } from '../utils/subtitleMask';
 import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribeCloze } from '../utils/clozePrep';
@@ -291,7 +291,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
   const modeName = (m: LearningMode) => (m === LearningMode.BLUR ? t('home.blur') : t('home.dictate'));
   const lastMode = (v: VideoRecord) => v.learningMode ?? LearningMode.DICTATION;
   // What the card's button starts: on the podcast page, intensive listening.
-  const cardMode = (v: VideoRecord) => t(podcasts ? 'custom.listen' : lastWayName(v, getLastWay(v.id)));
+  const cardMode = (v: VideoRecord) => t(podcasts ? 'custom.listen' : lastWayName(v, getLastWay(v.id), !!Listen));
   const otherMode = (v: VideoRecord) => (lastMode(v) === LearningMode.BLUR ? LearningMode.DICTATION : LearningMode.BLUR);
 
   // "Part 2 of 5" and how far into that part (utils/lastWayCard.ts); "finished" when the big card says so.

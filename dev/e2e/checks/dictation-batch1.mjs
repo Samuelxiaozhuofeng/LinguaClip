@@ -49,7 +49,7 @@ const start = async () => {
 
 try {
   await seed(page, [record(SAMPLE, '.mp4', over('zoo'))],
-    { linguaclip_practice_config: { sectionLength: 1, autoAddReview: true } });
+    { linguaclip_practice_config: { sectionLength: 1, autoAddReview: true }, linguaclip_last_way: { zoo: 'all' } });
 
   console.log('A 宽松判对（默认开）');
   await start();

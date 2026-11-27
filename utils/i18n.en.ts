@@ -1746,4 +1746,21 @@ export const en = {
   'import.needCookiesWindows': "YouTube wants you signed in to download this video; signing in is not supported on Windows yet.",
   'import.failedYtSetup': "YouTube parts did not finish downloading: {detail}. Retry picks up where it stopped",
   'import.stageYtSetup': "Downloading the YouTube parts {pct}%",
+
+  // --- In-place way switching & slow replay (docs/watch.md) ---
+  'way.label': 'Switch way',
+  'way.read': 'Read',
+  'way.watch': 'Watch',
+  'way.listen': 'Listen',
+  'way.blur': 'Blur',
+  'way.dict': 'Dictate',
+  'way.switched': 'Switched to {way} · {time}',
+  'shortcuts.gWay': 'Switch way',
+  'keys.way1': 'Read subtitles',
+  'keys.way2': 'Watch / Listen',
+  'keys.way3': 'Blur',
+  'keys.way4': 'Dictate',
+  'settingsGeneral.slowReplay': 'Slow to 0.75× from the 2nd replay of the same line',
+  'settingsGeneral.slowReplayHint': 'Applies only to that replay and returns to your normal speed afterwards.',
+  'studio.slowReplayPill': '0.75× slow',
 } as const;

@@ -57,9 +57,9 @@ export default [
       await add.getByRole('button', { name: '选字幕文件' }).click();
       await see(add.getByText('Me at the zoo [jNQXAC9IVRw].srt'), '弹窗里显示选中的字幕');
       await add.getByRole('button', { name: '开始练习' }).click();
-      const panel = page.getByRole('dialog', { name: '这次怎么练' });
-      await panel.getByRole('radio', { name: '按段从头练' }).click();
-      await panel.getByRole('button', { name: '开始练习' }).click();
+      await see(page.locator('[data-watch-line]'), '看剧页字幕');
+      await page.mouse.move(300, 30);
+      await page.getByRole('tab', { name: '听写' }).click();
       await see(page.getByText('第 1 / 4 句'), '练习页「第 1 / 4 句」');
       await page.getByRole('button', { name: '收藏这句' }).click();
       await see(page.getByRole('button', { name: '取消收藏' }), '收藏按钮变成「取消收藏」');

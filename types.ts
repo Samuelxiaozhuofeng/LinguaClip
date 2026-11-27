@@ -71,6 +71,7 @@ export interface PracticeConfig {
   todayBar?: boolean; // video home shows the "Today" bar (docs/stats.md); default on
   looseJudge?: boolean; // dictation ignores edge punctuation and case, marks near misses (docs/dictation-judge.md); default on
   subtitleMask?: boolean; // the hard-subtitle mask's menu items, key and block (docs/subtitle-mask.md); default on
+  slowReplay?: boolean; // 2nd+ replay of the same line temporarily plays at 0.75x (docs/watch.md); default on
   custom?: import('./utils/customPick').CustomConfig; // the start-of-practice panel's last choice
 }
 

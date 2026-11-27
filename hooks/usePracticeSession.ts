@@ -40,7 +40,7 @@ export interface UsePracticeSessionReturn {
   handleNextSection: (videoRef?: React.RefObject<HTMLVideoElement>, setIsPlaying?: (value: boolean) => void) => void;
 
   // Initialization
-  initializePractice: (subtitleText: string, startIndex?: number, startSectionIndex?: number, pick?: number[]) => { parsed: Subtitle[], sections: VideoSection[], initialSectionIndex: number, initialSubtitleIndex: number } | null;
+  initializePractice: (subtitleText: string, startIndex?: number, startSectionIndex?: number, pick?: number[], sectionLength?: number) => { parsed: Subtitle[], sections: VideoSection[], initialSectionIndex: number, initialSubtitleIndex: number } | null;
   resetSession: () => void;
 }
 
@@ -117,6 +117,7 @@ export function usePracticeSession(params: UsePracticeSessionParams): UsePractic
     startIndex?: number,
     startSectionIndex?: number,
     pick?: number[],
+    sectionLength?: number,
   ) => {
     try {
       const parsed = parseSRT(subtitleText);
@@ -128,7 +129,7 @@ export function usePracticeSession(params: UsePracticeSessionParams): UsePractic
       const picked = pick?.map(i => parsed[i]).filter(Boolean) ?? [];
       const computedSections = picked.length > 0
         ? [{ id: 1, label: 'Custom', startTime: picked[0].startTime, endTime: picked[picked.length - 1].endTime, subtitleIndices: pick!, subtitles: picked }]
-        : buildSections(parsed, Storage.getPracticeConfig().sectionLength);
+        : buildSections(parsed, sectionLength ?? Storage.getPracticeConfig().sectionLength);
 
       // Set state
       setFullSubtitles(parsed);
