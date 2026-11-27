@@ -7,6 +7,63 @@ import {
   type Level,
 } from '../../utils/customPick';
 import { useT } from '../../utils/i18n';
+import { wordCountOf } from './drillCommon';
+
+export const CustomDoneCard: React.FC<{ onNextSet: () => void; onExit: () => void }> = ({ onNextSet, onExit }) => {
+  const t = useT();
+  return (
+    <div className="bg-page rounded-2xl shadow-card px-4 py-6 flex flex-col items-center gap-3 text-center">
+      <h2 className="text-lg font-semibold text-ink">{t('m.customDone')}</h2>
+      <div className="flex gap-2.5">
+        <button
+          type="button"
+          onClick={onNextSet}
+          className="min-h-[44px] px-4 rounded-xl bg-accent text-white text-sm font-semibold"
+        >
+          {t('m.customNextSet')}
+        </button>
+        <button
+          type="button"
+          onClick={onExit}
+          className="min-h-[44px] px-4 rounded-xl bg-shade text-ink text-sm font-medium"
+        >
+          {t('m.toHome')}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export const CustomInactiveRow: React.FC<{
+  lineIdx: number;
+  rowPos: number;
+  text: string;
+  completed: boolean;
+  level?: string | null;
+  onSelect: () => void;
+}> = ({ lineIdx, rowPos, text, completed, level, onSelect }) => {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      data-custom-row={lineIdx}
+      onClick={onSelect}
+      className="w-full min-h-[52px] px-3.5 py-2.5 rounded-xl bg-page/80 shadow-card text-left flex items-center gap-2.5 active:bg-shade"
+    >
+      <span className={`w-6 text-xs text-center tabular-nums shrink-0 ${completed ? 'text-accent font-semibold' : 'text-mute'}`}>
+        {completed ? '✓' : rowPos + 1}
+      </span>
+      <span className={`flex-1 min-w-0 truncate text-[14px] ${completed ? 'font-serif text-ink/75' : 'text-mute'}`}>
+        {completed ? text : t('m.customLineHidden', { n: lineIdx + 1, words: wordCountOf(text) })}
+      </span>
+      {level && level !== 'x' && (
+        <span className="shrink-0 px-2 py-0.5 rounded-full bg-shade text-[11px] text-mute font-medium">
+          {level}
+        </span>
+      )}
+    </button>
+  );
+};
 
 export interface CustomControlsProps {
   cfg: CustomConfig;

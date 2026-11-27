@@ -14,6 +14,8 @@ import { parseSRT } from './srtParser';
 import { readDeferred, deferredAt, type Deferred } from './reviewDefer';
 import { getAllVideosFromDB, getVideoFromDB } from './fileSystemAccess';
 import type { SavedLine } from '../types';
+import * as SM from './syncMeta';
+import type { RevGrade } from './syncTypes';
 
 export type Deck = 'line' | 'word';
 // Files in <own dir>/clips; `from` = where the file starts in the source video, in seconds.
@@ -203,19 +205,23 @@ const forget = (t: IDBTransaction, ids: string[]) => {
 // the same card (stuck + bookmarked at once) queue up instead of the later one
 // clobbering the earlier. `next` returns the new card, null to delete, undefined to leave it.
 // `forgetIt` = the user took this card (or its bookmark) away; see forget().
-const update = async (id: string, next: (old: ReviewCard | null) => ReviewCard | null | undefined, forgetIt = false) => {
+const update = async (id: string, next: (old: ReviewCard | null) => ReviewCard | null | undefined, forgetIt = false, metaEdit?: SM.CardMetaEdit) => {
   await migrateSavedLines().catch(console.error);
   const t = (await db()).transaction([STORE, META], 'readwrite');
   const s = t.objectStore(STORE);
+  let wrote = false;
   const r = s.get(id);
   r.onsuccess = () => {
-    const card = next((r.result as ReviewCard | undefined) ?? null);
-    if (card === null) s.delete(id);
-    else if (card) s.put(card);
+    const old = (r.result as ReviewCard | undefined) ?? null, card = next(old);
+    if (card === undefined) return;
+    wrote = true;
+    if (card === null) s.delete(id); else s.put(card);
+    if (metaEdit) SM.touchCardMetaInTx(t.objectStore(META), (cards, tomb) => metaEdit(cards, tomb, old, card));
   };
   if (forgetIt) forget(t, [id]);
   await finished(t);
   changed();
+  if (wrote) SM.notifySyncDirty();
 };
 
 const listeners = new Set<() => void>();
@@ -225,12 +231,15 @@ const changed = () => listeners.forEach(fn => fn());
 export const getAllCards = async (): Promise<ReviewCard[]> => (await tx<ReviewCard[]>('readonly', s => s.getAll())) ?? [];
 export const getCard = async (id: string): Promise<ReviewCard | null> => (await tx<ReviewCard>('readonly', s => s.get(id))) ?? null;
 export const deleteCards = async (ids: string[]) => {
+  const uniq = [...new Set(ids)];
   await migrateSavedLines().catch(console.error);
   const t = (await db()).transaction([STORE, META], 'readwrite');
-  ids.forEach(id => t.objectStore(STORE).delete(id));
-  forget(t, ids);
+  let wrote = false;
+  SM.deleteCardsInTx(t.objectStore(STORE), t.objectStore(META), uniq, () => { wrote = true; });
+  forget(t, uniq);
   await finished(t);
   changed();
+  if (wrote) SM.notifySyncDirty();
 };
 
 export interface LineRef { videoId: string; videoName: string; videoPath?: string; text: string; start: number; end: number }
@@ -242,34 +251,37 @@ const withPath = async (ref: LineRef): Promise<LineRef> =>
 // A line the learner got stuck on (or bookmarked). Creates the card or just adds the reason.
 export const addLine = async (ref: LineRef, reason: Reason) => {
   if (!ref.videoId) return;
-  const id = lineCardId(ref.videoId, ref.start);
-  const full = await withPath(ref);
-  await update(id, old => old ? withReason({ ...old, videoPath: full.videoPath ?? old.videoPath }, reason) : newCard({ id, deck: 'line', ...full }, reason));
+  const id = lineCardId(ref.videoId, ref.start), full = await withPath(ref);
+  await update(id, old => old ? withReason({ ...old, videoPath: full.videoPath ?? old.videoPath }, reason) : newCard({ id, deck: 'line', ...full }, reason),
+    false, (cards, tomb, old, card) => { if (card) SM.metaOnAddLine(cards, tomb, id, old, card, reason); });
 };
 
 // Kept again without an AI note (none asked this time): the earlier note stays.
 export const addWord = async (ref: LineRef, word: string, definition: string, example: string, ai = '') => {
   if (!ref.videoId || !word) return;
-  const id = wordCardId(ref.videoId, ref.start, word);
-  const full = await withPath(ref);
-  await update(id, old => old ? { ...old, definition, example, ...(ai ? { ai } : {}) } : newCard({ id, deck: 'word', ...full, word, definition, example, ...(ai ? { ai } : {}) }, 'lookup'));
+  const id = wordCardId(ref.videoId, ref.start, word), full = await withPath(ref);
+  await update(id, old => old ? { ...old, definition, example, ...(ai ? { ai } : {}) } : newCard({ id, deck: 'word', ...full, word, definition, example, ...(ai ? { ai } : {}) }, 'lookup'),
+    false, (cards, tomb, old, card) => { if (card) SM.metaOnAddWord(cards, tomb, id, old, card); });
 };
 
 // Kept from a list that may be stale (this episode's keywords): a card that is already there,
 // however it got there, is left exactly as it is.
 export const addWordIfNew = async (ref: LineRef, word: string, definition: string) => {
   if (!ref.videoId || !word) return;
-  const id = wordCardId(ref.videoId, ref.start, word);
-  const full = await withPath(ref);
-  await update(id, old => old ? undefined : newCard({ id, deck: 'word', ...full, word, definition, example: '' }, 'lookup'));
+  const id = wordCardId(ref.videoId, ref.start, word), full = await withPath(ref);
+  await update(id, old => old ? undefined : newCard({ id, deck: 'word', ...full, word, definition, example: '' }, 'lookup'),
+    false, (cards, tomb, old, card) => { if (card) SM.metaOnAddWord(cards, tomb, id, old, card); });
 };
 
 // Un-bookmark: a card that is only a bookmark goes; a line you also got stuck on stays.
-export const unsaveLine = (videoId: string, start: number) => update(lineCardId(videoId, start), old => {
-  if (!old) return undefined;
-  const reasons = old.reasons.filter(r => r !== 'saved');
-  return reasons.length === 0 ? null : { ...old, reasons, saved: false };
-}, true);
+export const unsaveLine = (videoId: string, start: number) => {
+  const id = lineCardId(videoId, start);
+  return update(id, old => {
+    if (!old) return undefined;
+    const reasons = old.reasons.filter(r => r !== 'saved');
+    return reasons.length === 0 ? null : { ...old, reasons, saved: false };
+  }, true, (cards, tomb, old, card) => { if (old) SM.metaOnUnsaveLine(cards, tomb, id, old, card === null); });
+};
 
 // Start times of this video's bookmarked lines, for the practice page's bookmark icons.
 export const savedStarts = async (videoId: string): Promise<Set<string>> =>
@@ -284,23 +296,24 @@ export const lineCardsFor = async (videoId: string, lines: { startTime: number }
 };
 
 // Again / Hard: the line is a struggle again, so "got it" comes off.
-export const recordOutcome = (card: ReviewCard, o: Outcome | Grade, now = Date.now()) => update(card.id, old => {
-  if (!old) return undefined;
+export const recordOutcome = (card: ReviewCard, o: Outcome | Grade, now = Date.now()) => {
   const g = typeof o === 'number' ? o : gradeOf(o);
-  return { ...(g === Rating.Again || g === Rating.Hard ? unmastered(old) : old), videoPath: card.videoPath ?? old.videoPath, fsrs: schedule(old, g, now).fsrs };
-});
+  return update(card.id, old => old ? { ...(g === Rating.Again || g === Rating.Hard ? unmastered(old) : old), videoPath: card.videoPath ?? old.videoPath, fsrs: schedule(old, g, now).fsrs } : undefined,
+    false, (cards, _t, old) => { if (old) SM.metaOnRecordOutcome(cards, card.id, old, g as RevGrade, now); });
+};
 
 // "Got it" on / off (off = undo, or "back to review" in the library); the schedule is untouched.
 export const setMastered = (id: string, on: boolean) =>
-  update(id, old => old ? (on ? { ...old, mastered: Date.now() } : unmastered(old)) : undefined);
+  update(id, old => old ? (on ? { ...old, mastered: Date.now() } : unmastered(old)) : undefined, false, (cards, _t, old) => { if (old && !on) SM.metaOnUnmastered(cards, id, old); });
 
 // Sent to Anki from the library: only this card, everything else kept; a card deleted meanwhile stays deleted.
-export const markAnkiSent = (id: string, at: number) =>
-  update(id, old => old ? { ...old, ankiAt: at } : undefined);
+export const markAnkiSent = (id: string, at: number) => update(id, old => old ? { ...old, ankiAt: at } : undefined);
 
 // The practice page got stuck on this line: back to review, whether or not it adds cards.
-export const clearMastered = (videoId: string, start: number) =>
-  update(lineCardId(videoId, start), old => old?.mastered ? unmastered(old) : undefined);
+export const clearMastered = (videoId: string, start: number) => {
+  const id = lineCardId(videoId, start);
+  return update(id, old => old?.mastered ? unmastered(old) : undefined, false, (cards, _t, old) => { if (old) SM.metaOnUnmastered(cards, id, old); });
+};
 
 // Delete from inside a review round (docs/review.md「复习里删卡」): hands back the card as it was,
 // so undo can put it back whole (clip included), plus whether the old-bookmark move had already
@@ -309,15 +322,19 @@ export interface Removed { card: ReviewCard; listed: boolean; pending: boolean }
 export const removeCard = async (id: string): Promise<Removed | null> => {
   await migrateSavedLines().catch(console.error);
   const t = (await db()).transaction([STORE, META], 'readwrite');
-  const s = t.objectStore(STORE);
+  const s = t.objectStore(STORE), m = t.objectStore(META);
   let out: Removed | null = null;
-  const g = t.objectStore(META).get('deleted'); // queued before forget() adds this id
-  const mv = t.objectStore(META).get('migrated');
-  const r = s.get(id);
-  r.onsuccess = () => { if (r.result) { out = { card: r.result, listed: !!g.result?.ids?.includes(id), pending: !mv.result }; s.delete(id); } };
+  const g = m.get('deleted'), mv = m.get('migrated'), r = s.get(id); // queued before forget() adds this id
+  r.onsuccess = () => {
+    if (!r.result) return;
+    out = { card: r.result, listed: !!g.result?.ids?.includes(id), pending: !mv.result };
+    s.delete(id);
+    SM.touchCardMetaInTx(m, (cards, tomb) => SM.metaOnDeleteCards(cards, tomb, [r.result as ReviewCard]));
+  };
   forget(t, [id]);
   await finished(t);
   changed();
+  if (out) SM.notifySyncDirty();
   return out;
 };
 // Doesn't wait on the old-bookmark move: run first, it would skip this card while it is still on the list.
@@ -326,17 +343,17 @@ export const restoreCard = async ({ card, listed, pending }: Removed) => {
   const s = t.objectStore(STORE), m = t.objectStore(META);
   // Not listed before this delete: take back our own skip, and if the move already ran and skipped
   // it because of this delete, give it the bookmark the move would have.
-  const g = listed ? null : m.get('deleted');
-  const k = listed || !pending ? null : m.get('skippedSaved');
-  const r = s.get(card.id);
+  const g = listed ? null : m.get('deleted'), k = listed || !pending ? null : m.get('skippedSaved'), r = s.get(card.id);
+  let restored = false;
   r.onsuccess = () => {
     const missed = !!k?.result?.ids?.includes(card.id);
-    if (!r.result) s.put(missed ? withReason(card, 'saved') : card);
+    if (!r.result) { restored = true; s.put(missed ? withReason(card, 'saved') : card); SM.touchCardMetaInTx(m, (cards, tomb) => SM.metaOnRestoreCard(cards, tomb, card, missed)); }
     if (g?.result) m.put({ ...g.result, ids: g.result.ids.filter((x: string) => x !== card.id) });
     if (missed) m.put({ ...k!.result, ids: k!.result.ids.filter((x: string) => x !== card.id) });
   };
   await finished(t);
   changed();
+  if (restored) SM.notifySyncDirty();
 };
 
 export const countForVideo = async (videoId: string) => (await getAllCards()).filter(c => c.videoId === videoId).length;
@@ -347,18 +364,18 @@ export const countForVideo = async (videoId: string) => (await getAllCards()).fi
 export const deleteVideoCards = async (videoId: string, keep = false): Promise<string[]> => {
   await migrateSavedLines().catch(console.error);
   const t = (await db()).transaction([STORE, META], 'readwrite');
-  const s = t.objectStore(STORE);
-  const r = s.getAll();
+  const s = t.objectStore(STORE), m = t.objectStore(META), r = s.getAll();
   let kept: string[] = [];
   r.onsuccess = () => {
-    const mine = (r.result as ReviewCard[]).filter(c => c.videoId === videoId);
-    const ids = keep ? [] : mine.map(c => c.id);
+    const mine = (r.result as ReviewCard[]).filter(c => c.videoId === videoId), del = keep ? [] : mine;
     kept = keep ? mine.map(c => c.id) : [];
-    ids.forEach(id => s.delete(id));
-    forget(t, ids);
+    del.forEach(c => s.delete(c.id));
+    forget(t, del.map(c => c.id));
+    SM.touchCardMetaInTx(m, (cards, tomb) => SM.metaOnDeleteVideo(cards, tomb, videoId, keep, del));
   };
   await finished(t);
   changed();
+  SM.notifySyncDirty();
   return kept;
 };
 
@@ -368,12 +385,14 @@ export const setClip = async (ids: string[], clip: Clip, replace = false) => {
   await migrateSavedLines().catch(console.error);
   const t = (await db()).transaction(STORE, 'readwrite');
   const s = t.objectStore(STORE);
+  let wrote = false;
   for (const id of ids) {
     const r = s.get(id);
-    r.onsuccess = () => { const c = r.result as ReviewCard | undefined; if (c && (replace || !c.clip)) s.put({ ...c, clip }); };
+    r.onsuccess = () => { const c = r.result as ReviewCard | undefined; if (c && (replace || !c.clip)) { wrote = true; s.put({ ...c, clip }); } };
   }
   await finished(t);
   changed();
+  if (wrote) SM.notifySyncDirty();
 };
 
 // Cards whose video record is gone: left by versions that kept cards on delete,

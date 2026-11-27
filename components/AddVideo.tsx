@@ -20,24 +20,13 @@ import * as VideoStorage from '../utils/videoStorage';
 import { getLang, useT } from '../utils/i18n';
 import { dialog } from './Dialog';
 import { Btn, Card, inputCls } from './ui';
+import { IMPORT_LANGS, loadImportLang, saveImportLang } from '../utils/importLangs';
 
 // The one way in: a local video (picked or dropped), optionally with its own .srt,
 // or a YouTube link. With a .srt it goes straight to practice. Otherwise starting
 // hands off to the import job (which first downloads the transcription parts on a
 // Mac that lacks them); the new video shows up in the list with its own progress.
-// The link box only shows where yt-dlp is installed by hand.
 
-const LANGS = [
-  { value: 'en', key: 'import.langEn' },
-  { value: 'es', key: 'import.langEs' },
-  { value: 'ja', key: 'import.langJa' },
-  { value: 'zh', key: 'import.langZh' },
-  { value: 'fr', key: 'import.langFr' },
-  { value: 'de', key: 'import.langDe' },
-  { value: 'ko', key: 'import.langKo' },
-  { value: 'no', key: 'import.langNo' },
-  { value: 'auto', key: 'import.langAuto' },
-] as const;
 
 const QUALITY_KEYS = {
   1080: 'import.quality1080',
@@ -45,9 +34,6 @@ const QUALITY_KEYS = {
   480: 'import.quality480',
 } as const;
 
-const LANG_KEY = 'import_lang';
-// Not a language the dropdown offers (an older or newer version wrote it): back to English.
-const loadLang = () => { try { const v = localStorage.getItem(LANG_KEY); return LANGS.some(l => l.value === v) ? v! : 'en'; } catch { return 'en'; } };
 const TRASH_KEY = 'import_trash_original';
 const loadTrash = () => { try { return localStorage.getItem(TRASH_KEY) === '1'; } catch { return false; } };
 
@@ -79,11 +65,11 @@ const AddVideo: React.FC<Props> = ({ initialPath, initialSrt, onClose, onPractic
   const [srt, setSrt] = useState<string | null>(initialSrt);
   const [tools, setTools] = useState<ImportTools | null>(null);
   const [url, setUrl] = useState('');
-  const [lang, setLangState] = useState(loadLang);
+  const [lang, setLangState] = useState(loadImportLang);
   const [quality, setQuality] = useState<ImportQuality>(1080);
   const [busy, setBusy] = useState(false);
   const [sizes, setSizes] = useState<Partial<Record<ImportQuality, number>>>({});
-  const [sizesState, setSizesState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [sizesState, setSizesState] = useState<'idle' | 'loading' | 'ready' | 'error' | 'noTool'>('idle');
   // A video the player cannot open: converted on import. Its subtitle tracks are
   // read here (which needs the converter, downloaded on the spot the first time).
   const convert = !!path && needsConvert(path);
@@ -151,10 +137,11 @@ const AddVideo: React.FC<Props> = ({ initialPath, initialSrt, onClose, onPractic
           setSizes(next);
           setSizesState('ready');
         })
-        .catch(() => {
+        .catch(err => {
           if (cancelled) return;
           setSizes({});
-          setSizesState('error');
+          // No yt-dlp yet: it comes with the first YouTube import (docs/youtube.md).
+          setSizesState(String(err).includes('missing:yt-dlp') ? 'noTool' : 'error');
         });
     }, 600);
     return () => {
@@ -184,7 +171,7 @@ const AddVideo: React.FC<Props> = ({ initialPath, initialSrt, onClose, onPractic
 
   const setLang = (v: string) => {
     setLangState(v);
-    try { localStorage.setItem(LANG_KEY, v); } catch { /* localStorage unavailable */ }
+    saveImportLang(v);
   };
 
   const browse = async () => {
@@ -272,6 +259,7 @@ const AddVideo: React.FC<Props> = ({ initialPath, initialSrt, onClose, onPractic
               </select>
             )}
             {valid && sizesState === 'error' && <p className="text-xs text-mute">{t('import.qualitySizeFail')}</p>}
+            {valid && sizesState === 'noTool' && <p className="text-xs text-mute">{t('import.qualityNoTool')}</p>}
           </div>}
 
           {convert && !srt && (
@@ -301,7 +289,7 @@ const AddVideo: React.FC<Props> = ({ initialPath, initialSrt, onClose, onPractic
           {!ownSubtitles && <label className="flex items-center justify-between gap-4">
             <span className="text-sm text-mute">{t('add.lang')}</span>
             <select value={lang} onChange={e => setLang(e.target.value)} className={`${inputCls} !w-40`}>
-              {LANGS.map(opt => <option key={opt.value} value={opt.value}>{t(opt.key)}</option>)}
+              {IMPORT_LANGS.map(opt => <option key={opt.value} value={opt.value}>{t(opt.key)}</option>)}
             </select>
           </label>}
 

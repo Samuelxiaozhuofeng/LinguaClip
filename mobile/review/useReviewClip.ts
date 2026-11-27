@@ -1,6 +1,7 @@
 // Media resolver & <audio> stretch player for phone review cards (docs/mobile-web.md 8).
 // Resolves original audio first and falls back to standalone clips/ when the source file is gone.
 import React, { useEffect, useRef, useState } from 'react';
+import type { VideoRecord } from '../../types';
 import type { ReviewCard } from '../../utils/review';
 import { getVideoFromDB } from '../../utils/fileSystemAccess';
 import { parseSRT } from '../../utils/srtParser';
@@ -11,7 +12,11 @@ import { hasKana } from '../../utils/japanese';
 import type { Word } from '../../utils/resegment';
 import { getWordTokens, targetWords, tokenizeText, TokenType } from '../../utils/textTokenizer';
 import { playSpan, wordSpans, wordsInLine } from '../../utils/wordTimes';
+import { blobId } from '../backup';
 import { prepareSrc, readCacheText, resolveCardClipSrc, videoSrcFromPath } from '../platform/desktop';
+import { callAndroid, isAndroidNative } from '../platform/androidBridge';
+import { audioIds } from '../store';
+import { pickContinueRecord } from './cardFilter';
 
 const countLetters = (s: string) => s.replace(/[^\p{L}\p{M}\p{N}]/gu, '').length;
 
@@ -93,6 +98,25 @@ export async function findCardMedia(c: ReviewCard): Promise<FoundCardMedia> {
     trans = got && i >= 0 ? got[i] : null;
   }
   return { id: c.id, src, offset, trans };
+}
+
+// Finds the most recently practiced record for the review-done "Continue" CTA
+// (prefers playable audio; falls back to subtitle-only records just like Home.tsx).
+export async function resolveContinueRecord(records: VideoRecord[]): Promise<VideoRecord | null> {
+  if (records.length === 0) return null;
+  const android = isAndroidNative();
+  const haveBlobs = android ? null : await audioIds().then(ids => new Set(ids)).catch(() => null);
+  const missingAndroid = new Set<string>();
+  let candidate = pickContinueRecord(records, { haveBlobs, android, missingAndroid });
+  while (android && candidate?.videoPath && !missingAndroid.has(candidate.id)) {
+    const p = candidate.videoPath;
+    if (/^https?:\/\//i.test(p) || p.startsWith('data:') || p.startsWith('/starter/') || p.startsWith('content://') || blobId(p)) break;
+    const info = await callAndroid<{ exists: boolean }>('media.fileInfo', { path: p }).catch(() => ({ exists: true }));
+    if (info?.exists) break;
+    missingAndroid.add(candidate.id);
+    candidate = pickContinueRecord(records, { haveBlobs, android, missingAndroid });
+  }
+  return candidate;
 }
 
 export function useReviewClip() {

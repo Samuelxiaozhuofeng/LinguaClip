@@ -1,9 +1,12 @@
 // Stands in for utils/desktop.ts in the mobile build (vite.mobile.config.ts). Only
 // what the phone really uses; anything else imported from utils/desktop.ts fails
 // the build ("not exported"), on purpose.
-import type { CacheKind } from '../../utils/desktop';
+import type { CacheKind, MergePackContents, RekeyFilesResult, RemoteEntry, WebDavTestResult } from '../../utils/desktop';
+import type { WebDavConfig } from '../../utils/syncConfig';
 import { deleteCache, getAudio, readCache, writeCache } from '../store';
 import { blobId } from '../backup';
+
+export type { MergePackContents, RekeyFilesResult, RemoteEntry, WebDavTestResult };
 
 // A record's videoPath on the phone: the episode's web address, or `blob:<id>` for
 // an audio file kept in linguaclip_audio. Blob ones need prepareSrc first.
@@ -54,3 +57,46 @@ export const pickAndroidBackup = async (): Promise<{ kind: 'zip'; manifest: unkn
 export const unpackAndroidZip = async (_stagedZip: string): Promise<number> => 0;
 export const cleanupAndroidStagedZip = async (): Promise<void> => {};
 export const prepareAndroidRestore = async (): Promise<void> => {};
+
+// Cross-device sync stubs for PWA (zero @tauri-apps/* imports; offline JSON merge only).
+const unsupportedSync = () => Promise.reject(new Error('sync:unsupported'));
+export const syncWebdavSupported = (): boolean => false;
+export const syncWebdavTest = (_config: WebDavConfig): Promise<WebDavTestResult> => unsupportedSync();
+export const syncWebdavList = (
+  _config: WebDavConfig,
+  _subpath: 'devices' | 'subs' | 'caches' | 'clip-packs',
+): Promise<RemoteEntry[]> => unsupportedSync();
+export const syncWebdavGetGz = (_config: WebDavConfig, _relPath: string): Promise<string> => unsupportedSync();
+export const syncWebdavPutGz = (_config: WebDavConfig, _relPath: string, _content: string): Promise<string | null> =>
+  unsupportedSync();
+export const syncWebdavDelete = (_config: WebDavConfig, _relPath: string): Promise<void> => unsupportedSync();
+export const syncUploadClipPack = (
+  _config: WebDavConfig,
+  _relPath: string,
+  _files: string[],
+  _maxBytes?: number,
+  _maxFileBytes?: number,
+): Promise<string[]> => unsupportedSync();
+export const syncDownloadClipPack = (
+  _config: WebDavConfig,
+  _relPath: string,
+  _wantedFiles: string[],
+): Promise<string[]> => unsupportedSync();
+export const syncWriteMergePack = (
+  _dest: string | null,
+  _snapshotJson: string,
+  _subs: [string, string][],
+  _clipFiles: string[],
+): Promise<string> => unsupportedSync();
+export const syncWriteMergeJson = (_dest: string | null, _content: string): Promise<string> => unsupportedSync();
+export const syncReadMergePack = (_path: string): Promise<MergePackContents> => unsupportedSync();
+export const syncUnpackMergePack = (_path: string, _wantedFiles: string[]): Promise<string[]> => unsupportedSync();
+export const syncRekeyFiles = async (_fromId: string, _toId: string): Promise<RekeyFilesResult> => ({ moved: 0, mediaPaths: [] });
+export const syncClipNetworkOk = async (_wifiOnly: boolean): Promise<boolean> => true;
+export const pickSyncPackDest = async (_defaultName: string, _ext?: 'zip' | 'json'): Promise<string | null> => null;
+export const pickSyncPackFile = async (): Promise<
+  | { kind: 'zip'; path: string; cleanup?: () => Promise<void> }
+  | { kind: 'json'; text: string }
+  | null
+> => null;
+export const shareSyncPackFile = async (_path: string, _title: string, _mime?: string): Promise<void> => {};

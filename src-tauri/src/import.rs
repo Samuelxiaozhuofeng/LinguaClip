@@ -68,60 +68,12 @@ pub(crate) fn tail_chars(s: &str, max: usize) -> String {
 
 // A Chrome profile we own. Chrome's real profile dir is shielded by macOS app-data
 // protection (yt-dlp just reports "could not find cookies database"), but a dir of
-// ours is readable, so the user signs in once here and yt-dlp reads it directly.
+// ours is readable, so the user signs in once here.
 fn yt_login_dir() -> Result<PathBuf, String> {
   Ok(movies_dir()?.join(".yt-login"))
 }
 
-// Chrome creates the cookie DB the moment it launches, so "file exists" would wrongly
-// claim a sign-in and make us drop a working cookies.txt. Cookie *names* sit in the
-// sqlite file as plain bytes (only values are encrypted), and LOGIN_INFO only appears
-// once a Google account is signed in — so scan for that name.
-// ponytail: byte scan, not sqlite; switch to a real sqlite read only if this misfires.
-fn db_shows_login(bytes: &[u8]) -> bool {
-  bytes.windows(10).any(|w| w == b"LOGIN_INFO")
-}
-
-fn yt_login_ready() -> bool {
-  let Ok(db) = yt_login_dir().map(|d| d.join("Default").join("Cookies")) else {
-    return false;
-  };
-  std::fs::read(&db).map(|b| db_shows_login(&b)).unwrap_or(false)
-}
-
-// The in-app sign-in is the only source of a YouTube session. A hand-exported
-// cookies.txt used to be a fallback, but it could never be reached once the user
-// had signed in here even if that session had since expired, so a stale sign-in
-// silently shadowed a good file. One source, no shadowing.
-//
-// Not signed in at all -> send nothing: YouTube then answers with its own
-// "sign in to confirm you're not a bot", which the front end recognises and turns
-// into the sign-in button. Forcing an empty profile on yt-dlp instead would make it
-// fail with "could not find cookies database", which nothing recognises and which
-// leaves the user with no way forward.
-fn yt_cookie_args() -> Result<Vec<String>, String> {
-  if !yt_login_ready() {
-    return Ok(Vec::new());
-  }
-  Ok(vec![
-    "--cookies-from-browser".into(),
-    format!("chrome:{}", yt_login_dir()?.to_string_lossy()),
-  ])
-}
-
-// Recent YouTube clients require yt-dlp's JavaScript challenge solver. The
-// Finder-launched app has Node on PATH, but yt-dlp does not reliably discover
-// that runtime from PATH, so pass the executable explicitly.
-fn yt_runtime_args() -> Result<Vec<String>, String> {
-  let node = find_bin("node")?;
-  Ok(vec![
-    "--js-runtimes".into(),
-    format!("node:{}", node.to_string_lossy()),
-  ])
-}
-
-// Finder-launched apps get a bare PATH; yt-dlp needs node (YouTube's n-challenge)
-// and ffmpeg from these dirs, so every child process gets the same augmented PATH.
+// Finder-launched apps get a bare PATH; helper tools may still come from these dirs.
 fn tool_dirs() -> Vec<PathBuf> {
   let home = home_dir().unwrap_or_default();
   let mut dirs: Vec<PathBuf> = vec![
@@ -199,7 +151,7 @@ fn looks_like_video_path(line: &str) -> bool {
   let t = line.trim();
   let lower = t.to_ascii_lowercase();
   let ok_ext = lower.ends_with(".mp4") || lower.ends_with(".mov") || lower.ends_with(".m4v");
-  ok_ext && t.starts_with('/')
+  ok_ext && Path::new(t).is_absolute()
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
@@ -367,13 +319,26 @@ fn download_video(
   app: &AppHandle,
   id: &str,
   url: &str,
-  yt_dlp: &Path,
   dir: &Path,
   quality: u32,
 ) -> Result<PathBuf, String> {
+  let _yt_lock = crate::yt_tools::yt_dlp_lock();
+  let yt_dlp = crate::yt_tools::find_yt_dlp().ok_or_else(|| "missing:yt-dlp".to_string())?;
+  emit(app, ImportProgress::stage(id, "download", Some(0)));
   let template = dir.join("%(title).80s [%(id)s].%(ext)s");
-  let mut args: Vec<String> = yt_cookie_args()?;
-  args.extend(yt_runtime_args()?);
+  let login_dir = yt_login_dir()?;
+  let runtime = crate::yt_tools::js_runtime_args();
+  let cookies = crate::yt_cookies::prepare(&login_dir).map_err(|e| format!("download:{e}"))?;
+  let mut args: Vec<String> = cookies.args().to_vec();
+  args.extend(runtime);
+  // Windows writes a pipe in the ANSI code page: a CJK title or user name would come
+  // back as a path that does not exist. The path line we parse must be UTF-8.
+  args.push("--encoding".into());
+  args.push("utf-8".into());
+  if let Some(ffmpeg) = crate::convert::find() {
+    args.push("--ffmpeg-location".into());
+    args.push(ffmpeg.to_string_lossy().into_owned());
+  }
   // The codec belongs in the filter, not only in `-S`: `-S` merely sorts, so a clip
   // with no H.264 at this height would still download as VP9/AV1, which this Mac's
   // player cannot show — and the file then sits on disk with no way to delete it from
@@ -398,9 +363,10 @@ fn download_video(
   // `--print` puts yt-dlp in quiet mode, which swallows the `[download] xx%` lines;
   // `--progress` brings them back without losing the filepath line we parse below.
   args.push("--progress".into());
+  args.push("--".into());
   args.push(url.trim().into());
 
-  let mut cmd = command(yt_dlp);
+  let mut cmd = command(&yt_dlp);
   cmd.args(&args);
   cmd.current_dir(dir);
   cmd.env("PATH", augmented_path());
@@ -424,6 +390,7 @@ fn download_video(
     }
   })
   .map_err(|e| format!("download:{e}"))?;
+  drop(cookies);
 
   if code != 0 {
     return Err(format!("download:{err_tail}"));
@@ -862,7 +829,15 @@ fn run_import(app: &AppHandle, id: &str, source: &str, name: Option<&str>, lang:
   let dir = movies_dir()?;
   std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-  // First import on a new Mac: fetch the transcription parts before anything
+  let is_yt = is_url(source) && is_youtube_url(source);
+  if is_yt {
+    crate::yt_tools::ensure(|pct| {
+      emit(app, ImportProgress::stage(id, "ytSetup", Some(pct)));
+    })?;
+    crate::import_queue::check()?;
+  }
+
+  // First import on a new machine: fetch the transcription parts before anything
   // else, so a failure here never leaves a half-downloaded video behind.
   let parts = match engine {
     _ if subs.is_some() => None,
@@ -876,11 +851,9 @@ fn run_import(app: &AppHandle, id: &str, source: &str, name: Option<&str>, lang:
   };
   crate::import_queue::check()?;
 
-  let podcast = is_url(source) && !is_youtube_url(source);
-  let video = if is_url(source) && is_youtube_url(source) {
-    let yt = find_bin("yt-dlp")?;
-    emit(app, ImportProgress::stage(id, "download", Some(0)));
-    download_video(app, id, source, &yt, &dir, quality)?
+  let podcast = is_url(source) && !is_yt;
+  let video = if is_yt {
+    download_video(app, id, source, &dir, quality)?
   } else if is_url(source) {
     // Any other link is a podcast episode, which comes with the file name to save it as.
     let stem = name.and_then(crate::podcast::safe_stem).ok_or_else(|| "download:not a YouTube URL".to_string())?;
@@ -1156,15 +1129,23 @@ fn probe_sizes_blocking(url: String) -> Result<QualitySizes, String> {
   if !is_youtube_url(&url) {
     return Err("download:not a YouTube URL".into());
   }
-  let yt = find_bin("yt-dlp")?;
+  let _yt_lock = crate::yt_tools::yt_dlp_lock();
+  let yt = crate::yt_tools::find_yt_dlp().ok_or_else(|| "missing:yt-dlp".to_string())?;
+  let login_dir = yt_login_dir()?;
+  let runtime = crate::yt_tools::js_runtime_args();
+  let cookies = crate::yt_cookies::prepare(&login_dir).map_err(|e| format!("probe:{e}"))?;
   let mut cmd = command(&yt);
   cmd.env("PATH", augmented_path());
-  cmd.args(yt_cookie_args()?);
-  cmd.args(yt_runtime_args()?);
+  cmd.args(cookies.args());
+  cmd.args(&runtime);
+  if let Some(ffmpeg) = crate::convert::find() {
+    cmd.arg("--ffmpeg-location").arg(ffmpeg);
+  }
   // Without a socket timeout a stalled connection leaves the dropdown on "checking…"
   // for good, and every re-typed URL would start another yt-dlp that never exits.
-  cmd.args(["--socket-timeout", "15", "-J", "--no-playlist", &url]);
+  cmd.args(["--encoding", "utf-8", "--socket-timeout", "15", "-J", "--no-playlist", "--", &url]);
   let output = cmd.output().map_err(|e| format!("probe:{e}"))?;
+  drop(cookies);
   if !output.status.success() {
     let err = String::from_utf8_lossy(&output.stderr);
     return Err(format!("probe:{}", tail_chars(&err, 300)));
@@ -1351,11 +1332,77 @@ mod tests {
   #[test]
   fn login_marker_needs_a_real_sign_in() {
     // A just-launched Chrome profile has a cookie DB but no account cookies.
-    assert!(!db_shows_login(b""));
-    assert!(!db_shows_login(b"SQLite format 3\0cookiesVISITOR_INFO1_LIVEYSCPREF"));
+    assert!(!crate::yt_cookies::db_shows_login(b""));
+    assert!(!crate::yt_cookies::db_shows_login(b"SQLite format 3\0cookiesVISITOR_INFO1_LIVEYSCPREF"));
     // Signing in adds LOGIN_INFO; names are plain bytes even though values are not.
-    assert!(db_shows_login(b"SQLite format 3\0cookies\x01LOGIN_INFO\x7f\x80junk"));
-    assert!(db_shows_login(b"LOGIN_INFO"));
+    assert!(crate::yt_cookies::db_shows_login(b"SQLite format 3\0cookies\x01LOGIN_INFO\x7f\x80junk"));
+    assert!(crate::yt_cookies::db_shows_login(b"LOGIN_INFO"));
+  }
+
+  // cargo test --manifest-path src-tauri/Cargo.toml -- --ignored live_yt_probe_and_download --nocapture
+  #[test]
+  #[ignore]
+  fn live_yt_probe_and_download() {
+    let url = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
+    let sizes = probe_sizes_blocking(url.into()).expect("probe_sizes_blocking");
+    eprintln!("probe sizes: {sizes:?}");
+    assert!(sizes.h1080.is_some() || sizes.h720.is_some() || sizes.h480.is_some());
+
+    let _yt_lock = crate::yt_tools::yt_dlp_lock();
+    let yt = crate::yt_tools::find_yt_dlp().unwrap();
+    let login_dir = yt_login_dir().unwrap();
+    let runtime = crate::yt_tools::js_runtime_args();
+    let cookies = crate::yt_cookies::prepare(&login_dir).unwrap();
+    let temp_dir = cookies.args().get(1).and_then(|p| Path::new(p).parent().map(Path::to_path_buf));
+    assert!(temp_dir.as_ref().is_some_and(|d| d.is_dir()), "expected temp cookie dir");
+
+    let out_dir = std::env::temp_dir().join(format!("yt-live-dl-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&out_dir).unwrap();
+    let template = out_dir.join("%(title).80s [%(id)s].%(ext)s");
+    let mut cmd = command(&yt);
+    cmd.env("PATH", augmented_path()).current_dir(&out_dir);
+    cmd.args(cookies.args()).args(&runtime);
+    if let Some(ffmpeg) = crate::convert::find() {
+      cmd.arg("--ffmpeg-location").arg(ffmpeg);
+    }
+    cmd.args([
+      "-f", "bv*[height<=480][vcodec^=avc1]+ba[acodec^=mp4a]/b[height<=480][vcodec^=avc1]",
+      "--no-playlist", "-S", "vcodec:h264,res:1080,acodec:m4a",
+      "--merge-output-format", "mp4", "-o", &template.to_string_lossy(),
+      "--print", "after_move:filepath", "--no-simulate", "--newline", "--progress", "--", url,
+    ]);
+    let (code, err) = run_streaming(cmd, |_| {}).unwrap();
+    drop(cookies);
+    assert!(temp_dir.as_ref().is_none_or(|d| !d.exists()), "temp cookie dir must be cleaned up");
+    assert_eq!(code, 0, "yt-dlp failed: {err}");
+    let mp4 = std::fs::read_dir(&out_dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path())
+      .find(|p| p.extension().and_then(|x| x.to_str()) == Some("mp4")).expect("mp4 output");
+    let len = std::fs::metadata(&mp4).unwrap().len();
+    eprintln!("downloaded mp4 bytes={len}");
+    assert!(len > 10_000);
+    let _ = std::fs::remove_dir_all(&out_dir);
+  }
+
+  #[test]
+  fn looks_like_video_path_handles_platform_absolute_paths() {
+    #[cfg(unix)]
+    {
+      assert!(looks_like_video_path("/Users/me/Movies/LinguaClip/Clip [abc].mp4"));
+      assert!(looks_like_video_path("  /tmp/video.MOV  "));
+      assert!(looks_like_video_path("/tmp/video.m4v"));
+      assert!(!looks_like_video_path("relative/video.mp4"));
+      assert!(!looks_like_video_path("/tmp/video.webm"));
+      assert!(!looks_like_video_path("[download] 100% of /tmp/video.mp4"));
+    }
+    #[cfg(windows)]
+    {
+      assert!(looks_like_video_path(r"C:\Users\me\Videos\LinguaClip\Clip [abc].mp4"));
+      assert!(looks_like_video_path(r"  D:\clips\video.MOV  "));
+      assert!(looks_like_video_path(r"C:\clips\video.m4v"));
+      assert!(!looks_like_video_path(r"relative\video.mp4"));
+      assert!(!looks_like_video_path(r"C:\clips\video.webm"));
+      assert!(!looks_like_video_path(r"[download] 100% of C:\clips\video.mp4"));
+    }
   }
 
   #[test]

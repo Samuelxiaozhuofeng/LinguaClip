@@ -15,6 +15,10 @@ export interface WayProps {
   onPos: (sec: number) => void;
   /** Report "line n of N" for the shared header (n is 1-based); call again when it changes. */
   onLine?: (n: number, total: number) => void;
+  /** True when this record has no playable audio on this phone (read-only mode). */
+  noAudio?: boolean;
   /** Leave the study page (e.g. a summary's "back home" button). */
   onExit: () => void;
+  /** Go to the review tab (e.g. a section summary's "review now"). */
+  onReview?: () => void;
 }

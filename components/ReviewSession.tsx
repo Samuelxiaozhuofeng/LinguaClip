@@ -32,6 +32,7 @@ import { loadWords, playSpan, useTimedWords } from '../utils/wordTimes';
 import { locateWord, type WordSpot } from '../utils/wordAudio';
 import SubtitleMask from './SubtitleMask';
 import { maskShowing, setPeek, togglePeek } from '../utils/subtitleMask';
+import { registerSyncBusyScope } from './SyncHost';
 
 // A review round: one card at a time over the whole window (clip on top, a white
 // sheet below, like the practice page). A sentence card is dictated, a word card is
@@ -69,6 +70,7 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
   const shotRef = useRef<HTMLImageElement>(null);
 
   usePracticeClock();
+  useEffect(() => registerSyncBusyScope(), []);
   const card = queue[idx] as ReviewCard | undefined;
   const done = idx >= queue.length;
   const source = card && found?.id === card.id ? found.source : undefined; // undefined = still looking

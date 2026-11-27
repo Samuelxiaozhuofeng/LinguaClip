@@ -32,7 +32,7 @@ export const KeywordsCard: React.FC<{
   lines: Subtitle[];
   lang: DictLang | null;
   onJumpLine: (line: Subtitle) => void;
-  onPlayLine: (line: Subtitle) => void;
+  onPlayLine?: (line: Subtitle) => void;
 }> = ({ record, lines, lang, onJumpLine, onPlayLine }) => {
   const t = useT();
   const [data, setData] = useState<Keywords | 'wait' | null>(null);
@@ -96,7 +96,7 @@ export const KeywordsCard: React.FC<{
     }
     if (!aliveRef.current) return;
     setSpeakingId(cur => (cur === id ? null : cur));
-    if (!ok && sub) onPlayLine(sub);
+    if (!ok && sub && onPlayLine) onPlayLine(sub);
   };
 
   const saveKeyword = (k: Keyword) => {
@@ -162,16 +162,18 @@ export const KeywordsCard: React.FC<{
                     <span className="font-semibold text-ink">{k.word}</span>
                     {k.meaning && <span className="text-mute"> · {k.meaning}</span>}
                   </button>
-                  <button
-                    type="button"
-                    aria-label={`${t('m.speakWord')}: ${k.word}`}
-                    onClick={() => { void speakKeyword(k); }}
-                    className={`w-10 h-11 inline-flex items-center justify-center ${
-                      speakingId === id ? 'text-accent' : 'text-mute'
-                    }`}
-                  >
-                    <SpeakerSvg active={speakingId === id} />
-                  </button>
+                  {(CAN_SPEAK_WORD || onPlayLine) && (
+                    <button
+                      type="button"
+                      aria-label={`${t('m.speakWord')}: ${k.word}`}
+                      onClick={() => { void speakKeyword(k); }}
+                      className={`w-10 h-11 inline-flex items-center justify-center ${
+                        speakingId === id ? 'text-accent' : 'text-mute'
+                      }`}
+                    >
+                      <SpeakerSvg active={speakingId === id} />
+                    </button>
+                  )}
                   <button
                     type="button"
                     aria-label={`${t(has ? 'keywords.added' : 'keywords.add')}: ${k.word}`}
@@ -206,13 +208,15 @@ export const KeywordsCard: React.FC<{
                 >
                   {t('m.keywordsJump')}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onPlayLine(activeSub)}
-                  className="min-h-[44px] px-3.5 rounded-[10px] bg-page shadow-card text-xs font-medium text-ink"
-                >
-                  ▶ {t('keywords.playLine')}
-                </button>
+                {onPlayLine && (
+                  <button
+                    type="button"
+                    onClick={() => onPlayLine(activeSub)}
+                    className="min-h-[44px] px-3.5 rounded-[10px] bg-page shadow-card text-xs font-medium text-ink"
+                  >
+                    ▶ {t('keywords.playLine')}
+                  </button>
+                )}
               </div>
             </div>
           )}

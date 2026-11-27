@@ -14,6 +14,8 @@ await build({
   stdin: {
     contents: [
       "export * from './mobile/review/cardFilter';",
+      "export { checkDictation } from './mobile/dictation';",
+      "export { filterPairedNearExtras, groupGradedPieces } from './mobile/gradedPieces';",
       "export { cardLangs } from './utils/deckLang';",
       "export { dueQueue, newCard } from './utils/review';",
       "export { deferCard, readDeferred } from './utils/reviewDefer';",
@@ -44,10 +46,15 @@ const {
   removeCardFromQueue,
   shouldDeferCard,
   finishedCardCount,
+  roundSummaryCounts,
+  pickContinueRecord,
   classifyAnkiStatus,
   buildExportSummary,
   cardScheduleLabel,
   stripHtmlPlain,
+  checkDictation,
+  filterPairedNearExtras,
+  groupGradedPieces,
   cardLangs,
   dueQueue,
   newCard,
@@ -190,5 +197,78 @@ assert.equal(cardScheduleLabel(cEn1, NOW).kind, 'dueNow');
 assert.equal(cardScheduleLabel({ ...cEn1, fsrs: { ...cEn1.fsrs, due: NOW + DAY } }, NOW).kind, 'tomorrow');
 assert.equal(cardScheduleLabel(cEn2, NOW).kind, 'inDays');
 assert.equal(stripHtmlPlain('<b>weather</b> <i>noun</i>'), 'weather noun');
+
+// 8. Accurate round summary counts (only graded or mastered count; skipped & deleted count as unfinished)
+assert.deepEqual(
+  roundSummaryCounts([cEn1, cJa1, cOther], new Set(['c-en-1', 'c-ja-1']), new Set()),
+  { completed: 2, unfinished: 1 },
+  '1 skipped card counted in unfinished',
+);
+assert.deepEqual(
+  roundSummaryCounts([cEn1, cJa1, cEn1, cOther], new Set(['c-en-1']), new Set(['c-en-1', 'c-other'])),
+  { completed: 0, unfinished: 3 },
+  'deleted card never counts as completed even if graded Again earlier',
+);
+assert.deepEqual(
+  roundSummaryCounts([cEn1, cJa1], new Set(['c-en-1', 'c-ja-1']), new Set()),
+  { completed: 2, unfinished: 0 },
+  'all graded -> 0 unfinished',
+);
+
+// 9. Review-done "Continue" record selection (most recent playable record)
+const recsForContinue = [
+  { id: 'r-old', displayName: 'Old Ep', videoPath: 'https://example.com/old.mp3', lastPracticed: 100 },
+  { id: 'r-job', displayName: 'Importing', videoPath: 'https://example.com/j.mp3', lastPracticed: 999, importJob: { stage: 'cloud', source: 'x' } },
+  { id: 'r-missing-blob', displayName: 'Missing Blob', videoPath: 'blob:gone', lastPracticed: 800 },
+  { id: 'r-latest', displayName: 'Latest Ep', videoPath: 'https://example.com/new.mp3', lastPracticed: 500 },
+  { id: 'r-no-audio', displayName: 'No Audio', videoPath: '', lastPracticed: 700 },
+];
+assert.equal(pickContinueRecord(recsForContinue, { haveBlobs: new Set(['present']) })?.id, 'r-latest');
+assert.equal(pickContinueRecord(recsForContinue, { haveBlobs: new Set(['gone']) })?.id, 'r-missing-blob');
+assert.equal(pickContinueRecord(recsForContinue, { android: true })?.id, 'r-latest', 'android skips blob: paths');
+assert.equal(pickContinueRecord(recsForContinue, { android: true, missingAndroid: new Set(['r-latest']) })?.id, 'r-old');
+assert.equal(pickContinueRecord([]), null);
+
+// 10. Review-done "Continue" includes subtitle-only desktop records when no playable audio exists (matches Home.tsx)
+const subOnlyRecs = [
+  { id: 'desk-empty', displayName: 'Empty Sub', videoPath: '', subtitleText: '   ', lastPracticed: 950 },
+  { id: 'desk-job', displayName: 'Importing Sub', videoPath: '', subtitleText: '1\n00:00:00,000 --> 00:00:02,000\nHi', lastPracticed: 900, importJob: { stage: 'cloud', source: 'x' } },
+  { id: 'desk-no-path', displayName: 'No Path Sub', videoPath: '', subtitleText: '1\n00:00:00,000 --> 00:00:02,000\nHello', lastPracticed: 600 },
+  { id: 'desk-local', displayName: 'Desktop Path', videoPath: '/Users/alice/ep.mp4', subtitleText: '1\n00:00:00,000 --> 00:00:02,000\nWorld', lastPracticed: 800 },
+];
+assert.equal(pickContinueRecord(subOnlyRecs)?.id, 'desk-local', 'web falls back to most recent subtitle-only record');
+assert.equal(
+  pickContinueRecord(subOnlyRecs, { android: true, missingAndroid: new Set(['desk-local']) })?.id,
+  'desk-local',
+  'android falls back to subtitle-only record when all local audio files are missing',
+);
+assert.equal(
+  pickContinueRecord([...subOnlyRecs, { id: 'playable', displayName: 'Playable', videoPath: 'https://example.com/a.mp3', lastPracticed: 100 }])?.id,
+  'playable',
+  'playable audio still takes precedence over newer subtitle-only records',
+);
+assert.equal(pickContinueRecord([subOnlyRecs[0], subOnlyRecs[1]]), null, 'blank subtitle or active import job ignored');
+
+// 11. Review dictation near-miss display: paired near-miss input is never double-marked as extra
+const nearSimple = checkDictation('I walked home', 'I walk home', true);
+const filteredSimple = filterPairedNearExtras(nearSimple.pieces);
+assert.equal(filteredSimple.filter(p => p.kind === 'extra').length, 0, 'paired walk is not shown as struck-through extra');
+assert.equal(filteredSimple.filter(p => p.kind === 'miss' && p.near).length, 1, 'walked stays marked as near');
+assert.equal(filteredSimple.map(p => p.s).join(''), 'I walked home', 'spacing remains exact after suppressing paired extra');
+
+const nearWithTrueExtra = checkDictation('I walked home', 'I very walk home', true);
+const filteredWithExtra = filterPairedNearExtras(nearWithTrueExtra.pieces);
+assert.deepEqual(filteredWithExtra.filter(p => p.kind === 'extra').map(p => p.s), ['very'], 'genuinely extra word stays struck through');
+assert.equal(filteredWithExtra.filter(p => p.kind === 'miss' && p.near).length, 1);
+
+const nearDupTyped = checkDictation('I walked home', 'I walk walk home', true);
+const filteredDup = filterPairedNearExtras(nearDupTyped.pieces);
+assert.deepEqual(filteredDup.filter(p => p.kind === 'extra').map(p => p.s), ['walk'], 'only one copy of duplicated typed word is consumed by near pairing');
+
+const nearTwo = checkDictation('walked talked', 'walk talk', true);
+const filteredTwo = filterPairedNearExtras(nearTwo.pieces);
+assert.equal(filteredTwo.filter(p => p.kind === 'extra').length, 0);
+assert.equal(filteredTwo.map(p => p.s).join(''), 'walked talked');
+assert.equal(groupGradedPieces(nearSimple.pieces).filter(g => g.piece?.kind === 'extra').length, 0);
 
 console.log('mobile review phone ok');

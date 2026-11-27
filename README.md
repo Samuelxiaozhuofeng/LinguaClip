@@ -34,7 +34,7 @@ The video plays one line, then waits for you to type it. Words you get right mov
 
 ![Add a video](assets/readme/add.jpg)
 
-Have an `.srt`? Add it and start right away. No subtitles? LinguaClip transcribes the video on your computer with whisper. It downloads the parts once (about 580 MB) and works offline after that. On a Mac you can also paste a YouTube link.
+Have an `.srt`? Add it and start right away. No subtitles? LinguaClip transcribes the video on your computer with whisper. It downloads the parts once (about 580 MB) and works offline after that. You can also browse YouTube inside the app and click **Practise this video**, or paste a YouTube link.
 
 ### Pick how hard it is
 
@@ -100,18 +100,14 @@ Requires macOS (Apple silicon or Intel) or Windows 10/11 (64-bit).
 
 1. Download `LinguaClip-windows-setup.exe` from [Releases](https://github.com/Samuelxiaozhuofeng/LinguaClip/releases) and run it.
 2. At "Windows protected your PC", click **More info → Run anyway**.
-3. Pasting YouTube links isn't supported on Windows, and transcription runs on the CPU, so it's slower than on a Mac.
+3. Transcription runs on the CPU, so it's slower than on a Mac.
 
 The app updates itself: when a new version is out, it offers a one-click update.
 
 ### Optional extras
 
 - **AI features:** add any OpenAI-compatible endpoint and key in **Settings → AI**. Without one you can still dictate every word, use Blur and look words up in dictionaries. Easy / Medium blanks, Break it down, AI lookup and translations need it.
-- **YouTube links (Mac):** install these with [Homebrew](https://brew.sh) and a link box appears when you add a video. Please only download videos you have the right to use.
-
-  ```bash
-  brew install yt-dlp ffmpeg node
-  ```
+- **YouTube:** click **Find videos on YouTube** on the home page (or paste a link under **Add video**). The first time, the app downloads the parts it needs (yt-dlp, deno, ffmpeg, about 100 MB) into its own folder and keeps yt-dlp up to date. You can turn the button off in **Settings → Import & transcribe**. Please only download videos you have the right to use.
 
 - **Anki:** install [Anki](https://apps.ankiweb.net) and the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on, and keep Anki open while you practise.
 
@@ -132,8 +128,8 @@ No. Full dictation, Blur mode and dictionary lookup work without one. A key unlo
 **macOS says it can't be opened, or that it's damaged.**
 The app isn't notarized by Apple yet. See step 2 under [Install](#install).
 
-**Can I paste a YouTube link?**
-On Mac, yes, after installing `yt-dlp`, `ffmpeg` and `node` (see [Optional extras](#optional-extras)). On Windows, not yet: download the video first and add the file.
+**Can I use YouTube videos?**
+Yes, on Mac and Windows: browse YouTube in the app and click **Practise this video**, or paste a link. If YouTube asks you to sign in (common behind a VPN), a Mac can sign in through Chrome; Windows can't yet.
 
 **Transcription is slow on Windows.**
 It runs on the CPU by default. There's an experimental GPU option in **Settings → Import & transcribe**, or use cloud transcription.
@@ -172,7 +168,7 @@ Package with `npx tauri build`.
 ### 它能做什么
 
 - **一句一句听写**：听一句打一句，对答案时只标出你听错的词；可重听、放慢、单句循环
-- **自动出字幕**：有 .srt 直接开练；没有就在你电脑上用 whisper 识别（第一次下载约 580MB 组件，之后断网也能用）；Mac 上还能粘贴 YouTube 链接
+- **自动出字幕**：有 .srt 直接开练；没有就在你电脑上用 whisper 识别（第一次下载约 580MB 组件，之后断网也能用）；也能在 App 里逛 YouTube，看中了点「练这个视频」，或直接粘贴 YouTube 链接
 - **挖空三档**：轻松（每句只打 2–3 个词）/ 适中（约一半）/ 全写
 - **模糊模式**：字幕先糊住，听不出来再点开看，适合跟读
 - **拆开教我**：AI 挑出这句里值得学的搭配和语法，先听清晰朗读一块块练，再回到原声里把它听出来
@@ -201,14 +197,14 @@ Package with `npx tauri build`.
 
 1. 到 [Releases](https://github.com/Samuelxiaozhuofeng/LinguaClip/releases) 下载 `LinguaClip-windows-setup.exe`，双击安装。
 2. 安装包没有付费签名，会弹出「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」。
-3. Windows 版不支持粘贴 YouTube 链接；字幕识别用 CPU，比 Mac 慢一些。
+3. 字幕识别用 CPU，比 Mac 慢一些。
 
 有新版本时 App 会提示一键更新。
 
 ### 可选
 
 - **AI 功能**：「设置 → AI」里填任意 OpenAI 兼容接口的地址和 key。不填也能用全写听写、模糊模式和词典查词；挖空的轻松 / 适中档、拆开教我、AI 查词和译文需要 AI。
-- **YouTube 链接（只限 Mac）**：用 [Homebrew](https://brew.sh) 装好 `brew install yt-dlp ffmpeg node`，添加视频的弹窗里就会出现网址框。第一次下载会让你在 App 里登录 YouTube。请只下载你有权使用的视频。
+- **YouTube**：首页点「在 YouTube 里找视频」（或在「添加视频」里粘贴链接）。第一次用会自动下载要用的组件（yt-dlp、deno、ffmpeg，约 100MB，装在 App 自己的文件夹），之后 yt-dlp 自动保持最新。不想要这个按钮可以在「设置 → 导入与转录」里关掉。请只下载你有权使用的视频。
 - **Anki**：装好 [Anki](https://apps.ankiweb.net) 和 [AnkiConnect](https://ankiweb.net/shared/info/2055492159) 插件，练习时开着 Anki 就能一键加卡。
 
 ### 常见问题
@@ -218,7 +214,7 @@ Package with `npx tauri build`.
 - **为什么第一次要下载约 580MB？** 那是语音识别模型，只在第一次给没字幕的视频生成字幕时下载一次，之后断网也能用。空间紧可以在「设置 → 导入与转录」换轻量模型（约 190MB），或直接添加自带的 `.srt` 不下载；也可以用云端转录（Groq / 阿里云百炼，自填密钥）。
 - **必须填 AI key 吗？** 不用。全写听写、模糊模式、词典查词都不需要；挖空的轻松 / 适中档、拆开教我、AI 查词和译文才需要。
 - **Mac 提示无法打开 / 已损坏？** App 还没经过苹果公证，按上面「安装」第 2 步操作。
-- **能粘贴 YouTube 链接吗？** Mac 可以，先装好 `yt-dlp`、`ffmpeg`、`node`（见「可选」）；Windows 暂不支持，先把视频下载下来再添加。
+- **能用 YouTube 视频吗？** Mac 和 Windows 都可以：在 App 里逛 YouTube 点「练这个视频」，或粘贴链接。YouTube 要求登录时（挂代理常见），Mac 可以通过 Chrome 登录，Windows 暂不支持。
 - **Windows 上识别字幕很慢？** 默认用 CPU。「设置 → 导入与转录」里有实验性的显卡加速，或改用云端转录。
 - **支持哪些语言？** whisper 能识别的语言都能练；查词和细节打磨最好的是西、英、日、法、德。
 - **有 Linux 版吗？** 暂时没有。

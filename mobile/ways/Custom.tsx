@@ -1,13 +1,13 @@
-// Touch AI Custom way (docs/android-roadmap.md M2.2).
+// Touch AI Custom way (docs/android-roadmap.md M2.2, docs/android.md「手机学习闭环」).
 // Reuses desktop selection logic (utils/customPick.ts + utils/levelPrep.ts + practice_config.custom).
 // Single-column list of picked lines: active line highlighted, tapping any line selects & plays it,
-// bottom reuses DictDock for sentence-by-sentence dictation with near-miss feedback & keyboard avoidance.
+// bottom reuses DictDock for sentence-by-sentence dictation with near-miss/extra feedback,
+// cached translations, independent vs helped status, and keyboard avoidance.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Subtitle } from '../../types';
 import { useSavedLines } from '../../hooks/useSavedLines';
 import { canCloze } from '../../utils/aiDrills';
 import { pickCustom, type CustomConfig } from '../../utils/customPick';
-import { useRoundLabels } from './useRoundLabels';
 import { detectLang } from '../../utils/dictionary';
 import { useT } from '../../utils/i18n';
 import { loadJa, useJaVersion } from '../../utils/japanese';
@@ -18,19 +18,19 @@ import {
   getCustomConfig,
   getCustomPos,
   getLooseJudge,
-  getPracticeConfig,
   saveCustomConfig,
   setCustomPos,
 } from '../../utils/storage';
-import { tokenizeText } from '../../utils/textTokenizer';
 import { countLine } from '../../utils/today';
-import { checkDictation, type Checked } from '../dictation';
+import { autoAddOn } from '../autoAdd';
+import { checkDictation, tokenizeDictation, type Checked } from '../dictation';
 import { errText } from '../ui';
 import { useWordLookup } from '../useWordLookup';
 import { WordSheet } from '../WordSheet';
 import { BreakdownSheet } from './BreakdownSheet';
-import { CustomControls } from './CustomControls';
+import { CustomControls, CustomDoneCard, CustomInactiveRow } from './CustomControls';
 import { DictDock } from './DictDock';
+import { DictStatusBar } from './DictStatusBar';
 import { GradedLine } from './GradedLine';
 import {
   AUTO_NEXT_MS,
@@ -41,8 +41,10 @@ import {
   wordCountOf,
 } from './drillCommon';
 import type { WayProps } from './types';
-import { useKeyboardInset } from './useKeyboardInset';
+import { useCachedTrans } from './useCachedTrans';
+import { useKeyboardBackClose, useKeyboardInset } from './useKeyboardInset';
 import { PlayerAudio, useLinePlayer } from './useLinePlayer';
+import { useRoundLabels } from './useRoundLabels';
 
 export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, onExit }) => {
   const t = useT();
@@ -56,6 +58,7 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
     settleSplits(record.id, lines.map(l => l.text)).catch(() => {});
   }, [ja, record.id, lines]);
 
+  const trans = useCachedTrans(record.id, lines);
   const player = useLinePlayer(record, lines);
   const { savedIds, toggleSave } = useSavedLines({
     videoId: record.id,
@@ -82,14 +85,19 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
   const [pos, setPos] = useState(0);
   const [setDone, setSetDone] = useState(false);
   const [doneLines, setDoneLines] = useState<Set<number>>(() => new Set());
+  const [stuckLines, setStuckLines] = useState<Set<number>>(() => new Set());
   const [typed, setTyped] = useState('');
   const [hinted, setHinted] = useState<Set<number>>(() => new Set());
   const [result, setResult] = useState<Checked | null>(null);
   const [revealed, setRevealed] = useState(false);
+  const [everRevealed, setEverRevealed] = useState(false);
+  const [wrongTries, setWrongTries] = useState(0);
   const [showBreakdown, setShowBreakdown] = useState(false);
 
   const autoTimer = useRef<number | null>(null);
-  const countedRef = useRef(false);
+  const countedLinesRef = useRef<Set<number>>(new Set());
+  const stuckLineRef = useRef(false);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const clearAuto = useCallback(() => {
@@ -100,13 +108,17 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
   }, []);
   useEffect(() => clearAuto, [clearAuto]);
 
+  useKeyboardBackClose(kbInset, showBreakdown || !!def);
+
   useEffect(() => {
     clearAuto();
     resetLabels();
+    countedLinesRef.current = new Set();
     setFromSec(startSec > 0 ? startSec : getCustomPos(record.id));
     setPos(0);
     setSetDone(false);
     setDoneLines(new Set());
+    setStuckLines(new Set());
   }, [record.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Grade lines with AI when AI Key is configured (cached in <id>.levels.json / IndexedDB cache).
@@ -156,17 +168,19 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
   const line: Subtitle | undefined = activeLineIdx >= 0 ? lines[activeLineIdx] : undefined;
 
   const tokens = useMemo(
-    () => (line ? tokenizeText(line.text) : []),
-    [line, jaVersion], // eslint-disable-line react-hooks/exhaustive-deps
+    () => (line ? tokenizeDictation(line.text, lang) : []),
+    [line, lang, jaVersion], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   useEffect(() => {
     clearAuto();
-    countedRef.current = false;
+    stuckLineRef.current = false;
     setTyped('');
     setHinted(new Set());
     setResult(null);
     setRevealed(false);
+    setEverRevealed(false);
+    setWrongTries(0);
     setShowBreakdown(false);
     if (!line || setDone) return;
     onPos(line.startTime);
@@ -178,7 +192,15 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
       ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [activeLineIdx, setDone]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { if (typed || result || pos > 0 || hinted.size > 0 || revealed) markBusy(); }, [typed, result, pos, hinted, revealed, markBusy]);
+  useEffect(() => {
+    if (typed || result || pos > 0 || hinted.size > 0 || revealed) markBusy();
+  }, [typed, result, pos, hinted, revealed, markBusy]);
+
+  const countOnce = useCallback(() => {
+    if (!line || countedLinesRef.current.has(line.id)) return;
+    countedLinesRef.current.add(line.id);
+    countLine();
+  }, [line]);
 
   const updateCfg = (patch: Partial<CustomConfig>) => {
     const next = { ...cfg, on: true, ...patch };
@@ -187,6 +209,7 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
     newRound();
     setPos(0);
     setSetDone(false);
+    setStuckLines(new Set());
   };
 
   const advance = useCallback(() => {
@@ -201,9 +224,11 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
   }, [clearAuto, line, player, practise.length, record.id, safePos]);
 
   const recordStuck = useCallback((reason: 'wrong' | 'peek') => {
-    if (!line) return;
+    if (!line || stuckLineRef.current) return;
+    stuckLineRef.current = true;
+    setStuckLines(prev => new Set(prev).add(line.id));
     clearMastered(record.id, line.startTime).catch(() => {});
-    if (getPracticeConfig().autoAddReview) {
+    if (autoAddOn()) {
       addLine(
         {
           videoId: record.id,
@@ -220,43 +245,44 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
 
   const handleSubmit = useCallback(() => {
     if (!line || !typed.trim()) return;
-    const checked = checkDictation(line.text, typed, lenient);
+    countOnce();
+    const checked = checkDictation(line.text, typed, lenient, lang);
     setResult(checked);
     setRevealed(false);
     if (checked.correct) {
       setDoneLines(prev => new Set(prev).add(activeLineIdx));
-      if (!countedRef.current) {
-        countedRef.current = true;
-        countLine();
-      }
       clearAuto();
       autoTimer.current = window.setTimeout(() => {
         autoTimer.current = null;
         advance();
       }, AUTO_NEXT_MS);
     } else {
+      setWrongTries(n => n + 1);
       recordStuck('wrong');
     }
-  }, [activeLineIdx, advance, clearAuto, lenient, line, recordStuck, typed]);
+  }, [activeLineIdx, advance, clearAuto, countOnce, lang, lenient, line, recordStuck, typed]);
 
   const handleHint = useCallback(() => {
     if (!line || revealed || result?.correct) return;
-    const nextIdx = nextHintIndex(line.text, typed, hinted, lenient);
+    const nextIdx = nextHintIndex(line.text, typed, hinted, lenient, lang);
     if (nextIdx < 0) return;
+    recordStuck('peek');
     setHinted(prev => {
       const next = new Set(prev);
       next.add(nextIdx);
       return next;
     });
-  }, [hinted, lenient, line, result?.correct, revealed, typed]);
+  }, [hinted, lang, lenient, line, recordStuck, result?.correct, revealed, typed]);
 
   const handleReveal = useCallback(() => {
     if (!line || revealed) return;
     clearAuto();
+    countOnce();
     setRevealed(true);
+    setEverRevealed(true);
     setResult(null);
     recordStuck('peek');
-  }, [clearAuto, line, recordStuck, revealed]);
+  }, [clearAuto, countOnce, line, recordStuck, revealed]);
 
   const selectRow = (rowPos: number, lineIdx: number) => {
     if (rowPos === safePos) {
@@ -293,9 +319,10 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
   const audioErr = player.errorCode
     ? (player.errorCode === 'listen.failed' ? t('listen.failed') : errText(player.errorCode))
     : '';
-  const showActions = !!line && (revealed || (result !== null && !result.correct));
   const isSaved = !!line && savedIds.has(line.id);
-  const canHint = !!line && !revealed && !result?.correct && nextHintIndex(line.text, typed, hinted, lenient) >= 0;
+  const canHint = !!line && !revealed && !result?.correct && nextHintIndex(line.text, typed, hinted, lenient, lang) >= 0;
+  const needsNext = revealed || (result !== null && !result.correct);
+  const answered = revealed || result !== null;
 
   return (
     <div
@@ -317,30 +344,16 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
         {audioErr && <p role="alert" className="text-xs text-accent px-1">{audioErr}</p>}
 
         {setDone ? (
-          <div className="bg-page rounded-2xl shadow-card px-4 py-6 flex flex-col items-center gap-3 text-center">
-            <h2 className="text-lg font-semibold text-ink">{t('m.customDone')}</h2>
-            <div className="flex gap-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  newRound();
-                  setFromSec(getCustomPos(record.id));
-                  setPos(0);
-                  setSetDone(false);
-                }}
-                className="min-h-[44px] px-4 rounded-xl bg-accent text-white text-sm font-semibold"
-              >
-                {t('m.customNextSet')}
-              </button>
-              <button
-                type="button"
-                onClick={onExit}
-                className="min-h-[44px] px-4 rounded-xl bg-shade text-ink text-sm font-medium"
-              >
-                {t('m.toHome')}
-              </button>
-            </div>
-          </div>
+          <CustomDoneCard
+            onNextSet={() => {
+              newRound();
+              setFromSec(getCustomPos(record.id));
+              setPos(0);
+              setSetDone(false);
+              setStuckLines(new Set());
+            }}
+            onExit={onExit}
+          />
         ) : practise.length === 0 ? (
           <p className="py-6 text-center text-sm text-mute">{t('m.customEmpty')}</p>
         ) : (
@@ -356,25 +369,15 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
 
                 if (!active) {
                   return (
-                    <button
+                    <CustomInactiveRow
                       key={sub.id}
-                      type="button"
-                      data-custom-row={lineIdx}
-                      onClick={() => selectRow(rowPos, lineIdx)}
-                      className="w-full min-h-[52px] px-3.5 py-2.5 rounded-xl bg-page/80 shadow-card text-left flex items-center gap-2.5 active:bg-shade"
-                    >
-                      <span className={`w-6 text-xs text-center tabular-nums shrink-0 ${completed ? 'text-accent font-semibold' : 'text-mute'}`}>
-                        {completed ? '✓' : rowPos + 1}
-                      </span>
-                      <span className={`flex-1 min-w-0 truncate text-[14px] ${completed ? 'font-serif text-ink/75' : 'text-mute'}`}>
-                        {completed ? sub.text : t('m.customLineHidden', { n: lineIdx + 1, words: wordCountOf(sub.text) })}
-                      </span>
-                      {lv && lv !== 'x' && (
-                        <span className="shrink-0 px-2 py-0.5 rounded-full bg-shade text-[11px] text-mute font-medium">
-                          {lv}
-                        </span>
-                      )}
-                    </button>
+                      lineIdx={lineIdx}
+                      rowPos={rowPos}
+                      text={sub.text}
+                      completed={completed}
+                      level={lv}
+                      onSelect={() => selectRow(rowPos, lineIdx)}
+                    />
                   );
                 }
 
@@ -409,40 +412,19 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
                       compact
                     />
 
-                    {result?.correct && (
-                      <p role="status" className="self-start px-3 py-1 rounded-full bg-shade text-ink text-xs font-medium">
-                        {t('m.dictAllRightAuto')}
-                      </p>
-                    )}
-
-                    {showActions && (
-                      <div className="pt-1 border-t border-shade flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => { player.pause(); setShowBreakdown(true); }}
-                          className="min-h-[44px] px-3 rounded-xl bg-shade text-ink text-[13px] font-medium"
-                        >
-                          {t('studio.breakdown')}
-                        </button>
-                        <button
-                          type="button"
-                          aria-pressed={isSaved}
-                          onClick={() => toggleSave(sub)}
-                          className={`min-h-[44px] px-3 rounded-xl text-[13px] font-medium ${
-                            isSaved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
-                          }`}
-                        >
-                          {isSaved ? t('m.saved') : t('m.dictSaveLine')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={advance}
-                          className="ml-auto min-h-[44px] px-4 rounded-xl bg-accent text-white text-[13px] font-semibold"
-                        >
-                          {t('m.nextLine')}
-                        </button>
-                      </div>
-                    )}
+                    <DictStatusBar
+                      result={result}
+                      revealed={revealed}
+                      everRevealed={everRevealed}
+                      usedHint={hinted.size > 0}
+                      wrongTries={wrongTries}
+                      alreadyStuck={stuckLines.has(sub.id)}
+                      trans={trans?.[lineIdx] ?? null}
+                      isSaved={isSaved}
+                      onBreakdown={() => { player.pause(); setShowBreakdown(true); }}
+                      onToggleSave={() => toggleSave(sub)}
+                      compact
+                    />
                   </div>
                 );
               })}
@@ -463,8 +445,15 @@ export const CustomWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine,
           hintDisabled={!canHint}
           onReveal={handleReveal}
           revealDisabled={revealed || !!result?.correct}
+          onPrev={() => { clearAuto(); if (safePos > 0) setPos(safePos - 1); }}
+          prevDisabled={safePos <= 0}
+          onSkip={advance}
+          skipDisabled={answered}
+          onNext={advance}
+          nextHighlight={needsNext}
           submitDisabled={!!result?.correct}
           keyboardOpen={kbInset > 0}
+          inputRef={inputRef}
         />
       )}
 

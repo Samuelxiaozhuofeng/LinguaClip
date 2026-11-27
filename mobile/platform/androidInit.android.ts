@@ -10,7 +10,9 @@ import {
   type BgEvent,
 } from './androidBridge';
 import { clipsInfo } from './desktop.android';
-import { fillClips, getClipProgress, retryClips, startClips, subscribeClips } from '../../utils/clips';
+import { fillClips, getClipProgress, registerExtraKeptClips, retryClips, startClips, subscribeClips } from '../../utils/clips';
+import { createSyncExtraKeptClipsProvider } from '../../utils/syncEngine';
+import { readRestoreKeptClips } from '../restoreClips';
 import { registerClipsRuntime } from '../settings/ClipsSection';
 import * as ankiDroid from './ankiDroid';
 import { exportToAnkiDroid } from '../ankiDroidExport';
@@ -77,7 +79,8 @@ export async function syncLastPosFromNative(): Promise<void> {
     const res = await callAndroid<{ mediaId?: string; posMs?: number; ts?: number }>('playback.getLastPos');
     const ts = typeof res?.ts === 'number' ? res.ts : 0;
     if (!res?.mediaId || typeof res.posMs !== 'number' || res.posMs <= 0) return;
-    if (ts > 0 && ts <= lastAppliedPosTs) return;
+    const appliedTs = Math.max(lastAppliedPosTs, readAppliedTs());
+    if (ts > 0 && ts <= appliedTs) return;
     // Never write watchPos back for a deleted or absent record (protects delete & backup restore).
     const rec = await getVideoFromDB(res.mediaId);
     if (!rec) return;
@@ -171,8 +174,15 @@ export function flushBgEventsToReview(): Promise<number> {
 }
 
 
+let restoreClipsRegistered = false;
+
 export function initAndroidNative(): void {
   if (!isAndroidNative()) return;
+  if (!restoreClipsRegistered) {
+    restoreClipsRegistered = true;
+    registerExtraKeptClips(readRestoreKeptClips);
+    registerExtraKeptClips(createSyncExtraKeptClipsProvider());
+  }
   registerClipsRuntime({ getClipProgress, subscribeClips, retryClips, clipsInfo });
   // Durable lockscreen event flush & last-pos sync: on startup, on foreground resume, and on live bgEvent.
   // Start standalone review clips background worker after restore check (bootRestore) and initial bg-events flush.

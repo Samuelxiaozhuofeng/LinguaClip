@@ -10,7 +10,15 @@ import { join } from 'node:path';
 
 const out = join(tmpdir(), `mobile-listen-${process.pid}.mjs`);
 await build({
-  stdin: { contents: "export * from './mobile/listenBoundaries';", resolveDir: '.', loader: 'ts' },
+  stdin: {
+    contents: [
+      "export * from './mobile/listenBoundaries';",
+      "export { isMissedLineCard, missedLineIdsFromCards, canRemoveUnmarkedCard, planUnmarkCard, planSummaryRemoveCard, lineRefOf } from './mobile/listenMissed';",
+      "export { newCard, schedule } from './utils/review';",
+    ].join('\n'),
+    resolveDir: '.',
+    loader: 'ts',
+  },
   bundle: true,
   format: 'esm',
   platform: 'node',
@@ -26,6 +34,14 @@ const {
   drillProgressFromLoops,
   resolveBgMarkLineId,
   mergeBgMarks,
+  isMissedLineCard,
+  missedLineIdsFromCards,
+  canRemoveUnmarkedCard,
+  planUnmarkCard,
+  planSummaryRemoveCard,
+  lineRefOf,
+  newCard,
+  schedule,
 } = await import(out);
 
 const lines = [
@@ -191,5 +207,68 @@ assert.equal(merged.get(1), 'ok');
 assert.equal(merged.get(2), 'more');
 assert.equal(merged.get(3), 'open');
 assert.equal(mergeBgMarks(merged, [3]), merged, 'no-op merge returns identical Map reference');
+
+// 8. Immediate missed-line review helpers (mobile/listenMissed.ts)
+const mkCard = (start, reason, more = {}) => ({
+  ...newCard(
+    { id: `ep1|${start.toFixed(2)}`, deck: 'line', videoId: 'ep1', videoName: 'Ep 1', text: 'line', start, end: start + 2 },
+    reason,
+    1_700_000_000_000,
+  ),
+  ...more,
+});
+
+const cMissedFresh = mkCard(0.0, 'missed');
+const cMissedMastered = mkCard(2.2, 'missed', { mastered: 1_700_000_001_000 });
+const cSavedOnly = mkCard(4.5, 'saved');
+const cSavedAndMissed = mkCard(7.5, 'saved', { reasons: ['saved', 'missed'], saved: true });
+const cReviewedMissed = schedule(cMissedFresh, 3, 1_700_000_005_000);
+const cWrongAndMissed = mkCard(0.0, 'wrong', { reasons: ['wrong', 'missed'] });
+const cWordMissed = mkCard(0.0, 'missed', { deck: 'word', word: 'First' });
+
+// Hydrate only unmastered line cards whose reasons include 'missed'
+assert.equal(isMissedLineCard(cMissedFresh), true);
+assert.equal(isMissedLineCard(cMissedMastered), false, 'mastered card is not shown as hard');
+assert.equal(isMissedLineCard(cSavedOnly), false, 'saved-only card is not shown as hard');
+assert.equal(isMissedLineCard(cSavedAndMissed), true);
+assert.equal(isMissedLineCard(cWordMissed), false, 'word card ignored');
+assert.deepEqual(
+  missedLineIdsFromCards(lines, [cMissedFresh, cMissedMastered, cSavedOnly, cSavedAndMissed, cWordMissed]),
+  [1, 4],
+);
+
+// Unmarking deletes ONLY fresh (State.New), non-saved, missed-only cards
+assert.equal(canRemoveUnmarkedCard(null), false);
+assert.equal(canRemoveUnmarkedCard(cMissedFresh), true);
+assert.equal(canRemoveUnmarkedCard(cReviewedMissed), false, 'already reviewed card stays');
+assert.equal(canRemoveUnmarkedCard(cSavedAndMissed), false, 'bookmarked card stays');
+assert.equal(canRemoveUnmarkedCard(cWrongAndMissed), false, 'dictation-wrong card stays');
+
+// In-listening unmark requires session creation; re-entering and unmarking an old card must NOT delete it
+assert.equal(planUnmarkCard(null, true), 'noop');
+assert.equal(planUnmarkCard(cMissedFresh, true), 'delete', 'same-session fresh missed-only card is deleted');
+assert.equal(planUnmarkCard(cMissedFresh, false), 'strip', 'previous-session card is never deleted on unmark');
+assert.equal(planUnmarkCard(cSavedAndMissed, true), 'strip', 'bookmarked card strips missed only');
+assert.equal(planUnmarkCard(cReviewedMissed, true), 'strip', 'reviewed card strips missed only');
+assert.equal(planUnmarkCard(cWrongAndMissed, true), 'strip', 'multi-reason card strips missed only');
+assert.equal(planUnmarkCard(cSavedOnly, false), 'noop', 'card without missed reason is untouched');
+
+// Summary "remove from review": deletes fresh missed-only; strips missed only on saved/reviewed/multi-reason cards
+assert.equal(planSummaryRemoveCard(null), 'noop');
+assert.equal(planSummaryRemoveCard(cMissedFresh), 'delete', 'summary deletes fresh missed-only card');
+assert.equal(planSummaryRemoveCard(cSavedAndMissed), 'strip', 'summary keeps bookmarked card and strips missed only');
+assert.equal(planSummaryRemoveCard(cReviewedMissed), 'strip', 'summary keeps reviewed card and strips missed only');
+assert.equal(planSummaryRemoveCard(cWrongAndMissed), 'strip', 'summary keeps dictation-wrong card and strips missed only');
+assert.equal(planSummaryRemoveCard(cSavedOnly), 'noop', 'summary ignores card without missed reason');
+
+const ref = lineRefOf({ id: 'ep1', displayName: 'Ep 1', videoFileName: 'ep1.mp3', videoPath: '/a/ep1.mp3' }, lines[1]);
+assert.deepEqual(ref, {
+  videoId: 'ep1',
+  videoName: 'ep1.mp3',
+  videoPath: '/a/ep1.mp3',
+  text: 'Second sentence.',
+  start: 2.2,
+  end: 4.5,
+});
 
 console.log('mobile listen ok');

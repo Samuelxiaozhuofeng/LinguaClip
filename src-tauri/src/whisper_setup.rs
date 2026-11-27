@@ -405,13 +405,12 @@ pub struct ImportTools {
 
 // What the add-video dialog needs to know before the user starts: whether the
 // first import will download the transcription parts (for the model picked in
-// Settings), and whether this Mac has the (hand-installed) YouTube downloader.
+// Settings), and whether this platform supports YouTube downloads.
 #[tauri::command]
 pub fn import_tools(model: Option<String>, gpu: Option<bool>) -> ImportTools {
   let tier = model.as_deref().and_then(|m| Tier::parse(m).ok()).unwrap_or(Tier::Standard);
   let gpu = gpu.unwrap_or(false);
-  // No YouTube on Windows: Chrome there encrypts cookies so yt-dlp cannot sign in.
-  let youtube = !cfg!(windows) && crate::import::find_bin("yt-dlp").is_ok();
+  let youtube = cfg!(any(target_os = "macos", windows));
   ImportTools { whisper: find(tier, gpu).is_some(), youtube }
 }
 

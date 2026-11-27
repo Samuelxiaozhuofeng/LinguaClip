@@ -9,7 +9,7 @@ import { getTransJob, parseTransCache, prepareTrans, subscribeTrans, type TransT
 import { canCloze, hashSrt } from '../../utils/aiDrills';
 import { detectLang } from '../../utils/dictionary';
 import { useLang, useT } from '../../utils/i18n';
-import { loadJa, useJaVersion } from '../../utils/japanese';
+import { downloadJa, loadJa, useJaState, useJaVersion } from '../../utils/japanese';
 import { settleSplits } from '../../utils/jaSegments';
 import { addLooked, getLooked, getReadPos, lookedKey, setGloss, setReadPos, useLookedVersion } from '../../utils/readLooked';
 import { lineAt, parseSRT } from '../../utils/srtParser';
@@ -55,7 +55,7 @@ function resolveInitialIndex(record: VideoRecord, lines: Subtitle[], startSec: n
   return 0;
 }
 
-export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine }) => {
+export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, noAudio = false }) => {
   const t = useT();
   const uiLang = useLang();
   const transTo: TransTo = uiLang === 'en' ? 'en' : 'zh';
@@ -73,6 +73,7 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine })
   const dictLang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
   const ja = dictLang === 'ja';
   const jaVersion = useJaVersion();
+  const jaState = useJaState();
   useEffect(() => {
     if (ja) {
       void loadJa();
@@ -81,7 +82,18 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine })
   }, [ja, record.id, lines]);
 
   const [kana, setKana] = useState(() => getWatchPrefs().kana);
+  const [kanaNeedDict, setKanaNeedDict] = useState(false);
+  useEffect(() => {
+    if (jaState.ready) setKanaNeedDict(false);
+  }, [jaState.ready]);
+
   const toggleKana = () => {
+    if (ja && !jaState.ready) {
+      setKana(true);
+      saveWatchPrefs({ kana: true });
+      setKanaNeedDict(true);
+      return;
+    }
     setKana(prev => {
       const next = !prev;
       saveWatchPrefs({ kana: next });
@@ -98,7 +110,7 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine })
     setReadPos(record.id, idx === 0 ? 0 : line.startTime);
   }, [lines, onLine, onPos, record.id]);
 
-  const player = useReaderPlayer(record, lines, initialIndex, onActiveLine);
+  const player = useReaderPlayer(record, lines, initialIndex, onActiveLine, noAudio);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const userScrollingRef = useRef(false);
   const scrollIdleRef = useRef<number | null>(null);
@@ -270,10 +282,11 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine })
     );
   }
 
-  const audioErr = player.errorCode
+  const audioErr = !noAudio && player.errorCode
     ? (player.errorCode === 'listen.failed' ? t('listen.failed') : errText(player.errorCode))
     : '';
   const hasAnyTrans = hasAi || !!trans?.some(Boolean);
+  const kanaActive = kana && jaState.ready;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-paper">
@@ -284,10 +297,11 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine })
         total={lines.length}
         playing={player.playing}
         disabled={!player.ready || !!audioErr}
+        noAudio={noAudio}
         mode={player.mode}
         rate={player.rate}
         ja={ja}
-        kana={kana}
+        kana={kanaActive}
         showTrans={showTrans}
         hasTrans={hasAnyTrans}
         onToggle={player.toggle}
@@ -296,6 +310,32 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine })
         onKanaToggle={toggleKana}
         onTransToggle={() => setShowTrans(v => !v)}
       />
+
+      {ja && kanaNeedDict && !jaState.ready && (
+        <div
+          role="status"
+          data-testid="read-kana-need-dict"
+          className="mx-4 mt-2 px-3.5 py-2.5 rounded-xl bg-page shadow-card flex items-center gap-2 shrink-0"
+        >
+          <span className="flex-1 text-[13px] text-ink leading-snug">{t('m.w4KanaNeedDict')}</span>
+          <button
+            type="button"
+            disabled={jaState.running}
+            onClick={() => { void downloadJa(); }}
+            className="min-h-[44px] px-3 rounded-lg bg-accent text-white text-xs font-medium shrink-0 disabled:opacity-60"
+          >
+            {jaState.running ? t('ja.downloading', { pct: jaState.pct }) : t('m.w4KanaDownloadNow')}
+          </button>
+          <button
+            type="button"
+            aria-label={t('m.close')}
+            onClick={() => setKanaNeedDict(false)}
+            className="w-11 h-11 -mr-1.5 shrink-0 flex items-center justify-center text-mute text-lg"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <div
         ref={scrollerRef}
@@ -314,7 +354,7 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine })
           lines={lines}
           lang={dictLang}
           onJumpLine={jumpToLine}
-          onPlayLine={playSpecificLine}
+          onPlayLine={noAudio ? undefined : playSpecificLine}
         />
 
         <PhrasesCard record={record} phrases={phrases} onJump={jumpToLine} />
@@ -343,10 +383,10 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine })
               index={i}
               ja={ja}
               jaVersion={jaVersion}
-              kana={kana}
+              kana={kanaActive}
               looked={looked}
               active={player.current === i}
-              playing={player.playing && player.current === i}
+              playing={!noAudio && player.playing && player.current === i}
               saved={savedIds.has(line.id)}
               showTrans={showTrans}
               transText={trans?.[i] ?? null}
@@ -370,7 +410,7 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine })
           onClose={close}
           onExplain={explain}
           onKeep={k => keep(k, ref)}
-          onPlayLine={playSpecificLine}
+          onPlayLine={noAudio ? undefined : playSpecificLine}
         />
       )}
 
@@ -380,7 +420,7 @@ export const ReadWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine })
           line={breakdownLine}
           around={aroundOf(breakdownLine)}
           lang={dictLang}
-          onPlayLine={() => playSpecificLine(breakdownLine)}
+          onPlayLine={noAudio ? undefined : () => playSpecificLine(breakdownLine)}
           onClose={() => setBreakdownLine(null)}
         />
       )}

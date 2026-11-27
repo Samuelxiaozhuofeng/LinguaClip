@@ -1,6 +1,7 @@
 // OPML podcast subscription import, local subscription storage, Wi-Fi-only preference,
 // and Android cellular-download confirmation. Safe on both PWA and Android (no @tauri-apps/* imports).
 import { t } from '../utils/i18n';
+import { touchSyncSetting } from '../utils/syncMeta';
 import { callAndroid, isAndroidNative, type NetworkState } from './platform/androidBridge';
 
 export interface PodcastSub {
@@ -118,6 +119,7 @@ function savePodcastSubs(subs: PodcastSub[]): void {
   try {
     localStorage.setItem(PODCAST_SUBS_KEY, JSON.stringify(subs));
   } catch { /* localStorage unavailable */ }
+  touchSyncSetting(PODCAST_SUBS_KEY);
 }
 
 export function isPodcastSubscribed(feed: string, subs: PodcastSub[] = getPodcastSubs()): boolean {

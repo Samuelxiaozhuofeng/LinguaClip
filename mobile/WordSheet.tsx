@@ -9,7 +9,7 @@ import { useT } from '../utils/i18n';
 import { getWordVoice } from '../utils/storage';
 import { useBackClose } from './backClose';
 import { CAN_SPEAK_WORD, WORD_PLATFORM, speakWordAux } from './platform/wordPlatform';
-import { aiFields, firstFields, isSafeImgUrl, senseFields, type Def, type Keep } from './useWordLookup';
+import { aiFields, cardWordOf, isSafeImgUrl, jaBaseForm, phraseSaveFields, senseFields, type Def, type Keep } from './useWordLookup';
 
 const ERROR_KEY = {
   offline: 'definition.dictOffline',
@@ -94,18 +94,37 @@ export const WordSheet: React.FC<{
     }
   };
 
-  const plus = (id: string, k: Keep) => (
-    <button aria-label={t('m.keepWord')} aria-pressed={kept.has(id)} disabled={kept.has(id)}
-      onClick={() => { setKept(s => new Set(s).add(id)); onKeep(k); }}
-      className={`shrink-0 w-11 h-11 rounded-[10px] text-xl ${kept.has(id) ? 'bg-accent-soft text-accent text-base' : 'bg-shade text-ink'}`}>
-      {kept.has(id) ? '✓' : '＋'}
-    </button>
-  );
+  const plus = (id: string, k: Keep) => {
+    const saved = kept.has(id);
+    return (
+      <div className="pt-1 flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          data-testid="keep-word-btn"
+          aria-pressed={saved}
+          disabled={saved}
+          onClick={() => { setKept(s => new Set(s).add(id)); onKeep(k); }}
+          className={`min-h-[44px] px-3 rounded-[10px] text-[13px] font-medium whitespace-nowrap ${
+            saved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
+          }`}
+        >
+          {saved ? t('m.w4KeptWordBtn') : (
+            <>
+              <span className="hidden min-[360px]:inline">{t('m.w4KeepWordBtn')}</span>
+              <span className="inline min-[360px]:hidden">{t('m.w4KeepWordShort')}</span>
+            </>
+          )}
+        </button>
+        {saved && <span role="status" className="text-xs text-mute">{t('m.w4KeptWordHint')}</span>}
+      </div>
+    );
+  };
 
   const errKey = errorKeyOf(def.error);
   const pickAiNote = [def.pickNote, def.pickCulture].filter(Boolean).join('\n');
-  const phraseFields = def.phrase ? firstFields(def) : null;
+  const phraseFields = phraseSaveFields(def);
   const phraseKept = kept.has('phrase');
+  const baseForm = jaBaseForm(def);
   const canSpeak = (CAN_SPEAK_WORD && !!def.lang) || !!onPlayLine;
   let n = 0;
 
@@ -119,6 +138,11 @@ export const WordSheet: React.FC<{
             {def.phrase && <span className="self-start px-2 py-0.5 rounded-full bg-accent-soft text-accent text-[11px] font-medium">{t('m.phraseTag')}</span>}
             <div className="flex items-baseline gap-2 flex-wrap">
               <span className="font-serif text-[26px] font-semibold break-words leading-tight">{def.word}</span>
+              {baseForm && (
+                <span data-testid="ja-base-form" className="px-2 py-0.5 rounded-full bg-shade text-xs text-mute font-medium">
+                  {t('m.w4JaBaseForm', { word: baseForm })}
+                </span>
+              )}
               {def.dict?.[0]?.phonetic && <span className="text-[13px] text-mute">{def.dict[0].phonetic}</span>}
             </div>
           </div>
@@ -168,8 +192,11 @@ export const WordSheet: React.FC<{
                       {s.examples[0] && <span className="font-serif text-sm text-mute"><SegText line={s.examples[0]} /></span>}
                       {isPicked && def.pickNote && <span className="text-[13px] text-accent leading-snug">AI：{def.pickNote}</span>}
                       {isPicked && def.pickCulture && <span className="text-[13px] text-ink/80 leading-snug whitespace-pre-line">{def.pickCulture}</span>}
+                      {!def.phrase && plus(id, {
+                        ...senseFields(e, s, def.ai, isPicked ? pickAiNote : ''),
+                        word: cardWordOf(def, e),
+                      })}
                     </div>
-                    {plus(id, senseFields(e, s, def.ai, isPicked ? pickAiNote : ''))}
                   </div>
                 );
               })}
@@ -180,12 +207,12 @@ export const WordSheet: React.FC<{
           <p className="text-sm text-mute">{def.phrase && !onExplain ? t('m.phraseNoAi') : t(errKey)}</p>
         )}
         {def.ai && (
-          <div className="rounded-xl bg-accent-soft px-3.5 py-3 flex gap-2.5 items-start">
-            <div className="flex-1 min-w-0 text-[15px] leading-relaxed whitespace-pre-line">
+          <div className="rounded-xl bg-accent-soft px-3.5 py-3 flex flex-col gap-2">
+            <div className="min-w-0 text-[15px] leading-relaxed whitespace-pre-line">
               <span className="text-xs text-accent font-medium block mb-0.5">AI{def.ai.partOfSpeech ? ` · ${def.ai.partOfSpeech}` : ''}</span>
               {def.ai.definition}{def.ai.culture ? `\n${def.ai.culture}` : ''}
             </div>
-            {!def.dict && !def.phrase && plus('ai', aiFields(def.ai))}
+            {!def.dict && !def.phrase && plus('ai', { ...aiFields(def.ai), word: cardWordOf(def) })}
           </div>
         )}
         {def.aiBusy && <p className="text-sm text-mute">{t('m.aiAsking')}</p>}

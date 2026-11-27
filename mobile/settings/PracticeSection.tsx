@@ -1,16 +1,18 @@
-// Settings → Practice section (docs/android-roadmap.md M2.1):
-// toggles for Home "Today" panel & "This week" stats (practice_config) and each of the
-// four ways under "More" on the study page (mobile/phoneWays.ts).
+// Settings → Practice section (docs/android-roadmap.md M2.1 & docs/android.md「手机学习闭环」):
+// toggles for auto-adding stuck lines to review (mobile/autoAdd.ts), Home "Today" panel &
+// "This week" stats (practice_config), and each of the four ways under "More" (mobile/phoneWays.ts).
 import React, { useEffect, useState } from 'react';
 import { useT } from '../../utils/i18n';
 import { getAIConfig, getEndpoint, saveAIConfig } from '../../utils/aiConfig';
 import { getTodayBar, getWeekStats, setPracticeFlag } from '../../utils/storage';
+import { autoAddOn, setAutoAdd } from '../autoAdd';
 import { AI_WAYS, isWayOn, MORE_WAY_DESC_KEY, setWayOn, subscribeWays, WAY_LABEL_KEY } from '../phoneWays';
 import { MORE_WAYS, type PhoneWay } from '../ways/types';
 import { sheet } from '../ui';
 
 export const PracticeSection: React.FC = () => {
   const t = useT();
+  const [autoAdd, setAutoAddState] = useState(autoAddOn);
   const [todayOn, setTodayOn] = useState(getTodayBar);
   const [weekOn, setWeekOn] = useState(getWeekStats);
   const [, bumpWays] = useState(0);
@@ -25,6 +27,10 @@ export const PracticeSection: React.FC = () => {
 
   useEffect(() => subscribeWays(() => bumpWays(n => n + 1)), []);
 
+  const toggleAutoAdd = (on: boolean) => {
+    setAutoAddState(on);
+    setAutoAdd(on);
+  };
   const toggleToday = (on: boolean) => {
     setTodayOn(on);
     setPracticeFlag('todayBar', on);
@@ -41,6 +47,18 @@ export const PracticeSection: React.FC = () => {
     <section className="flex flex-col gap-2">
       <p className="text-[13px] text-mute">{t('m.practiceTitle')}</p>
       <div className={`${sheet} flex flex-col`}>
+        <label className="px-4 py-3.5 min-h-[52px] flex items-center justify-between gap-3 border-b border-shade">
+          <span className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[15px]">{t('m.w3AutoAddTitle')}</span>
+            <span className="text-[13px] text-mute">{t('m.w3AutoAddHint')}</span>
+          </span>
+          <input
+            type="checkbox"
+            checked={autoAdd}
+            className="w-5 h-5 shrink-0 accent-accent"
+            onChange={e => toggleAutoAdd(e.target.checked)}
+          />
+        </label>
         <label className="px-4 py-3.5 min-h-[52px] flex items-center justify-between gap-3 border-b border-shade">
           <span className="text-[15px]">{t('m.practiceTodayBar')}</span>
           <input
@@ -74,7 +92,7 @@ export const PracticeSection: React.FC = () => {
             >
               <span className="flex flex-col gap-0.5 min-w-0">
                 <span className="text-[15px]">{t(WAY_LABEL_KEY[w])}</span>
-                {hint && <span className="text-xs text-mute">{hint}</span>}
+                {hint && <span className="text-[13px] text-mute">{hint}</span>}
               </span>
               <input
                 type="checkbox"
@@ -92,7 +110,7 @@ export const PracticeSection: React.FC = () => {
           <label key={k} className="px-4 py-3.5 min-h-[52px] flex items-center justify-between gap-3 border-b border-shade last:border-0">
             <span className="flex flex-col gap-0.5 min-w-0">
               <span className="text-[15px]">{t(k === 'autoKeywords' ? 'settingsAI.autoKeywords' : 'settingsAI.autoPhrases')}</span>
-              {!aiReady && <span className="text-xs text-mute">{t('m.practiceNeedAiKey')}</span>}
+              {!aiReady && <span className="text-[13px] text-mute">{t('m.practiceNeedAiKey')}</span>}
             </span>
             <input
               type="checkbox"

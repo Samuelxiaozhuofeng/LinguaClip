@@ -158,12 +158,12 @@ export interface VideoRecord {
   lang?: import('./utils/dictionary').DictLang; // set by hand in the video's menu; unset = guessed from the subtitles (utils/deckLang.ts)
   // An episode imported from a podcast feed (docs/private/podcast.md): listed on the podcast
   // page, not with the videos. `name` = the downloaded file's name stem, sent again on a retry.
-  podcast?: { show: string; feed: string; guid: string; image?: string; name: string };
+  podcast?: { show: string; feed: string; guid: string; image?: string; name: string; audio?: string };
 
   // Present while a YouTube/local import is generating subtitles (or failed).
   // Cleared once videoPath / subtitleText / totalSubtitles are filled in.
   importJob?: {
-    stage: 'queued' | 'setup' | 'download' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'retranscribe' | 'segment';
+    stage: 'queued' | 'setup' | 'download' | 'ytSetup' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'retranscribe' | 'segment';
     percent?: number;
     error?: string;
     source: string;

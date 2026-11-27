@@ -6,6 +6,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { Rating, type Grade } from 'ts-fsrs';
+import type { VideoRecord } from '../types';
 import type { ReviewCard, Removed } from '../utils/review';
 import {
   deckCounts,
@@ -31,20 +32,25 @@ import { countLine, usePracticeClock } from '../utils/today';
 import { loadWords } from '../utils/wordTimes';
 import { CAN_SPEAK_WORD, speakWordAux, stopWordAux } from './platform/wordPlatform';
 import { holdCardClips, refillClipsAfterRestore, warmClipsRuntime } from './review/nativeRuntime';
-import { finishedCardCount, removeCardFromQueue, shouldDeferCard } from './review/cardFilter';
-import { findCardMedia, locateWordInLine, useReviewClip, type FoundCardMedia } from './review/useReviewClip';
+import { removeCardFromQueue, roundSummaryCounts, shouldDeferCard } from './review/cardFilter';
+import { findCardMedia, locateWordInLine, resolveContinueRecord, useReviewClip, type FoundCardMedia } from './review/useReviewClip';
 import { UndoToast } from './review/UndoToast';
-import { Dictation, GradeBar, WordFace } from './ReviewFaces';
+import { Dictation, GradeBar, SilentLineFace, WordFace } from './ReviewFaces';
 import { Header, btnPlain, btnPrimary } from './ui';
 
 type Held = Removed & { release: () => void };
 type UndoState = { id: string; n: number; gone?: Promise<Held | null> };
 
-export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void }> = ({ onBack, onOpenLibrary }) => {
+export const Review: React.FC<{
+  onBack?: () => void;
+  onOpenLibrary?: () => void;
+  onOpenRecord?: (id: string) => void;
+}> = ({ onBack, onOpenLibrary, onOpenRecord }) => {
   const t = useT();
   usePracticeClock();
   const [queue, setQueue] = useState<ReviewCard[] | null | 'error'>(null);
   const [langs, setLangs] = useState<Map<string, DeckLang>>(() => new Map());
+  const [continueRec, setContinueRec] = useState<VideoRecord | null>(null);
   const [totalDue, setTotalDue] = useState<number>(0);
   const [round, setRound] = useState(0);
   const [idx, setIdx] = useState(0);
@@ -61,6 +67,8 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
   const front = useMemo(getWordFront, []);
   const masteredBtn = useMemo(getMasteredBtn, []);
   const repeats = useRef(new Set<string>());
+  const graded = useRef(new Set<string>());
+  const mastered = useRef(new Set<string>());
   const removed = useRef(new Set<string>());
   const undone = useRef(new Set<Promise<Held | null>>());
   const writes = useRef<Promise<unknown>[]>([]);
@@ -74,9 +82,11 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
       if (!alive) return;
       const counts = deckCounts(all);
       setTotalDue(counts.line.due + counts.word.due);
-      setLangs(cardLangs(all, recs));
+      const langOf = cardLangs(all, recs);
+      setLangs(langOf);
+      void resolveContinueRecord(recs).then(r => { if (alive) setContinueRec(r); }, () => {});
       const q = [...dueQueue(all, 'line'), ...dueQueue(all, 'word')];
-      if (q.some(c => c.deck === 'line' && hasKana(c.text))) await loadJa();
+      if (q.some(c => c.deck === 'line' && (hasKana(c.text) || langOf.get(c.id) === 'ja'))) await loadJa();
       if (alive) setQueue(q);
     }, e => { console.error(e); if (alive) setQueue('error'); });
 
@@ -158,7 +168,8 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
   };
 
   const canSpeakWord = !!card?.word && (CAN_SPEAK_WORD || !!src);
-  const grading = !!card && !!here && (isWord ? turned : missing || suggest !== undefined);
+  const silentFace = !isWord && missing && suggest === undefined;
+  const grading = !!card && !!here && (isWord || silentFace ? turned : suggest !== undefined);
   useEffect(() => { if (grading) setAt(Date.now()); }, [grading, card]);
   const due = useMemo(() => {
     try { return card && at ? previewDue(card, at) : null; }
@@ -198,6 +209,7 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
 
   const grade = (g: Grade) => {
     if (!card || !at) return;
+    graded.current.add(card.id);
     writes.current.push(recordOutcome(card, g, at).catch(console.error));
     if (!isWord && !repeats.current.has(card.id)) countLine();
     if (g === Rating.Again) {
@@ -213,6 +225,7 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
   // "Got it" (docs/review.md): mark mastered, skip grading, show 6s undo bar.
   const master = () => {
     if (!card) return;
+    mastered.current.add(card.id);
     writes.current.push(setMastered(card.id, true).catch(console.error));
     if (!repeats.current.has(card.id)) countLine();
     setUndo(u => ({ id: card.id, n: (u?.n ?? 0) + 1 }));
@@ -247,6 +260,8 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
     if (cur.gone) {
       undone.current.add(cur.gone);
       removed.current.delete(cur.id);
+    } else {
+      mastered.current.delete(cur.id);
     }
     setRestored(n => n + 1);
     setUndo(null);
@@ -281,6 +296,8 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
     if (!more?.length) return;
     writes.current = [];
     repeats.current.clear();
+    graded.current.clear();
+    mastered.current.clear();
     removed.current.clear();
     setQueue(more);
     setMore(null);
@@ -294,7 +311,8 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
 
   const canMaster = masteredBtn && !isWord;
   const title = card ? t(isWord ? 'm.reviewWords' : 'm.reviewLines') : t('m.reviewTitle');
-  const doneCount = finishedCardCount(list, removed.current);
+  const completedIds = new Set([...graded.current, ...mastered.current]);
+  const summary = roundSummaryCounts(list, completedIds, removed.current);
 
   return (
     <div className={onBack ? 'fixed inset-0 bg-paper flex flex-col pt-[env(safe-area-inset-top)]' : 'flex-1 min-h-0 flex flex-col bg-paper'}>
@@ -372,11 +390,25 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
         {done && list.length > 0 && (
           <div className="pt-10 flex flex-col items-center gap-3 text-center">
             <h2 className="text-2xl font-semibold">{t('session.doneTitle')}</h2>
-            <p className="text-sm text-mute leading-relaxed">{t('session.doneBody', { n: doneCount })}</p>
+            <p className="text-sm text-mute leading-relaxed">
+              {summary.completed > 0 ? t('session.doneBody', { n: summary.completed }) : t('m.w1DoneZero')}
+            </p>
+            {summary.unfinished > 0 && (
+              <p className="text-sm text-mute">{t('m.w1DoneUnfinished', { n: summary.unfinished })}</p>
+            )}
             <div className="pt-3 flex flex-col gap-2.5 w-full max-w-xs">
               {!!more?.length && (
                 <button type="button" onClick={startAnotherRound} className={`${btnPrimary} w-full`}>
                   {t('session.doneMore', { n: more.length })}
+                </button>
+              )}
+              {continueRec && onOpenRecord && (
+                <button
+                  type="button"
+                  onClick={() => onOpenRecord(continueRec.id)}
+                  className={`${more?.length ? btnPlain : btnPrimary} w-full px-4 truncate`}
+                >
+                  {t('m.w1ContinueStudy', { name: continueRec.displayName })}
                 </button>
               )}
               {onOpenLibrary && (
@@ -395,7 +427,7 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
                 <span className="text-[13px] text-mute truncate">{card.videoName}</span>
               </div>
             )}
-            {missing && <p className="text-[13px] text-mute">{t('m.reviewNoAudio')}</p>}
+            {missing && isWord && <p className="text-[13px] text-mute">{t('m.reviewNoAudio')}</p>}
             {isWord ? (
               <WordFace
                 card={card}
@@ -406,22 +438,20 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
                 onSpeakWord={canSpeakWord ? () => { void speakWord(); } : null}
                 speaking={speaking}
               />
-            ) : missing ? (
-              <>
-                <p className="font-serif text-[20px] leading-relaxed">{card.text}</p>
-                {here.trans && <p className="text-sm text-mute">{here.trans}</p>}
-              </>
+            ) : silentFace ? (
+              <SilentLineFace card={card} trans={here.trans} turned={turned} onTurn={() => setTurned(true)} />
             ) : (
               <Dictation
                 key={`${round}-${idx}-${card.id}`}
                 card={card}
                 trans={here.trans}
+                lang={cardDictLang ?? undefined}
                 onChecked={c => { setWrong(c.wrong); setSuggest(gradeOf({ correct: c.correct, helped: false })); }}
               />
             )}
           </div>
         )}
-        {grading && !isWord && !missing && (
+        {grading && !isWord && !silentFace && (
           <p className="text-[13px] text-mute text-center">
             {suggest === Rating.Again ? t('m.wrongN', { n: wrong }) : t('m.allRight')}
           </p>
@@ -433,7 +463,7 @@ export const Review: React.FC<{ onBack?: () => void; onOpenLibrary?: () => void 
           <GradeBar
             due={due}
             now={at}
-            suggest={isWord || missing ? undefined : suggest}
+            suggest={isWord || silentFace ? undefined : suggest}
             onGrade={grade}
             canMaster={canMaster}
             onMaster={master}

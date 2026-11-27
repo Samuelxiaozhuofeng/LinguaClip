@@ -1,31 +1,34 @@
-// The phone's home (design Main.dc.html & Android M1.2/M1.3/M1.5): install tip or Android
-// battery-whitelist hint, "continue" card, the practiced list with each import's stage/chunk
-// progress & cancel (or "audio not on this phone" + repick), the ready-made episodes, and
-// the two ways to add audio (PWA file input or Android native media/video picker + ImportSheet).
+// The phone's home (design Main.dc.html & Android M1.2/M1.3/M1.5 & 手机学习闭环):
+// onboarding starter-first layout on empty library, battery-whitelist hint gated on first practice,
+// Today panel + Week card, practiced records (HomeRecordRow), and key-preserving local import resume.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { VideoRecord } from '../types';
 import { useT } from '../utils/i18n';
+import { androidCloudArgs } from '../utils/transcribeConfig';
 import { patchVideoRecord, updateVideoWith } from '../utils/videoStorage';
-import { cancelImport, deleteRecord, importFile, retryImport } from './importAudio';
-import { MAX_BYTES, NO_MEDIA } from './transcribe';
+import { importFile, retryImport } from './importAudio';
+import { groqKey } from './transcribe';
 import { Starter } from './Starter';
-import { audioIds, putAudio } from './store';
+import { audioIds } from './store';
 import { blobId } from './backup';
-import { ImportSheet, type ImportSheetConfirm } from './ImportSheet';
+import { hasEverPracticed, isWebAudioMissing } from './homeHelpers';
+import { HomeRecordRow, type PendingRepickTrack } from './HomeRecordRow';
+import { ImportSheet, TrackPickSheet, type ImportSheetConfirm } from './ImportSheet';
+import { clearPendingImport, getPendingImport, savePendingAndroidImport, setPendingImportStore } from './pendingImportStore';
 import { callAndroid, isAndroidNative, type ProbeTracksResult } from './platform/androidBridge';
 import {
   HOME_PLATFORM,
   clearAndroidJobTmp,
+  extractAndroidRecordAudio,
   pickAndroidMedia,
   pickAndroidSrt,
-  repickAndroidRecordAudio,
   startAndroidImport,
 } from './platform/homePlatform';
-import { confirmPodcastDownloadNetwork } from './opml';
-import { getPhoneLastWay, subscribeWays, WAY_LABEL_KEY } from './phoneWays';
+import { subscribeWays } from './phoneWays';
+import { consumeRestoreResult } from './restore';
 import { sanitizeShareText } from './shareHelper';
 import { TodayPanel, WeekCard } from './TodayPanel';
-import { btnPlain, errText, heardPct, sheet, sourceOf } from './ui';
+import { btnSmall, btnSoft, errText, sheet } from './ui';
 
 const HINT_KEY = 'linguaclip_install_hint_closed';
 const BATTERY_DISMISS_KEY = 'linguaclip_android_battery_dismissed';
@@ -34,26 +37,6 @@ const ios = () => /iPhone|iPad|iPod/.test(navigator.userAgent);
 
 function isAndroidLocalPath(path?: string): path is string {
   return !!path && !/^https?:\/\//i.test(path) && !path.startsWith('blob:') && !path.startsWith('content://');
-}
-
-function jobStageText(job: NonNullable<VideoRecord['importJob']>, t: ReturnType<typeof useT>): string {
-  if (job.stage === 'queued') return t('m.stageQueued');
-  if (job.stage === 'download') {
-    if (typeof job.percent === 'number') return t('m.stageDownload', { pct: job.percent });
-    const mb = typeof job.downloadBytes === 'number' && job.downloadBytes > 0
-      ? (job.downloadBytes / 1048576).toFixed(1)
-      : '0.0';
-    return t('m.stageDownloadBytes', { mb });
-  }
-  if (job.stage === 'extract') return t('m.stageExtract');
-  if (job.stage === 'cloud') {
-    if (job.pieceTotal && job.pieceTotal > 0) {
-      return t('m.stageChunk', { done: job.pieceDone ?? 0, total: job.pieceTotal });
-    }
-    return t('m.transcribing');
-  }
-  if (job.stage === 'segment') return t('m.segmenting');
-  return t('m.transcribing');
 }
 
 function InstallHint() {
@@ -73,7 +56,7 @@ function BatteryHint({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [shown, setShown] = useState(false);
 
   const check = useCallback(() => {
-    if (!isAndroidNative()) return;
+    if (!isAndroidNative() || !hasEverPracticed()) { setShown(false); return; }
     try {
       if (localStorage.getItem(BATTERY_DISMISS_KEY)) { setShown(false); return; }
     } catch { /* ignore */ }
@@ -103,7 +86,7 @@ function BatteryHint({ onOpenSettings }: { onOpenSettings: () => void }) {
       <span className="flex-1">{t('m.batteryBanner')}</span>
       <button
         type="button"
-        className="min-h-[36px] px-2.5 rounded-lg bg-ink text-white text-xs font-medium shrink-0"
+        className="min-h-[36px] px-2.5 rounded-lg bg-ink text-white text-[13px] font-medium shrink-0"
         onClick={onOpenSettings}
       >
         {t('m.batteryGo')}
@@ -120,152 +103,12 @@ function BatteryHint({ onOpenSettings }: { onOpenSettings: () => void }) {
   );
 }
 
-// A finished or stopped record whose phone audio isn't stored here (restored from a backup):
-// its blob id. An import still running has its file (`have` may just not be reloaded yet).
-const missingId = (r: VideoRecord, have: Set<string> | null) => {
-  const id = blobId(r.videoPath ?? r.importJob?.source);
-  return have && id && !have.has(id) && (!r.importJob || r.importJob.error) ? id : null;
-};
-
-function Row({
-  r,
-  missing,
-  androidMissing,
-  android,
-  onOpen,
-  onFixed,
-}: {
-  r: VideoRecord;
-  missing: string | null;
-  androidMissing: boolean;
-  android: boolean;
-  onOpen: (id: string) => void;
-  onFixed: () => void;
-}) {
-  const t = useT();
-  const job = r.importJob;
-  const input = useRef<HTMLInputElement>(null);
-  const [err, setErr] = useState('');
-  const [repicking, setRepicking] = useState(false);
-
-  const remove = () => {
-    if (confirm(t('m.confirmDelete', { name: r.displayName }))) deleteRecord(r.id).catch(console.error);
-  };
-
-  // PWA: stored under the blob id the record already points at; transcript stays, unfinished import retries.
-  const repickWeb = (f: File) => {
-    if (!missing) return;
-    if (job && f.size > MAX_BYTES) { setErr(errText('file:toolarge')); return; }
-    setErr('');
-    putAudio(missing, { blob: f, name: f.name, type: f.type }).then(() => {
-      onFixed();
-      if (job) retryImport(r.id).catch(console.error);
-    }, (e: unknown) => setErr(t('m.errSave', { msg: e instanceof Error ? e.message : String(e) })));
-  };
-
-  // Android: extract newly picked file into private mediaDir, update path, and resume unfinished job if any.
-  const repickAndroid = async () => {
-    if (repicking) return;
-    setErr('');
-    setRepicking(true);
-    try {
-      const newPath = await repickAndroidRecordAudio(r.id);
-      if (!newPath) return;
-      if (job) {
-        await clearAndroidJobTmp(r.id).catch(console.error);
-        await updateVideoWith(r.id, cur => (
-          cur.importJob
-            ? { ...cur, importJob: { ...cur.importJob, extractedPath: newPath, source: newPath, error: undefined } }
-            : null
-        ));
-        onFixed();
-        retryImport(r.id).catch(console.error);
-      } else {
-        await patchVideoRecord(r.id, { videoPath: newPath });
-        onFixed();
-      }
-    } catch (e: unknown) {
-      const code = e instanceof Error ? e.message : String(e);
-      setErr(errText(code));
-    } finally {
-      setRepicking(false);
-    }
-  };
-
-  const needsReimport = android && job?.error === 'audio:reimport';
-  // On Android native, blob:<id> paths restored from a PWA .json backup cannot be played by Media3;
-  // route them through native repickAndroid into private media/ instead of PWA IndexedDB blob storage.
-  const effectiveAndroidMissing = android && (androidMissing || !!blobId(r.videoPath ?? r.importJob?.source));
-  const isMissing = !!missing || effectiveAndroidMissing;
-  const inProgress = !!job && !job.error;
-  const canRetry = !!job?.error && !isMissing && !needsReimport && job.error !== NO_MEDIA && job.error !== 'podcast:format';
-
-  const handleRetry = async () => {
-    if (android && job && /^https?:\/\//i.test(job.source) && !job.extractedPath) {
-      if (!(await confirmPodcastDownloadNetwork())) return;
-    }
-    retryImport(r.id).catch(console.error);
-  };
-
-  const state = err || (isMissing ? t('m.audioGone')
-    : job ? job.error ? t('m.failed', { why: errText(job.error) }) : jobStageText(job, t)
-    : t('m.doneRate', { n: heardPct(r) }));
-  const lastWay = !job && !isMissing ? getPhoneLastWay(r.id) : null;
-
-  return (
-    <li data-id={r.id} className="flex items-center border-b border-shade last:border-0">
-      <button disabled={!!job || isMissing} onClick={() => onOpen(r.id)} className="flex-1 min-w-0 min-h-[56px] pl-4 py-3 text-left flex flex-col gap-1">
-        <span className="text-[15px] truncate">{r.displayName}</span>
-        <span className="flex items-center gap-1.5 flex-wrap">
-          {lastWay && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-shade text-mute shrink-0">
-              {t('m.lastWayTag', { way: t(WAY_LABEL_KEY[lastWay]) })}
-            </span>
-          )}
-          <span className={`text-xs ${job?.error || isMissing || err ? 'text-accent' : 'text-mute'}`}>{sourceOf(r)} · {state}</span>
-        </span>
-      </button>
-      {inProgress && (
-        <button
-          type="button"
-          className="min-h-[44px] px-3 text-xs text-mute font-medium shrink-0"
-          onClick={() => cancelImport(r.id)}
-        >
-          {t('m.cancel')}
-        </button>
-      )}
-      {canRetry && (
-        <button
-          type="button"
-          className="min-h-[44px] px-3 text-sm text-accent font-medium shrink-0"
-          onClick={() => { void handleRetry(); }}
-        >
-          {t('m.retry')}
-        </button>
-      )}
-      {(effectiveAndroidMissing || needsReimport) && (
-        <button
-          type="button"
-          disabled={repicking}
-          className="min-h-[44px] px-3 text-sm text-accent font-medium shrink-0 disabled:opacity-50"
-          onClick={() => { void repickAndroid(); }}
-        >
-          {t('m.repick')}
-        </button>
-      )}
-      {!effectiveAndroidMissing && !needsReimport && missing && <>
-        <button
-          type="button"
-          className="min-h-[44px] px-3 text-sm text-accent font-medium shrink-0"
-          onClick={() => input.current?.click()}
-        >
-          {t('m.repick')}
-        </button>
-        <input ref={input} type="file" accept="audio/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) repickWeb(f); }} />
-      </>}
-      <button aria-label={t('m.more')} className="w-11 h-11 mr-1 text-mute shrink-0" onClick={remove}>…</button>
-    </li>
-  );
+interface PendingImportState {
+  uri: string;
+  probe: ProbeTracksResult;
+  initialLang?: string;
+  initialTrackIndex?: number;
+  initialSrt?: { name: string; text: string; count: number };
 }
 
 export const Home: React.FC<{
@@ -283,13 +126,64 @@ export const Home: React.FC<{
   const android = HOME_PLATFORM === 'android' || isAndroidNative();
   const input = useRef<HTMLInputElement>(null);
   const [note, setNote] = useState('');
-  const [have, setHave] = useState<Set<string> | null>(null); // PWA audio stored here; null = unknown, nothing flagged
+  const [restoreBanner, setRestoreBanner] = useState('');
+  const [have, setHave] = useState<Set<string> | null>(null);
   const [missingAndroid, setMissingAndroid] = useState<Set<string>>(() => new Set());
   const [checkTick, setCheckTick] = useState(0);
-  const [pendingImport, setPendingImport] = useState<{ uri: string; probe: ProbeTracksResult } | null>(null);
+  const [pendingImport, setPendingImport] = useState<PendingImportState | null>(null);
+  const [pendingWebFile, setPendingWebFile] = useState<{ file: File; lang: string } | null>(null);
+  const [repickTrack, setRepickTrack] = useState<PendingRepickTrack | null>(null);
   const [, bumpWays] = useState(0);
 
   useEffect(() => subscribeWays(() => bumpWays(n => n + 1)), []);
+
+  useEffect(() => {
+    const res = consumeRestoreResult();
+    if (res) {
+      setRestoreBanner(t(res.kind === 'undo' ? 'm.fxBkSwapped' : 'm.w3BkRestored', { videos: res.videos, cards: res.cards }));
+    }
+  }, [t]);
+
+  // Resume a local import saved before jumping to Settings for a missing transcription key.
+  useEffect(() => {
+    const saved = getPendingImport();
+    if (!saved?.waitingForKey) return;
+    const hasKeyNow = android ? !!androidCloudArgs() : !!groqKey();
+    if (saved.kind === 'android') {
+      clearPendingImport();
+      if (hasKeyNow) {
+        void startAndroidImport({
+          uri: saved.uri,
+          displayName: sanitizeShareText(saved.probe.displayName) || 'Audio',
+          trackIndex: saved.trackIndex,
+          lang: saved.lang,
+          ...(saved.srt ? { srtText: saved.srt.text, srtName: saved.srt.name } : {}),
+        }).then(onChanged, (e: unknown) => {
+          setNote(errText(e instanceof Error ? e.message : String(e)));
+        });
+      } else {
+        setPendingImport({
+          uri: saved.uri,
+          probe: saved.probe,
+          initialLang: saved.lang,
+          initialTrackIndex: saved.trackIndex,
+          initialSrt: saved.srt,
+        });
+      }
+      return;
+    }
+    if (hasKeyNow) {
+      clearPendingImport();
+      setPendingWebFile(null);
+      importFile(saved.file, saved.lang).then(onChanged, (e: unknown) => {
+        const code = e instanceof Error ? e.message : String(e);
+        setNote(code === 'file:toolarge' ? errText(code) : t('m.errSave', { msg: code }));
+      });
+    } else {
+      clearPendingImport();
+      setPendingWebFile({ file: saved.file, lang: saved.lang });
+    }
+  }, [android, onChanged, t]);
 
   const loadAudio = useCallback(() => {
     audioIds().then(ids => setHave(new Set(ids)), console.error);
@@ -319,8 +213,7 @@ export const Home: React.FC<{
       }
     })).then(results => {
       if (cancelled) return;
-      const next = new Set(results.filter((id): id is string => !!id));
-      setMissingAndroid(next);
+      setMissingAndroid(new Set(results.filter((id): id is string => !!id)));
     });
     return () => { cancelled = true; };
   }, [records, checkTick]);
@@ -330,14 +223,25 @@ export const Home: React.FC<{
     onChanged();
   }, [loadAudio, onChanged]);
 
-  const last = records.find(r => !r.importJob && r.videoPath && !missingId(r, have) && !missingAndroid.has(r.id) && !(android && blobId(r.videoPath)));
+  const isRowMissing = (r: VideoRecord) => (
+    android
+      ? (missingAndroid.has(r.id) || !!blobId(r.videoPath ?? r.importJob?.source) || (!r.importJob && !r.videoPath))
+      : isWebAudioMissing(r, have)
+  );
+  const last = records.find(r => !r.importJob && !isRowMissing(r))
+    ?? records.find(r => !r.importJob && !!r.subtitleText?.trim());
 
-  const pickWeb = (f: File) => {
+  const pickWeb = (f: File, lang = 'auto') => {
     setNote('');
-    importFile(f, 'auto').then(onChanged, (e: unknown) => {
+    setPendingWebFile(null);
+    importFile(f, lang).then(onChanged, (e: unknown) => {
       const code = e instanceof Error ? e.message : String(e);
-      if (code === 'cloud:nokey') onNeedKey();
-      else setNote(code === 'file:toolarge' ? errText(code) : t('m.errSave', { msg: code }));
+      if (code === 'cloud:nokey') {
+        setPendingImportStore({ kind: 'web', file: f, lang, waitingForKey: true });
+        onNeedKey();
+      } else {
+        setNote(code === 'file:toolarge' ? errText(code) : t('m.errSave', { msg: code }));
+      }
     });
   };
 
@@ -349,8 +253,7 @@ export const Home: React.FC<{
       const safeName = sanitizeShareText(picked.probe.displayName) || picked.probe.displayName;
       setPendingImport({ uri: picked.uri, probe: { ...picked.probe, displayName: safeName } });
     } catch (e: unknown) {
-      const code = e instanceof Error ? e.message : String(e);
-      setNote(errText(code));
+      setNote(errText(e instanceof Error ? e.message : String(e)));
     }
   };
 
@@ -358,19 +261,47 @@ export const Home: React.FC<{
     setNote('');
     try {
       await startAndroidImport({ ...opts, displayName: sanitizeShareText(opts.displayName) || 'Audio' });
+      clearPendingImport();
       setPendingImport(null);
       onChanged();
     } catch (e: unknown) {
       const code = e instanceof Error ? e.message : String(e);
-      setPendingImport(null);
-      if (code === 'cloud:nokey') {
-        onNeedKey();
-      } else if (code === 'cloud:missing-url') {
-        setNote(errText(code));
+      if (code === 'cloud:nokey' || code === 'cloud:missing-url') {
+        if (pendingImport) {
+          savePendingAndroidImport(pendingImport.uri, pendingImport.probe, opts);
+        }
+        setPendingImport(null);
+        if (code === 'cloud:missing-url') setNote(errText(code));
         onNeedKey();
       } else {
+        setPendingImport(null);
         setNote(errText(code));
       }
+    }
+  };
+
+  const finishRepickTrack = async (trackIndex: number) => {
+    const req = repickTrack;
+    if (!req) return;
+    setRepickTrack(null);
+    setNote('');
+    try {
+      const newPath = await extractAndroidRecordAudio(req.record.id, req.uri, req.probe.displayName, trackIndex);
+      if (req.record.importJob) {
+        await clearAndroidJobTmp(req.record.id).catch(console.error);
+        await updateVideoWith(req.record.id, cur => (
+          cur.importJob
+            ? { ...cur, importJob: { ...cur.importJob, extractedPath: newPath, source: newPath, error: undefined } }
+            : null
+        ));
+        handleRowFixed();
+        retryImport(req.record.id).catch(console.error);
+      } else {
+        await patchVideoRecord(req.record.id, { videoPath: newPath });
+        handleRowFixed();
+      }
+    } catch (e: unknown) {
+      setNote(errText(e instanceof Error ? e.message : String(e)));
     }
   };
 
@@ -385,20 +316,38 @@ export const Home: React.FC<{
       <InstallHint />
       <BatteryHint onOpenSettings={onOpenSettings} />
       <div className="flex-1 px-5 flex flex-col gap-4 pb-6">
-        <TodayPanel due={due} last={last} onReview={onReview} onOpen={onOpen} onPodcast={onPodcast} />
-        <WeekCard remembered={remembered} />
+        {restoreBanner && (
+          <div role="status" data-testid="restore-result-banner" className={`${sheet} shadow-card px-4 py-3 flex items-center gap-2 text-[13px] text-ink`}>
+            <span className="flex-1">{restoreBanner}</span>
+            <button type="button" aria-label={t('m.close')} className="w-9 h-9 shrink-0 flex items-center justify-center text-lg text-mute" onClick={() => setRestoreBanner('')}>×</button>
+          </div>
+        )}
+
+        {pendingWebFile && (
+          <div className={`${sheet} shadow-card px-4 py-3 flex items-center gap-2 text-[13px]`}>
+            <span className="flex-1 text-mute truncate">{t('m.w3ResumePending', { name: pendingWebFile.file.name })}</span>
+            <button type="button" className={btnSmall} onClick={() => pickWeb(pendingWebFile.file, pendingWebFile.lang)}>
+              {t('m.w3ContinueImport')}
+            </button>
+            <button type="button" aria-label={t('m.close')} className="w-9 h-9 shrink-0 flex items-center justify-center text-lg text-mute" onClick={() => setPendingWebFile(null)}>×</button>
+          </div>
+        )}
 
         {note && <p role="alert" className="text-[13px] text-accent">{note}</p>}
 
         {records.length === 0 ? (
           <>
-            <button type="button" className={`${btnPlain} w-full`} onClick={openPicker}>
-              {t(android ? 'm.pickMedia' : 'm.pickFile')}
-            </button>
             {starter}
+            <TodayPanel due={due} last={last} emptyLibrary onReview={onReview} onOpen={onOpen} onPodcast={onPodcast} />
+            <WeekCard remembered={remembered} />
+            <button type="button" className={`${btnSoft} w-full`} onClick={openPicker}>
+              {t(android ? 'm.w3OrImportLocal' : 'm.w3OrImportAudio')}
+            </button>
           </>
         ) : (
           <>
+            <TodayPanel due={due} last={last} onReview={onReview} onOpen={onOpen} onPodcast={onPodcast} />
+            <WeekCard remembered={remembered} />
             <div className="flex items-center justify-between gap-2 mt-1">
               <p className="text-[13px] text-mute">{t('m.myMaterials')}</p>
               <button
@@ -411,14 +360,15 @@ export const Home: React.FC<{
             </div>
             <ul className={`${sheet} shadow-card flex flex-col`}>
               {records.map(r => (
-                <Row
+                <HomeRecordRow
                   key={r.id}
                   r={r}
-                  missing={missingId(r, have)}
+                  webMissing={isWebAudioMissing(r, have)}
                   androidMissing={missingAndroid.has(r.id)}
                   android={android}
                   onOpen={onOpen}
                   onFixed={handleRowFixed}
+                  onNeedTrackPick={setRepickTrack}
                 />
               ))}
             </ul>
@@ -434,9 +384,20 @@ export const Home: React.FC<{
           key={pendingImport.uri}
           uri={pendingImport.uri}
           probe={pendingImport.probe}
+          defaultLang={pendingImport.initialLang}
+          initialTrackIndex={pendingImport.initialTrackIndex}
+          initialSrt={pendingImport.initialSrt}
           onPickSrt={pickAndroidSrt}
-          onCancel={() => setPendingImport(null)}
+          onCancel={() => { clearPendingImport(); setPendingImport(null); }}
           onConfirm={opts => { void confirmAndroid(opts); }}
+        />
+      )}
+      {repickTrack && (
+        <TrackPickSheet
+          probe={repickTrack.probe}
+          preferredLang={repickTrack.record.lang}
+          onCancel={() => setRepickTrack(null)}
+          onConfirm={idx => { void finishRepickTrack(idx); }}
         />
       )}
     </>

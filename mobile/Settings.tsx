@@ -1,23 +1,26 @@
 // Phone settings (design Settings.dc.html): cloud transcription (Groq on PWA; Groq / Bailian /
-// custom OpenAI-compatible on Android), AI config, podcast Wi-Fi-only & online dictionary choices
-// (Android), export / restore backup (mobile/restore.ts), battery whitelist guide (Android), and UI language.
-import React, { useEffect, useRef, useState } from 'react';
+// custom OpenAI-compatible on Android), AI config, practice switches, podcast Wi-Fi-only &
+// dictionary choices, export / undoable restore (BackupSection), battery whitelist guide, and UI language.
+import React, { useEffect, useState } from 'react';
 import { CLOUD, androidCloudArgs, getTranscribeConfig, saveTranscribeConfig, type TranscribeConfig } from '../utils/transcribeConfig';
 import { getAIConfig, saveAIConfig } from '../utils/aiConfig';
 import { setLang, useLang, useT, type Lang } from '../utils/i18n';
 import type { AIConfig } from '../types';
-import { Header, btnSmall, btnSoft, sheet } from './ui';
+import { Header, btnPrimary, btnSmall, btnSoft, sheet } from './ui';
 import { callAndroid, isAndroidNative } from './platform/androidBridge';
 import { getPodcastWifiOnly, setPodcastWifiOnly } from './opml';
+import { groqKey } from './transcribe';
 import { PracticeSection } from './settings/PracticeSection';
 import { DictSection } from './settings/DictSection';
 import { ClipsSection } from './settings/ClipsSection';
 import { AnkiSection } from './settings/AnkiSection';
+import { SyncSection } from './settings/SyncSection';
+import { BackupSection } from './settings/BackupSection';
 import { SupporterSection } from './settings/SupporterSection';
-import { describe, discardAndroidStagedZip, exportBackup, pickAndReadAndroidBackup, readBackupFile, startRestore } from './restore';
 
 const field = 'h-11 rounded-[10px] border border-line px-3 text-[15px] w-full bg-page';
 const BATTERY_DISMISSED_KEY = 'linguaclip_android_battery_dismissed';
+const AI_KEYS_URL = 'https://platform.deepseek.com/api_keys';
 
 type AndroidProvider = 'cloud' | 'bailian' | 'custom';
 
@@ -33,10 +36,6 @@ export const Settings: React.FC<{ needKey: boolean; onBack?: () => void }> = ({ 
   const t = useT();
   const ui = useLang();
   const android = isAndroidNative();
-  const file = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState('');
-  const [includeKeys, setIncludeKeys] = useState(true);
 
   const [trCfg, setTrCfg] = useState<TranscribeConfig>(getTranscribeConfig);
   const [provider, setProvider] = useState<AndroidProvider>(() => resolveAndroidMode(getTranscribeConfig()));
@@ -83,49 +82,6 @@ export const Settings: React.FC<{ needKey: boolean; onBack?: () => void }> = ({ 
     setAi(prev => ({ ...prev, [k]: v }));
   };
 
-  const doExport = () => {
-    setBusy(true);
-    setNote('');
-    exportBackup(android ? { includeKeys } : undefined)
-      .then(n => { if (n) setNote(t('m.bkExported', n)); }, e => { console.error(e); setNote(t('m.bkExportFail', { why: describe(e) })); })
-      .finally(() => setBusy(false));
-  };
-
-  const doRestore = async (f: File) => {
-    setBusy(true);
-    setNote('');
-    try {
-      const b = await readBackupFile(f);
-      if (!confirm(t('m.bkConfirm', { videos: b.videos.length, cards: b.review.cards.length }))) return;
-      await startRestore(b); // reloads
-    } catch (e) {
-      console.error(e);
-      setNote(t('m.bkCant', { why: describe(e) }));
-    } finally { setBusy(false); }
-  };
-
-  const doPickRestore = async () => {
-    if (!android) { file.current?.click(); return; }
-    setBusy(true);
-    setNote('');
-    let stagedZip = false;
-    try {
-      const picked = await pickAndReadAndroidBackup();
-      if (!picked) return;
-      const { backup: b, zip, cross } = picked;
-      stagedZip = !!zip;
-      if (!confirm(t('m.bkConfirm', { videos: b.videos.length, cards: b.review.cards.length }))) {
-        if (stagedZip) await discardAndroidStagedZip().catch(console.error);
-        return;
-      }
-      await startRestore(b, { zip, cross }); // reloads
-    } catch (e) {
-      if (stagedZip) await discardAndroidStagedZip().catch(console.error);
-      console.error(e);
-      setNote(t('m.bkCant', { why: describe(e) }));
-    } finally { setBusy(false); }
-  };
-
   const row = (k: 'baseUrl' | 'apiKey' | 'model', label: string, type = 'text') => (
     <label className="px-4 py-3 flex flex-col gap-1.5 border-b border-shade last:border-0">
       <span className="text-[15px]">{label}</span>
@@ -140,13 +96,33 @@ export const Settings: React.FC<{ needKey: boolean; onBack?: () => void }> = ({ 
     { mode: 'custom', label: t('m.providerCustom') },
   ];
 
+  const needKeyText = !android || provider === 'cloud'
+    ? t('m.w3NeedKeyProvider', { provider: 'Groq' })
+    : provider === 'bailian'
+      ? t('m.w3NeedKeyProvider', { provider: t('transcribe.bailian') })
+      : t('m.w3NeedKeyCustom');
+  const hasKeyNow = android ? !!androidCloudArgs(trCfg) : !!groqKey();
+
   return (
     <>
       {onBack ? <Header title={t('m.settings')} onBack={onBack} /> : <h1 className="pt-4 px-5 pb-2 text-[17px] font-semibold">{t('m.settings')}</h1>}
       <div className="px-5 pt-2 pb-10 flex flex-col gap-5">
+        <p data-testid="settings-no-key-tip" className={`${sheet} px-4 py-3 text-[13px] text-mute leading-relaxed shadow-card`}>
+          {t('m.w3SettingsNoKeyBanner')}
+        </p>
+
         <section className="flex flex-col gap-2">
           <p className="text-[13px] text-mute">{t(android ? 'm.transcribeTitle' : 'm.groqTitle')}</p>
-          {needKey && <p role="alert" className="text-[13px] text-accent px-1">{t('m.needKey')}</p>}
+          {needKey && (
+            <div className="flex flex-col gap-2">
+              <p role="alert" className="text-[13px] text-accent px-1">{needKeyText}</p>
+              {hasKeyNow && onBack && (
+                <button type="button" className={`${btnPrimary} w-full`} onClick={onBack}>
+                  {t('m.w3BackContinue')}
+                </button>
+              )}
+            </div>
+          )}
           {android && (
             <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t('m.transcribeTitle')}>
               {providers.map(p => (
@@ -164,7 +140,7 @@ export const Settings: React.FC<{ needKey: boolean; onBack?: () => void }> = ({ 
               <input id="groq" type="password" className={field} placeholder={CLOUD.cloud.placeholder} value={trCfg.groqKey}
                 autoCapitalize="off" autoCorrect="off" spellCheck={false}
                 onChange={e => patchTr({ groqKey: e.target.value })} />
-              <p className="text-xs text-mute">
+              <p className="text-[13px] text-mute">
                 {t('m.groqHelp')}{' '}
                 <a className="text-accent" href={CLOUD.cloud.keysUrl} target="_blank" rel="noreferrer">console.groq.com/keys</a>
               </p>
@@ -176,7 +152,7 @@ export const Settings: React.FC<{ needKey: boolean; onBack?: () => void }> = ({ 
               <input id="bailian" type="password" className={field} placeholder={CLOUD.bailian.placeholder} value={trCfg.bailianKey}
                 autoCapitalize="off" autoCorrect="off" spellCheck={false}
                 onChange={e => patchTr({ bailianKey: e.target.value })} />
-              <p className="text-xs text-mute">
+              <p className="text-[13px] text-mute">
                 {t('m.bailianHelp')}{' '}
                 <a className="text-accent break-all" href={CLOUD.bailian.keysUrl} target="_blank" rel="noreferrer">bailian.console.aliyun.com</a>
               </p>
@@ -202,7 +178,7 @@ export const Settings: React.FC<{ needKey: boolean; onBack?: () => void }> = ({ 
                   autoCapitalize="off" autoCorrect="off" spellCheck={false}
                   onChange={e => patchTr({ customModel: e.target.value })} />
               </label>
-              <p className="px-4 pb-3.5 text-xs text-mute">{t('m.customHelp')}</p>
+              <p className="px-4 pb-3.5 text-[13px] text-mute">{t('m.customHelp')}</p>
             </div>
           )}
         </section>
@@ -214,7 +190,11 @@ export const Settings: React.FC<{ needKey: boolean; onBack?: () => void }> = ({ 
             {row('apiKey', t('m.aiKey'), 'password')}
             {row('model', t('m.aiModel'))}
           </div>
-          <p className="text-xs text-mute px-1">{t('m.aiHelp')}</p>
+          <p className="text-[13px] text-mute px-1">{t('m.aiHelp')}</p>
+          <p className="text-[13px] text-mute px-1">
+            {t('m.w3AiRecommend')}{' '}
+            <a className="text-accent break-all" href={AI_KEYS_URL} target="_blank" rel="noreferrer">platform.deepseek.com/api_keys</a>
+          </p>
         </section>
 
         <PracticeSection />
@@ -224,7 +204,7 @@ export const Settings: React.FC<{ needKey: boolean; onBack?: () => void }> = ({ 
             <label className={`${sheet} px-4 py-3.5 flex items-center justify-between gap-3`}>
               <span className="flex flex-col gap-0.5">
                 <span className="text-[15px]">{t('m.wifiOnlyTitle')}</span>
-                <span className="text-xs text-mute">{t('m.wifiOnlyHelp')}</span>
+                <span className="text-[13px] text-mute">{t('m.wifiOnlyHelp')}</span>
               </span>
               <input type="checkbox" checked={wifiOnly} className="w-5 h-5 shrink-0 accent-accent"
                 onChange={e => { setWifiOnly(e.target.checked); setPodcastWifiOnly(e.target.checked); }} />
@@ -235,32 +215,8 @@ export const Settings: React.FC<{ needKey: boolean; onBack?: () => void }> = ({ 
         <DictSection />
         <ClipsSection />
         <AnkiSection />
-
-        <section className="flex flex-col gap-2">
-          <p className="text-[13px] text-mute">{t('m.dataTitle')}</p>
-          <div className={`${sheet} flex flex-col`}>
-            {android && (
-              <label className="px-4 py-3 flex items-start justify-between gap-3 border-b border-shade">
-                <span className="flex flex-col gap-0.5">
-                  <span className="text-[15px]">{t('m.bkIncludeKeys')}</span>
-                  <span className="text-xs text-mute">{t('m.bkIncludeKeysWarn')}</span>
-                </span>
-                <input type="checkbox" checked={includeKeys} className="w-5 h-5 mt-0.5 shrink-0 accent-accent"
-                  onChange={e => setIncludeKeys(e.target.checked)} />
-              </label>
-            )}
-            <button disabled={busy} onClick={doExport} className="h-[52px] px-4 text-left text-[15px] border-b border-shade disabled:opacity-50">
-              {t(android ? 'm.bkExportZip' : 'm.bkExport')}
-            </button>
-            <button disabled={busy} onClick={() => void doPickRestore()} className="min-h-[52px] px-4 py-2.5 text-left text-[15px] disabled:opacity-50">
-              {t(android ? 'm.bkRestoreAndroid' : 'm.bkRestore')}
-            </button>
-          </div>
-          {note && <p role="status" className="text-[13px] text-accent px-1 whitespace-pre-line">{note}</p>}
-          <p className="text-xs text-mute px-1">{t(android ? 'm.androidDataHelp' : 'm.dataHelp')}</p>
-          <input ref={file} type="file" accept=".json,application/json" className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void doRestore(f); }} />
-        </section>
+        <SyncSection />
+        <BackupSection />
 
         {android && (
           <section className="flex flex-col gap-2">
@@ -273,7 +229,7 @@ export const Settings: React.FC<{ needKey: boolean; onBack?: () => void }> = ({ 
                   {batteryIgnoring === false && (
                     <>
                       <p className="text-[14px] text-accent">{t('m.batteryWarn')}</p>
-                      <p className="text-xs text-mute leading-relaxed">{t('m.batterySteps')}</p>
+                      <p className="text-[13px] text-mute leading-relaxed">{t('m.batterySteps')}</p>
                     </>
                   )}
                   <div className="flex flex-wrap gap-2 pt-0.5">

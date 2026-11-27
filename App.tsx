@@ -8,7 +8,7 @@ import Studio from './components/Studio';
 import WatchPage from './components/WatchPage';
 import CustomPanel, { PanelChoice, nextPick, paceOf, resumeChoice } from './components/CustomPanel';
 import { Listen, PodcastPicker, ProHost, Reader, StarterHost, podcastRate } from '@pro';
-import type { ReadBy } from './utils/storage';
+import SyncHost from './components/SyncHost';
 import { DialogHost, dialog } from './components/Dialog';
 import { UpdateDialog } from './components/UpdateUI';
 import { checkUpdate } from './utils/update';
@@ -31,7 +31,7 @@ import { countLine } from './utils/today';
 import { deleteCards, keepOrphans, orphanCards } from './utils/review';
 import { startClips } from './utils/clips';
 import { CustomConfig, CustomPick } from './utils/customPick';
-import { setCustomPos, setLastWay } from './utils/storage';
+import { setCustomPos, setLastWay, type ReadBy } from './utils/storage';
 
 let orphansAsked = false; // StrictMode runs effects twice in dev
 async function askAboutOrphans() {
@@ -78,10 +78,7 @@ export default function App() {
         console.error(err);
       }
     })();
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
+    return () => { cancelled = true; unlisten?.(); };
   }, []);
 
   const [appState, setAppState] = useState<AppState>(AppState.UPLOAD);
@@ -493,6 +490,7 @@ export default function App() {
       {ProHost && <ProHost />}
       {StarterHost && <StarterHost here={appState === AppState.PODCASTS} onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)}
         onLand={() => setAppState(s => (s === AppState.UPLOAD ? AppState.PODCASTS : s))} />}
+      <SyncHost busy={appState === AppState.PRACTICE || appState === AppState.WATCH || appState === AppState.LISTEN || appState === AppState.READ} />
       <UpdateDialog />
       <DialogHost />
     </>

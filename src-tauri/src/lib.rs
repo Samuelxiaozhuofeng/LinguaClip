@@ -23,11 +23,17 @@ mod ja_dict;
 mod paths;
 mod podcast;
 mod repeat_fix;
+mod sync_packs;
+mod sync_webdav;
 mod tts;
 mod tts_gec;
 mod gpus;
 mod whisper_setup;
 mod word_order;
+mod yt_cookies;
+mod yt_tools;
+mod yt_update;
+mod youtube_window;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -114,8 +120,30 @@ pub fn run() {
       android_podcast_cmds::download_podcast_audio_stream,
       android_podcast_cmds::android_purge_files,
       android_podcast_cmds::android_sweep_orphans,
+      sync_webdav::sync_webdav_test,
+      sync_webdav::sync_webdav_list,
+      sync_webdav::sync_webdav_get_gz,
+      sync_webdav::sync_webdav_put_gz,
+      sync_webdav::sync_webdav_delete,
+      sync_packs::sync_upload_clip_pack,
+      sync_packs::sync_download_clip_pack,
+      sync_packs::sync_write_merge_pack,
+      sync_packs::sync_write_merge_json,
+      sync_packs::sync_read_merge_pack,
+      sync_packs::sync_unpack_merge_pack,
+      sync_packs::sync_rekey_files,
+      youtube_window::open_youtube_window,
+      youtube_window::youtube_pick_done,
+      yt_tools::youtube_tool_status,
+      yt_tools::install_youtube_tool,
       trash_file
     ])
+    .on_window_event(|window, event| {
+      // The YouTube window hands its picks to the main one, so it closes with it.
+      if window.label() == "main" && matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+        youtube_window::close_with_main(tauri::Manager::app_handle(window));
+      }
+    })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

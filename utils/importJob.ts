@@ -2,7 +2,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { VideoRecord } from '../types';
 import { dialog } from '../components/Dialog';
-import { fileNameFromPath, isAudioPath, needsConvert, pathExists, trashFile } from './desktop';
+import { fileNameFromPath, isAudioPath, needsConvert, onYouTubePick, pathExists, trashFile, youtubePickDone } from './desktop';
+import { IS_WINDOWS } from './platform';
+import { saveImportLang } from './importLangs';
+import { getYouTubeQuality } from './youtube';
 import { getLang, t } from './i18n';
 import { getAIConfig } from './aiConfig';
 import { canCloze } from './aiDrills';
@@ -20,7 +23,7 @@ import { getAllVideosFromDB } from './fileSystemAccess';
 
 type ImportProgressPayload = {
   id: string;
-  stage: 'queued' | 'setup' | 'download' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'retranscribe' | 'done' | 'error';
+  stage: 'queued' | 'setup' | 'download' | 'ytSetup' | 'convertSetup' | 'convert' | 'extract' | 'transcribe' | 'cloud' | 'retranscribe' | 'done' | 'error';
   percent?: number;
   error?: string;
   videoPath?: string;
@@ -62,6 +65,9 @@ export function isCookieError(raw: string): boolean {
   return /Sign in to confirm|needs to be reloaded|confirm you.re not a bot|not a bot/i.test(raw);
 }
 
+// Only the Mac can sign in (its own Chrome profile); Windows has no way yet (docs/youtube.md「登录」).
+export const canYouTubeLogin = (raw: string) => isCookieError(raw) && !IS_WINDOWS;
+
 export async function openYouTubeLogin(): Promise<void> {
   await invoke('open_youtube_login');
 }
@@ -70,12 +76,15 @@ export async function openYouTubeLogin(): Promise<void> {
 // language re-translates it. Pre-existing records already hold a translated
 // sentence; it matches nothing below and falls through unchanged.
 export function formatImportError(raw: string): string {
-  if (isCookieError(raw)) return t('import.needCookies');
+  if (isCookieError(raw)) return t(IS_WINDOWS ? 'import.needCookiesWindows' : 'import.needCookies');
   if (raw.startsWith('missing-model:')) {
     return t('import.missingModel', { name: raw.slice('missing-model:'.length) });
   }
   if (raw.startsWith('missing:')) {
     return t('import.missingTool', { name: raw.slice('missing:'.length) });
+  }
+  if (raw.startsWith('ytSetup:')) {
+    return t('import.failedYtSetup', { detail: raw.slice('ytSetup:'.length) });
   }
   if (raw.startsWith('convertSetup:')) {
     return t('import.failedConvertSetup', { detail: raw.slice('convertSetup:'.length) });
@@ -382,10 +391,22 @@ function enqueueProgress(payload: ImportProgressPayload): void {
   if (payload.stage !== 'done') applyChain = run;
 }
 
+// Also takes the YouTube window's picks: only this (main) window writes records.
 export async function startImportListener(): Promise<() => void> {
-  return listen<ImportProgressPayload>('import-progress', event => {
+  const offProgress = await listen<ImportProgressPayload>('import-progress', event => {
     enqueueProgress(event.payload);
   });
+  const offPick = await onYouTubePick(({ id, url, lang }) => {
+    const done = (ok: boolean) => youtubePickDone(id, ok).catch(err => console.error(err));
+    if (!isYouTubeUrl(url)) { done(false); return; }
+    saveImportLang(lang);
+    // Resolves once the card is saved; the import goes on in the background.
+    startUrlImport(url, lang, getYouTubeQuality()).then(
+      () => done(true),
+      err => { console.error('YouTube pick failed:', err); done(false); },
+    );
+  }).catch(err => { console.error(err); return () => {}; });
+  return () => { offProgress(); offPick(); };
 }
 
 export async function markInterruptedJobs(): Promise<void> {

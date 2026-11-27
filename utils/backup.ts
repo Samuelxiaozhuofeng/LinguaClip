@@ -5,15 +5,19 @@
  * ones go. Reading / writing happens in utils/backupData.ts and utils/restore.ts.
  */
 import type { ReviewCard } from './review';
+import { DAYS_DEV_KEY, SYNC_AUTH_KEY, SYNC_DEVICE_KEY, SYNC_STATE_KEY } from './syncConfig';
 
 export const FORMAT = 1;
 export const STAGED = 'restore-staged.zip';
 export const PENDING_KEY = 'linguaclip_restore_pending';
 export const LICENSE_KEY = 'linguaclip_pro_license';
-// Not only the keys: address, model, prompt, transcription choice. Only a hand-made backup carries them.
-export const SECRET_KEYS = ['linguaclip_ai_config', 'linguaclip_transcribe_config'];
+// Not only the keys: address, model, prompt, transcription choice, WebDAV auth. Only a hand-made backup carries them.
+export const SECRET_KEYS = ['linguaclip_ai_config', 'linguaclip_transcribe_config', SYNC_AUTH_KEY];
 // This computer's own state: never in a backup, never overwritten or removed by a restore.
-const LOCAL_ONLY = [LICENSE_KEY, 'linguaclip_anki_tpl', 'linguaclip_today', 'linguaclip_days', PENDING_KEY];
+const LOCAL_ONLY = [
+  LICENSE_KEY, 'linguaclip_anki_tpl', 'linguaclip_today', 'linguaclip_days', PENDING_KEY,
+  SYNC_DEVICE_KEY, SYNC_STATE_KEY, DAYS_DEV_KEY,
+];
 // Platform-specific keys: kept in same-platform backups, skipped during cross-platform migration
 // so desktop shortcuts and mobile hints never overwrite or wipe each other.
 export const DEVICE_ONLY = [
@@ -26,6 +30,8 @@ export const DEVICE_ONLY = [
   'linguaclip_phone_ways_off',
   'linguaclip_phone_last_way',
   'linguaclip_native_pos_ts',
+  'linguaclip_youtube_entry',
+  'linguaclip_youtube_quality',
 ];
 const EXTRA = ['import_lang', 'import_trash_original'];
 
@@ -110,7 +116,7 @@ const VIDEO: Record<string, Rule> = {
   currentSubtitleIndex: opt(num), currentSectionIndex: opt(num), totalSubtitles: opt(num), completionRate: opt(num),
   dateAdded: opt(num), lastPracticed: opt(num), totalPracticeTime: opt(num),
   learningMode: opt(str), blurPlaybackMode: opt(str), lang: opt(str),
-  podcast: opt(shape({ show: str, feed: str, guid: str, image: opt(str), name: str })),
+  podcast: opt(shape({ show: str, feed: str, guid: str, image: opt(str), name: str, audio: opt(str) })),
   importJob: opt(shape({
     stage: str, percent: opt(num), error: opt(str), source: str, lang: opt(str), quality: opt(num),
     convert: opt(bool), subs: opt(v => v === 'own' || num(v)), trashOriginal: opt(bool), converted: opt(str),

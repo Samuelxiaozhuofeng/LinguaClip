@@ -4,6 +4,29 @@
 // so flex containers already stay above the keyboard; when only visualViewport shrinks
 // (iOS Safari PWA or overlay keyboards), this returns the exact keyboard height in px.
 import { useEffect, useState } from 'react';
+import { pushBackClose } from '../backClose';
+
+/** Only intercept back for keyboard dismissal when the viewport inset actually shows a visible keyboard. */
+export function shouldRegisterKeyboardBackClose(kbInset: number): boolean {
+  return kbInset > 0;
+}
+
+/**
+ * Dismiss the soft keyboard on system back before closing any sheet (BreakdownSheet / WordSheet).
+ * Pass `sheetOpen` so parent effects re-register after child sheets mount, keeping keyboard
+ * dismissal at the top of the LIFO back-close stack. Only active while `kbInset > 0` so Android's
+ * IME-handled back key never leaves a stale focus-only handler behind.
+ */
+export function useKeyboardBackClose(kbInset: number, sheetOpen: boolean): void {
+  const kbVisible = shouldRegisterKeyboardBackClose(kbInset);
+  useEffect(() => {
+    if (!kbVisible) return;
+    return pushBackClose(() => {
+      const active = document.activeElement as HTMLElement | null;
+      if (active && typeof active.blur === 'function') active.blur();
+    });
+  }, [kbVisible, sheetOpen]);
+}
 
 export function computeKeyboardInset(
   innerHeight: number,

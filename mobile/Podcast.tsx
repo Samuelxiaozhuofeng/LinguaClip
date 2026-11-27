@@ -84,7 +84,7 @@ export const Podcast: React.FC<{ onBack: () => void; onShow: (s: ShowRef) => voi
                     <span className="text-[15px] truncate">{sub.title}</span>
                   </button>
                   <button
-                    className="min-h-[44px] px-3 text-xs text-mute shrink-0"
+                    className="min-h-[44px] px-3 text-[13px] text-mute shrink-0"
                     onClick={() => setSubs(removePodcastSub(sub.feed))}
                   >
                     {t('m.unsub')}
@@ -102,7 +102,7 @@ export const Podcast: React.FC<{ onBack: () => void; onShow: (s: ShowRef) => voi
             <li key={s.id} className="border-b border-shade last:border-0">
               <button onClick={() => onShow({ url: s.feed, pick: s })} className="w-full min-h-[56px] px-4 py-3 text-left flex flex-col gap-0.5">
                 <span className="text-[15px]">{s.name}</span>
-                <span className="text-xs text-mute">{[t(`podcast.level_${s.level}`), t(s.slow ? 'podcast.slow' : 'podcast.natural'), t(`podcast.style_${s.style}`), s.english && t('podcast.english')].filter(Boolean).join(' · ')}</span>
+                <span className="text-[13px] text-mute">{[t(`podcast.level_${s.level}`), t(s.slow ? 'podcast.slow' : 'podcast.natural'), t(`podcast.style_${s.style}`), s.english && t('podcast.english')].filter(Boolean).join(' · ')}</span>
               </button>
             </li>
           ))}

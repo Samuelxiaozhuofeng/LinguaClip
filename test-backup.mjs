@@ -20,13 +20,14 @@ const B = await import(out);
 
 // --- backupKeys: our settings by prefix + two import choices, never this computer's own state ---
 const keys = [
-  'linguaclip_practice_config', 'linguaclip_ai_config', 'linguaclip_transcribe_config', 'linguaclip_some_future_key',
+  'linguaclip_practice_config', 'linguaclip_ai_config', 'linguaclip_transcribe_config', 'linguaclip_sync_auth', 'linguaclip_some_future_key',
   'import_lang', 'import_trash_original',
   'linguaclip_pro_license', 'linguaclip_anki_tpl', 'linguaclip_today', 'linguaclip_days', 'linguaclip_restore_pending',
+  'linguaclip_sync_device', 'linguaclip_sync_state', 'linguaclip_days_dev',
   'other_app_key', 'lang',
 ];
 assert.deepEqual(B.backupKeys(keys), [
-  'linguaclip_practice_config', 'linguaclip_ai_config', 'linguaclip_transcribe_config', 'linguaclip_some_future_key',
+  'linguaclip_practice_config', 'linguaclip_ai_config', 'linguaclip_transcribe_config', 'linguaclip_sync_auth', 'linguaclip_some_future_key',
   'import_lang', 'import_trash_original',
 ]);
 
@@ -71,8 +72,8 @@ assert.equal(check(make({ videos: [video({ videoFileName: 'https://www.youtube.c
 assert.equal(check(make({ videos: [video({ subtitleFileName: '' })] })), null, 'no subtitle file name passes');
 assert.equal(check(make({ cards: [card(), wordCard(), B.newCard({ id: 'legacy|7', deck: 'line', videoId: '', videoName: '', text: 'Old', start: -1, end: -1 }, 'saved', 1)] })), null,
   'line, word and unmatched old-bookmark cards pass');
-assert.equal(check(make({ videos: [video({ id: 'podcast-episode-1', podcast: { show: 'S', feed: 'https://f', guid: 'g', name: 'ep' } })] })), null,
-  'a non-UUID id and a podcast episode pass');
+assert.equal(check(make({ videos: [video({ id: 'podcast-episode-1', podcast: { show: 'S', feed: 'https://f', guid: 'g', name: 'ep', audio: 'https://cdn.example/ep.mp3' } })] })), null,
+  'a non-UUID id and a podcast episode with audio URL pass');
 assert.equal(check(make({ videos: [video({ importJob: { stage: 'segment', percent: undefined, source: '/a.mkv', lang: 'en', quality: 1080, subs: 'own', trashOriginal: true, converted: '/a.mp4', convert: true } })] })), null,
   'every import field, set as the app sets them, passes');
 assert.deepEqual(check(make({ m: { format: 2 } })), { newer: true, why: 'format' }, 'format too new');
@@ -130,16 +131,26 @@ assert.equal(B.compareVersions('0.2', '0.2.0'), 0);
 assert.equal(B.compareVersions('1.0.0-beta', '1.0.0'), 0);
 assert.equal(B.compareVersions('0.1.9', '0.2.0'), -1);
 
-// --- restoring settings: AI / transcription settings already here are never touched ---
+// --- restoring settings: AI / transcription / sync auth settings already here are never touched ---
 {
-  const current = { linguaclip_ai_config: 'mine', linguaclip_lang: 'en', linguaclip_old: 'x', linguaclip_pro_license: 'L', linguaclip_today: 'T', linguaclip_days: 'D', other: 'o' };
-  const backup = { linguaclip_ai_config: 'theirs', linguaclip_transcribe_config: 'theirs-t', linguaclip_lang: 'zh', linguaclip_pro_license: 'evil' };
+  const current = {
+    linguaclip_ai_config: 'mine', linguaclip_sync_auth: 'my-dav', linguaclip_lang: 'en', linguaclip_old: 'x',
+    linguaclip_pro_license: 'L', linguaclip_today: 'T', linguaclip_days: 'D',
+    linguaclip_sync_device: 'dev-1', linguaclip_sync_state: '{"dirty":true}', linguaclip_days_dev: '{}', other: 'o',
+  };
+  const backup = {
+    linguaclip_ai_config: 'theirs', linguaclip_transcribe_config: 'theirs-t', linguaclip_sync_auth: 'their-dav',
+    linguaclip_lang: 'zh', linguaclip_pro_license: 'evil',
+    linguaclip_sync_device: 'dev-2', linguaclip_sync_state: '{"dirty":false}', linguaclip_days_dev: '{"2026-01-01":{}}',
+  };
   const plan = B.planLocalStorage(current, backup);
   assert.deepEqual(Object.fromEntries(plan.set), { linguaclip_transcribe_config: 'theirs-t', linguaclip_lang: 'zh' },
-    'local AI settings kept, missing transcription settings taken, license never written');
-  assert.deepEqual(plan.remove, ['linguaclip_old'], 'only in-range keys missing from the backup go; secrets / license / today stay');
-  // A computer with neither secret key takes both.
-  assert.deepEqual(B.planLocalStorage({}, backup).set.map(([k]) => k).sort(), ['linguaclip_ai_config', 'linguaclip_lang', 'linguaclip_transcribe_config']);
+    'local AI / sync auth settings kept, missing transcription settings taken, license and sync local state never written');
+  assert.deepEqual(plan.remove, ['linguaclip_old'], 'only in-range keys missing from the backup go; secrets / license / today / sync local state stay');
+  // A computer with no secret keys takes all three.
+  assert.deepEqual(B.planLocalStorage({}, backup).set.map(([k]) => k).sort(), ['linguaclip_ai_config', 'linguaclip_lang', 'linguaclip_sync_auth', 'linguaclip_transcribe_config']);
+  // Local sync_auth stays untouched even when backup omits it.
+  assert.deepEqual(B.planLocalStorage({ linguaclip_sync_auth: 'my-dav' }, { linguaclip_lang: 'zh' }).remove, []);
 }
 
 // --- empty / daily trigger ---

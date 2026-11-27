@@ -7,7 +7,7 @@ import type { Subtitle } from '../types';
 import * as AI from '../utils/ai';
 import { clean } from '../utils/cleanHtml';
 import { getDictSources, senseList, senseToAnki, type DictEntry, type DictLang, type Seg, type Sense } from '../utils/dictionary';
-import { addWord } from '../utils/review';
+import { addWord, addWordIfNew, type LineRef } from '../utils/review';
 import { lookupOnlineWord, stopWordAux, type LookupError } from './platform/wordPlatform';
 import { isPhraseText } from './reader/phrasePick';
 
@@ -19,7 +19,67 @@ export type Def = {
   picked?: number | null; pickNote?: string; pickCulture?: string;
   error: LookupError;
 };
-export type Keep = { definition: string; example: string; ai: string };
+export type Keep = { definition: string; example: string; ai: string; word?: string };
+
+/** Base/dictionary form for a Japanese word lookup when it differs from the tapped surface text. */
+export function jaBaseForm(def: Pick<Def, 'word' | 'lang' | 'phrase' | 'dict' | 'ai'>): string | null {
+  if (def.lang !== 'ja' || def.phrase) return null;
+  const candidate = def.dict?.[0]?.word?.trim() || def.ai?.word?.trim() || '';
+  if (!candidate || candidate === def.word.trim()) return null;
+  return candidate;
+}
+
+/** Word written as the card front: Japanese non-phrase cards store the dictionary base form; others stay unchanged. */
+export function cardWordOf(
+  def: Pick<Def, 'word' | 'lang' | 'phrase' | 'dict' | 'ai'>,
+  entry?: Pick<DictEntry, 'word'> | null,
+): string {
+  if (def.lang === 'ja' && !def.phrase) {
+    const base = entry?.word?.trim() || jaBaseForm(def);
+    if (base) return base;
+  }
+  return def.word;
+}
+
+/** True when a Keep payload carries no definition, example, or AI note. */
+export const isEmptyKeep = (k: Pick<Keep, 'definition' | 'example' | 'ai'>): boolean =>
+  !k.definition.trim() && !k.example.trim() && !k.ai.trim();
+
+/** Writes a word/phrase card: empty-meaning saves only create when absent so existing meanings stay intact. */
+export function saveWordCard(
+  ref: LineRef,
+  word: string,
+  k: Keep,
+  writers: { addWord: typeof addWord; addWordIfNew: typeof addWordIfNew } = { addWord, addWordIfNew },
+): Promise<void> {
+  if (isEmptyKeep(k)) return writers.addWordIfNew(ref, word, '');
+  return writers.addWord(ref, word, k.definition, k.example, k.ai);
+}
+
+/** Card front word aligned with firstFields(d): uses the picked/first dict entry's Japanese base form when applicable. */
+export function cardWordForFirst(d: Def): string {
+  if (d.dict) {
+    if (d.picked != null) {
+      let n = 0;
+      for (const e of d.dict) {
+        for (const _s of e.senses) {
+          if (++n === d.picked) return cardWordOf(d, e);
+        }
+      }
+    }
+    if (d.dict[0]?.senses[0]) return cardWordOf(d, d.dict[0]);
+  }
+  return cardWordOf(d);
+}
+
+/** Fields saved for a dragged phrase: dict/AI meaning when found, or empty meaning once lookup finishes. */
+export function phraseSaveFields(d: Def): Keep | null {
+  if (!d.phrase) return null;
+  const found = firstFields(d);
+  if (found) return found;
+  if (d.loading || d.aiBusy) return null;
+  return { definition: '', example: '', ai: '' };
+}
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -131,7 +191,8 @@ export function useWordLookup(lang: DictLang | null, ja: boolean) {
   const keep = (k: Keep, ref: { videoId: string; videoName: string }) => {
     if (!def) return;
     const l = def.line;
-    addWord({ ...ref, text: l.text, start: l.startTime, end: l.endTime }, def.word, k.definition, k.example, k.ai).catch(console.error);
+    const savedWord = k.word?.trim() || cardWordOf(def);
+    saveWordCard({ ...ref, text: l.text, start: l.startTime, end: l.endTime }, savedWord, k).catch(console.error);
   };
 
   return { def, lookup, explain: AI.aiReady() ? explain : undefined, close, keep };

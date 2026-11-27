@@ -9,11 +9,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const out = join(tmpdir(), `mobile-backup-${process.pid}.mjs`);
-await build({ stdin: { contents: "export * from './mobile/backup'; export { checkBackup, clipFiles } from './utils/backup';", resolveDir: '.', loader: 'ts' },
-  bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error' });
+await build({
+  stdin: {
+    contents: [
+      "export * from './mobile/backup';",
+      "export * from './mobile/restorePlan';",
+      "export { collectRestoreKeptClips } from './mobile/restoreClips';",
+      "export { checkBackup, clipFiles } from './utils/backup';",
+    ].join('\n'),
+    resolveDir: '.',
+    loader: 'ts',
+  },
+  bundle: true, format: 'esm', platform: 'node', outfile: out, logLevel: 'error',
+});
 const {
   makeBackup, checkMobile, parseBackup, fromDesktopBackup, buildAndroidZipPayload,
   pickLocal, planLocal, blobId, blobIds, orphanAudio, readPending, BackupProblem, checkBackup, clipFiles,
+  stageRestorePlan, prepareUndoPlan, collectRestoreKeptClips,
 } = await import(out);
 
 const video = (id, extra = {}) => ({ id, displayName: id, subtitleText: '1\n00:00:00,000 --> 00:00:01,000\nhi\n', videoPath: `blob:${id}`, ...extra });
@@ -212,6 +224,274 @@ assert.deepEqual(readPending('{"use":"staged","tries":0,"zip":"/tmp/x.zip","cros
     () => fromDesktopBackup({ ...withKeys.manifest, app: '0.11.0' }, withKeys.data, '0.10.0', { crossPlatform: false }),
     e => e instanceof BackupProblem && e.code === 'newer',
   );
+}
+
+// --- F1: Reversible undo, atomic staging preserving existing `pre`, and clips keep-set for pre/staged ---
+{
+  const snapA = makeBackup({
+    videos: [video('va')],
+    cards: [card('ca', { videoId: 'va', clip: { kind: 'audio', file: 'va_1.00.m4a', image: 'va_1.00.jpg', from: 0 } })],
+    meta: [], local: {}, cache: {},
+  }, 1700000010000);
+  const snapB = makeBackup({
+    videos: [video('vb')],
+    cards: [card('cb', { videoId: 'vb', clip: { kind: 'audio', file: 'vb_2.00.m4a', from: 1 } })],
+    meta: [], local: {}, cache: {},
+  }, 1700000020000);
+  const snapBPracticed = makeBackup({
+    videos: [video('vb'), video('vc')],
+    cards: [
+      card('cb', { videoId: 'vb', clip: { kind: 'audio', file: 'vb_2.00.m4a', from: 1 } }),
+      card('cc', { videoId: 'vc', clip: { kind: 'audio', file: 'vc_3.00.m4a', from: 2 } }),
+    ],
+    meta: [], local: {}, cache: {},
+  }, 1700000030000);
+
+  // 1. Reversible undo: undo snapshots current state (snapBPracticed) into `pre`, stages old `pre` (snapA) as `staged`,
+  //    and running undo a second time swaps right back to snapBPracticed!
+  {
+    const copies = new Map([['pre', snapA]]);
+    let currentLive = snapBPracticed;
+    let pending = null;
+    const intents = [];
+    const makeDeps = () => ({
+      hasPending: () => pending !== null,
+      prepare: async () => {},
+      snapshot: async () => currentLive,
+      getPre: async () => copies.get('pre') ?? null,
+      commitCopies: async (staged, newPre) => {
+        const prev = copies.get('pre') ?? null;
+        copies.set('staged', staged);
+        copies.set('pre', newPre);
+        return prev;
+      },
+      rollbackCopies: async prev => {
+        copies.delete('staged');
+        if (prev) copies.set('pre', prev); else copies.delete('pre');
+      },
+      setPending: p => { pending = p; },
+      setIntent: i => { intents.push(i); },
+      clearIntent: () => { intents.push('clear'); },
+    });
+
+    // First undo: snapBPracticed -> pre, snapA -> staged
+    assert.equal(await prepareUndoPlan(makeDeps()), 'ready');
+    assert.deepEqual(pending, { use: 'staged', tries: 0 });
+    assert.equal(intents.at(-1), 'undo');
+    assert.deepEqual(copies.get('staged'), snapA);
+    assert.deepEqual(copies.get('pre'), snapBPracticed);
+
+    // Simulate bootRestore applying staged (snapA) while keeping `pre` (snapBPracticed).
+    currentLive = copies.get('staged');
+    copies.delete('staged');
+    pending = null;
+    assert.deepEqual(currentLive, snapA);
+    assert.deepEqual(copies.get('pre'), snapBPracticed);
+
+    // Second undo (undo the undo!): snapA -> pre, snapBPracticed -> staged -> returns to practiced state!
+    assert.equal(await prepareUndoPlan(makeDeps()), 'ready');
+    assert.deepEqual(pending, { use: 'staged', tries: 0 });
+    assert.deepEqual(copies.get('staged'), snapBPracticed);
+    assert.deepEqual(copies.get('pre'), snapA);
+  }
+
+  // 2. Second restore failing (quota exceeded when writing staged) preserves original `pre` untouched.
+  {
+    const copies = new Map([['pre', snapA]]);
+    let pending = null;
+    await assert.rejects(
+      () => stageRestorePlan(snapB, undefined, {
+        hasPending: () => pending !== null,
+        prepare: async () => {},
+        snapshot: async () => snapBPracticed,
+        commitCopies: async () => { throw new Error('QuotaExceededError'); },
+        rollbackCopies: async () => {},
+        setPending: p => { pending = p; },
+      }),
+      e => e instanceof BackupProblem && e.code === 'pre' && e.message.includes('QuotaExceededError'),
+    );
+    assert.deepEqual(copies.get('pre'), snapA, 'original pre must remain untouched on staged quota failure');
+    assert.equal(copies.has('staged'), false, 'staged must not be left behind on failure');
+    assert.equal(pending, null, 'PENDING_KEY must not be written on failure');
+  }
+
+  // 3. Failure when writing PENDING_KEY rolls back `pre` to original and removes `staged`.
+  {
+    const copies = new Map([['pre', snapA]]);
+    let cleared = false;
+    await assert.rejects(
+      () => stageRestorePlan(snapB, undefined, {
+        hasPending: () => false,
+        prepare: async () => {},
+        snapshot: async () => snapBPracticed,
+        commitCopies: async (staged, newPre) => {
+          const prev = copies.get('pre') ?? null;
+          copies.set('staged', staged);
+          copies.set('pre', newPre);
+          return prev;
+        },
+        rollbackCopies: async prev => {
+          copies.delete('staged');
+          if (prev) copies.set('pre', prev); else copies.delete('pre');
+        },
+        setPending: () => { throw new Error('localStorage full'); },
+        clearIntent: () => { cleared = true; },
+      }),
+      e => e instanceof BackupProblem && e.code === 'pre',
+    );
+    assert.deepEqual(copies.get('pre'), snapA, 'rollback must restore original pre');
+    assert.equal(copies.has('staged'), false, 'rollback must remove staged');
+    assert.equal(cleared, true);
+  }
+
+  // 4. Undo with missing `pre` throws BackupProblem('gone').
+  await assert.rejects(
+    () => prepareUndoPlan({
+      hasPending: () => false,
+      prepare: async () => {},
+      snapshot: async () => snapB,
+      getPre: async () => null,
+      commitCopies: async () => null,
+      rollbackCopies: async () => {},
+      setPending: () => {},
+    }),
+    e => e instanceof BackupProblem && e.code === 'gone',
+  );
+
+  // 5. Clip sweep protection for `pre` and `staged` snapshots (collectRestoreKeptClips).
+  {
+    const ok = await collectRestoreKeptClips({
+      outsideRestore: async fn => fn(),
+      hasPendingRestore: () => false,
+      readCopy: async k => (k === 'pre' ? snapA : snapB),
+    });
+    assert.deepEqual([...ok].sort(), ['va_1.00.jpg', 'va_1.00.m4a', 'vb_2.00.m4a']);
+
+    // Unreadable snapshot -> returns null so caller skips clip sweeping altogether.
+    const errRes = await collectRestoreKeptClips({
+      outsideRestore: async fn => fn(),
+      hasPendingRestore: () => false,
+      readCopy: async k => { if (k === 'pre') throw new Error('idb error'); return null; },
+    });
+    assert.equal(errRes, null, 'unreadable pre snapshot must skip clip sweep');
+
+    // Malformed snapshot -> returns null (never sweep blindly).
+    const badRes = await collectRestoreKeptClips({
+      outsideRestore: async fn => fn(),
+      hasPendingRestore: () => false,
+      readCopy: async k => (k === 'pre' ? { broken: true } : null),
+    });
+    assert.equal(badRes, null, 'malformed pre snapshot must skip clip sweep');
+
+    // Pending restore marker -> returns null.
+    const pendRes = await collectRestoreKeptClips({
+      outsideRestore: async fn => fn(),
+      hasPendingRestore: () => true,
+      readCopy: async () => snapA,
+    });
+    assert.equal(pendRes, null, 'pending restore must skip clip sweep');
+
+    // Restore lock busy -> outsideRestore returns skip (null).
+    const lockedRes = await collectRestoreKeptClips({
+      outsideRestore: async (_fn, skip) => skip,
+      hasPendingRestore: () => false,
+      readCopy: async () => snapA,
+    });
+    assert.equal(lockedRes, null, 'locked restore must skip clip sweep');
+  }
+
+  // 6. End-to-end utils/clips.ts fillClips + registerExtraKeptClips:
+  //    - desktop (no provider): keeps current cards + backupKeptClips
+  //    - Android (provider returns pre/staged clips): includes pre/staged clips in sweepClips keep list
+  //    - provider returns null (read failure): skips sweepClips completely!
+  {
+    const clipsOut = join(tmpdir(), `mobile-clips-keep-${process.pid}.mjs`);
+    await build({
+      entryPoints: ['./utils/clips.ts'],
+      bundle: true,
+      format: 'esm',
+      platform: 'node',
+      outfile: clipsOut,
+      logLevel: 'error',
+      plugins: [{
+        name: 'stub-clips-deps',
+        setup(b) {
+          b.onResolve({ filter: /^\.\/(desktop|review|videoStorage|storage)$/ }, args => ({
+            path: args.path,
+            namespace: 'clipstub',
+          }));
+          b.onLoad({ filter: /^\.\/desktop$/, namespace: 'clipstub' }, () => ({
+            contents: `
+              export const backupKeptClips = async () => globalThis.__clipTest.backupKept;
+              export const sweepClips = async keep => { globalThis.__clipTest.swept.push([...keep]); return 0; };
+              export const clipPath = async f => f;
+              export const cutClip = async () => { throw new Error('no cut'); };
+              export const pathExists = async () => false;
+            `,
+          }));
+          b.onLoad({ filter: /^\.\/review$/, namespace: 'clipstub' }, () => ({
+            contents: `
+              export const getAllCards = async () => globalThis.__clipTest.cards;
+              export const hasAudio = c => !!c.videoPath || !!c.clip;
+              export const setClip = async () => {};
+              export const subscribeCards = () => () => {};
+            `,
+          }));
+          b.onLoad({ filter: /^\.\/videoStorage$/, namespace: 'clipstub' }, () => ({
+            contents: 'export const getVideoRecord = async () => null;',
+          }));
+          b.onLoad({ filter: /^\.\/storage$/, namespace: 'clipstub' }, () => ({
+            contents: 'export const getPracticeConfig = () => ({ saveClips: false, clipKind: "audio" });',
+          }));
+        },
+      }],
+    });
+    globalThis.__clipTest = {
+      backupKept: ['zip_1.00.m4a'],
+      cards: [{ id: 'c_now', videoId: 'vnow', start: 0, end: 1, clip: { kind: 'audio', file: 'now_0.00.m4a', from: 0 } }],
+      swept: [],
+    };
+    const Clips = await import(clipsOut);
+
+    // Desktop behavior (zero providers registered)
+    await Clips.fillClips();
+    assert.equal(globalThis.__clipTest.swept.length, 1);
+    assert.deepEqual(globalThis.__clipTest.swept[0].sort(), ['now_0.00.m4a', 'zip_1.00.m4a']);
+
+    // Android behavior: provider supplies pre/staged clips
+    let mode = 'ok';
+    const unreg = Clips.registerExtraKeptClips(async () => (
+      mode === 'ok'
+        ? collectRestoreKeptClips({
+          outsideRestore: async fn => fn(),
+          hasPendingRestore: () => false,
+          readCopy: async k => (k === 'pre' ? snapA : snapB),
+        })
+        : mode === 'null'
+          ? null
+          : Promise.reject(new Error('idb fail'))
+    ));
+
+    await Clips.fillClips();
+    assert.equal(globalThis.__clipTest.swept.length, 2);
+    assert.deepEqual(
+      globalThis.__clipTest.swept[1].sort(),
+      ['now_0.00.m4a', 'va_1.00.jpg', 'va_1.00.m4a', 'vb_2.00.m4a', 'zip_1.00.m4a'],
+    );
+
+    // Provider returns null -> skip sweep completely
+    mode = 'null';
+    await Clips.fillClips();
+    assert.equal(globalThis.__clipTest.swept.length, 2, 'must not call sweepClips when provider returns null');
+
+    // Provider rejects -> skip sweep completely
+    mode = 'throw';
+    await Clips.fillClips();
+    assert.equal(globalThis.__clipTest.swept.length, 2, 'must not call sweepClips when provider throws');
+
+    unreg();
+    delete globalThis.__clipTest;
+  }
 }
 
 console.log('mobile backup: all passed');

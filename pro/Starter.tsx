@@ -8,6 +8,7 @@ import * as VideoStorage from '../utils/videoStorage';
 import { startPodcastImport, subscribeImportJobs } from '../utils/importJob';
 import { STARTER_FEED } from '../utils/sections';
 import { parseSRT } from '../utils/srtParser';
+import { episodeUuid } from '../utils/syncClock';
 import { getLang, useT } from '../utils/i18n';
 import { epKey, episodeName, parseStarter, type StarterItem } from './podcastFeed';
 import { writeTransCache } from './transPrep';
@@ -35,11 +36,11 @@ async function download(it: StarterItem): Promise<void> {
   const [srt, trans] = await Promise.all([get(it.srtFor[to] ?? it.srt), it.trans[to] ? get(it.trans[to]!).then(t => JSON.parse(t) as unknown) : null]);
   const lines = parseSRT(srt);
   if (!lines.length) throw new Error('empty srt');
-  const id = crypto.randomUUID();
   const guid = `${it.id}@${it.version}`;
+  const id = episodeUuid(STARTER_FEED, guid);
   await startPodcastImport({
     id, title: it.title, audio: it.audio, lang: it.lang,
-    podcast: { show: it.show, feed: STARTER_FEED, guid, name: episodeName(it.title, starterKey(it)) },
+    podcast: { show: it.show, feed: STARTER_FEED, guid, name: episodeName(it.title, starterKey(it)), audio: it.audio },
   }, { text: srt, fileName: `${it.id}.srt`, count: lines.length });
   // One translation per subtitle line, in the order the pages sort them (by start time); written
   // before the episode may open, so its first visit already has them.

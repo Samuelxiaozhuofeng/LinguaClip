@@ -152,6 +152,7 @@ export const ClozeLine: React.FC<ClozeLineProps> = ({
 
 export interface ClozeBarProps {
   canFill: boolean;
+  canSubmit: boolean;
   submitted: boolean;
   rate: number;
   kbInset: number;
@@ -167,6 +168,7 @@ export interface ClozeBarProps {
 
 export const ClozeBar: React.FC<ClozeBarProps> = ({
   canFill,
+  canSubmit,
   submitted,
   rate,
   kbInset,
@@ -212,14 +214,16 @@ export const ClozeBar: React.FC<ClozeBarProps> = ({
             type="button"
             disabled={submitted}
             onClick={onReveal}
+            data-testid="cloze-reveal"
             className="min-h-[44px] px-3 rounded-xl bg-shade text-ink text-[13px] font-medium whitespace-nowrap disabled:opacity-40"
           >
             {t('m.dictShowLine')}
           </button>
           <button
             type="button"
-            disabled={submitted}
+            disabled={submitted || !canSubmit}
             onClick={onSubmit}
+            data-testid="cloze-submit"
             className="ml-auto min-h-[44px] px-4 rounded-xl bg-accent text-white text-[14px] font-semibold whitespace-nowrap disabled:opacity-40"
           >
             {t('m.check')}

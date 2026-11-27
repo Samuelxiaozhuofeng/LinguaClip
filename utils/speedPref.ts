@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { touchSyncSetting } from './syncMeta';
 
 // Playback speeds of the three players and the one each last used (docs/phrase.md「倍速」).
 // Each place remembers its own: their choices differ, so one shared value would not fit.
@@ -25,6 +26,7 @@ export function getSpeed(place: SpeedPlace): number {
 
 export function saveSpeed(place: SpeedPlace, speed: number): void {
   try { localStorage.setItem(key(place), String(speed)); } catch { /* localStorage unavailable */ }
+  touchSyncSetting(key(place));
 }
 
 // Only a pick goes to storage: the Anki recorder sets the element's rate to 1 directly, never through here.

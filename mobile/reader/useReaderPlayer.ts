@@ -18,6 +18,7 @@ export type ReadPlayMode = 'single' | 'continuous';
 export interface ReaderPlayer {
   bindAudio: (el: HTMLAudioElement | null) => void;
   ready: boolean;
+  noAudio: boolean;
   errorCode: string;
   playing: boolean;
   rate: number;
@@ -38,6 +39,7 @@ export function useReaderPlayer(
   lines: Subtitle[],
   initialIndex: number,
   onActiveLine?: (index: number) => void,
+  noAudio = false,
 ): ReaderPlayer {
   const [ready, setReady] = useState(false);
   const [errorCode, setErrorCode] = useState('');
@@ -95,6 +97,10 @@ export function useReaderPlayer(
     setErrorCode('');
     setPlaying(false);
     playingRef.current = false;
+
+    if (noAudio) {
+      return () => { cancelled = true; };
+    }
 
     const eng = createAudioEngine({
       onState: st => {
@@ -174,7 +180,7 @@ export function useReaderPlayer(
       eng.dispose();
       if (engine.current === eng) engine.current = null;
     };
-  }, [record.id, path, reportActive, startPlay]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [record.id, path, noAudio, reportActive, startPlay]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const bindAudio = useCallback((el: HTMLAudioElement | null) => {
     audio.current = el;
@@ -187,12 +193,13 @@ export function useReaderPlayer(
     currentRef.current = i;
     setCurrent(i);
     onActiveRef.current?.(i);
+    if (noAudio) return;
     if (!engine.current || !ready) {
       pending.current = { i, mode: m };
       return;
     }
     startPlay(i, m);
-  }, [ready, startPlay]);
+  }, [noAudio, ready, startPlay]);
 
   const focusLine = useCallback((i: number) => {
     if (i < 0 || i >= linesRef.current.length) return;
@@ -207,13 +214,14 @@ export function useReaderPlayer(
   }, []);
 
   const toggle = useCallback(() => {
+    if (noAudio) return;
     if (playingRef.current) {
       pause();
       return;
     }
     const idx = currentRef.current >= 0 ? currentRef.current : 0;
     playLine(idx);
-  }, [pause, playLine]);
+  }, [noAudio, pause, playLine]);
 
   const setRate = useCallback((r: number) => {
     setRateState(r);
@@ -229,8 +237,10 @@ export function useReaderPlayer(
     eng.holdAt(m === 'single' && curLine ? curLine.endTime : null);
   }, []);
 
-  return { bindAudio, ready, errorCode, playing, rate, mode, current, setRate, setMode, playLine, focusLine, pause, toggle };
+  return { bindAudio, ready, noAudio, errorCode, playing, rate, mode, current, setRate, setMode, playLine, focusLine, pause, toggle };
 }
 
 export const ReaderAudio: React.FC<{ player: ReaderPlayer }> = ({ player }) =>
-  AUDIO_ENGINE_PLATFORM === 'web' ? React.createElement('audio', { ref: player.bindAudio, preload: 'auto' }) : null;
+  !player.noAudio && AUDIO_ENGINE_PLATFORM === 'web'
+    ? React.createElement('audio', { ref: player.bindAudio, preload: 'auto' })
+    : null;

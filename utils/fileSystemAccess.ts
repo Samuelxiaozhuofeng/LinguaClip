@@ -1,6 +1,7 @@
 /**
  * IndexedDB utilities for video records and subtitle storage.
  */
+import { notifySyncDirty } from './syncMeta';
 
 // IndexedDB setup
 const DB_NAME = 'linguaclip_db';
@@ -62,7 +63,8 @@ export const saveVideoToDB = async (videoRecord: any): Promise<void> => {
   const db = await initDB();
   const tx = db.transaction([STORE_VIDEOS], 'readwrite');
   tx.objectStore(STORE_VIDEOS).put(videoRecord);
-  return commit(tx, 'save video record');
+  await commit(tx, 'save video record');
+  notifySyncDirty();
 };
 
 /**
@@ -91,6 +93,7 @@ export const updateVideoInDB = async (id: string, change: (record: any) => any |
   };
   const done = commit(tx, 'update video record');
   await done.catch(err => { throw failure ?? err; });
+  if (written) notifySyncDirty();
   return written;
 };
 
@@ -143,6 +146,7 @@ export const deleteVideoFromDB = async (id: string): Promise<void> => {
   const db = await initDB();
   const tx = db.transaction([STORE_VIDEOS], 'readwrite');
   tx.objectStore(STORE_VIDEOS).delete(id);
-  return commit(tx, 'delete video record');
+  await commit(tx, 'delete video record');
+  notifySyncDirty();
 };
 

@@ -8,6 +8,7 @@ import type { VideoRecord } from '../types';
 import * as VideoStorage from '../utils/videoStorage';
 import { STARTER_FEED } from '../utils/sections';
 import { parseSRT } from '../utils/srtParser';
+import { episodeUuid } from '../utils/syncClock';
 import { getLang, useLang, useT } from '../utils/i18n';
 import { epKey, episodeName, parseStarter, type StarterItem } from '../pro/podcastFeed';
 import { writeTransCache } from '../pro/transPrep';
@@ -39,14 +40,16 @@ async function create(it: StarterItem): Promise<string> {
   const [srt, trans] = await Promise.all([get(it.srtFor[to] ?? it.srt), it.trans[to] ? get(it.trans[to]!).then(x => JSON.parse(x) as unknown) : null]);
   const lines = parseSRT(srt);
   if (!lines.length) throw new Error('empty srt');
-  const id = crypto.randomUUID();
+  const guid = `${it.id}@${it.version}`;
+  const id = episodeUuid(STARTER_FEED, guid);
   const now = Date.now();
+  const audioUrl = new URL(it.audio, SITE).href;
   await VideoStorage.updateVideoRecord({
     id, displayName: it.title, videoFileName: it.title, videoPath: local(it.audio),
     subtitleFileName: `${it.id}.srt`, subtitleText: srt, totalSubtitles: lines.length,
     currentSubtitleIndex: 0, currentSectionIndex: 0, completionRate: 0,
     dateAdded: now, lastPracticed: now, totalPracticeTime: 0,
-    podcast: { show: it.show, feed: STARTER_FEED, guid: `${it.id}@${it.version}`, name: episodeName(it.title, starterKey(it)) },
+    podcast: { show: it.show, feed: STARTER_FEED, guid, name: episodeName(it.title, starterKey(it)), audio: audioUrl },
   });
   // One translation per subtitle line, in the order the pages sort them (by start time).
   if (Array.isArray(trans) && trans.length === lines.length) {
@@ -82,7 +85,7 @@ export const Starter: React.FC<{ records: VideoRecord[]; onOpen: (id: string) =>
   const mine = new Map(records.filter(r => r.podcast).map(r => [epKey(r.podcast!.feed, r.podcast!.guid), r]));
 
   const start = async (it: StarterItem) => {
-    if (busy) return;
+    if (busy || mine.has(starterKey(it))) return;
     setBusy(it.id);
     try { const id = await create(it); onChanged(); onOpen(id); }
     catch (err) { console.error(err); alert(t('starter.fetchFail')); }
@@ -103,7 +106,7 @@ export const Starter: React.FC<{ records: VideoRecord[]; onOpen: (id: string) =>
               <div className="flex-1 min-w-0">
                 <p className="text-[13px] font-semibold text-accent">{t(`starter.level_${it.level}` as 'starter.level_1')} · <span className="font-normal text-mute">{t(`starter.levelHint_${it.level}` as 'starter.levelHint_1')}</span></p>
                 <p className="mt-0.5 font-serif text-[16px] leading-snug break-words">{it.title}</p>
-                <p className="mt-0.5 text-[11px] text-mute break-words">{[it.seconds && t('podcast.minutes', { n: Math.max(1, Math.round(it.seconds / 60)) }), it.credit].filter(Boolean).join(' · ')}</p>
+                <p className="mt-0.5 text-[13px] text-mute break-words">{[it.seconds && t('podcast.minutes', { n: Math.max(1, Math.round(it.seconds / 60)) }), it.credit].filter(Boolean).join(' · ')}</p>
               </div>
               {r
                 ? <button className={btnSoft} onClick={() => onOpen(r.id)}>{t('m.open')}</button>

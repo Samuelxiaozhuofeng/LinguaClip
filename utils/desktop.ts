@@ -13,6 +13,7 @@ import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { getVersion } from '@tauri-apps/api/app';
 import { IS_WINDOWS } from './platform';
+import type { WebDavConfig } from './syncConfig';
 
 // What the player opens as is; the rest of VIDEO_EXTS gets converted to mp4 on
 // import (src-tauri/src/convert.rs `plays_natively` must agree on the first list).
@@ -100,6 +101,23 @@ export type ConvertToolStatus = { path: string | null; dir: string; bytes: numbe
 export const convertToolStatus = () => invoke<ConvertToolStatus>('convert_tool_status');
 export const installConvertTool = () => invoke<void>('install_convert_tool');
 export const onConvertToolProgress = (fn: (pct: number) => void) => listen<number>('convert-tool-progress', e => fn(e.payload));
+
+// The in-app YouTube window and the parts it downloads (docs/youtube.md).
+export type YouTubeToolStatus = { ready: boolean; path: string | null; dir: string; bytes: number };
+export type YouTubePillText = {
+  practice: string; langHint: string; confirmTitle: string; confirmBody: string; install: string; notNow: string;
+  installing: string; failed: string; retry: string; adding: string; added: string; notAdded: string;
+  tryAgain: string; backHome: string;
+};
+export const openYouTubeWindow = (lang: string, langs: { code: string; label: string }[], text: YouTubePillText) =>
+  invoke<void>('open_youtube_window', { lang, langs, text });
+export const youtubeToolStatus = () => invoke<YouTubeToolStatus>('youtube_tool_status');
+export const installYouTubeTool = () => invoke<void>('install_youtube_tool');
+export const onYouTubeToolProgress = (fn: (pct: number) => void) => listen<number>('youtube-tool-progress', e => fn(e.payload));
+export type YouTubePick = { id: string; url: string; lang: string };
+export const onYouTubePick = (fn: (pick: YouTubePick) => void) => listen<YouTubePick>('youtube-pick', e => fn(e.payload));
+// Tells the YouTube window whether the picked video's card was saved.
+export const youtubePickDone = (id: string, ok: boolean) => invoke<void>('youtube_pick_done', { id, ok });
 // index: among the subtitle tracks only. text: false for picture subtitles (unreadable).
 // Review cards' own clips (src-tauri/src/clips.rs), in <own dir>/clips.
 export const cutClip = (src: string, from: number, to: number, name: string, kind: 'video' | 'audio') =>
@@ -250,3 +268,68 @@ export type { Update };
 export const appVersion = (): Promise<string> => getVersion();
 export const checkForUpdate = (): Promise<Update | null> => check({ timeout: 20000 });
 export const relaunchApp = (): Promise<void> => relaunch();
+
+// Cross-device serverless sync (docs/sync.md, src-tauri/src/sync_webdav.rs & sync_packs.rs).
+export type WebDavTestResult = { ok: boolean; remoteRoot: string; existingDevices: number };
+export type RemoteEntry = { name: string; etag?: string | null; size?: number | null };
+export type MergePackContents = { snapshotJson: string; subs: [string, string][]; clipNames: string[] };
+export type RekeyFilesResult = { moved: number; mediaPaths: [string, string][] };
+
+export const syncWebdavSupported = (): boolean => true;
+export const syncWebdavTest = (config: WebDavConfig): Promise<WebDavTestResult> =>
+  invoke<WebDavTestResult>('sync_webdav_test', { config });
+export const syncWebdavList = (
+  config: WebDavConfig,
+  subpath: 'devices' | 'subs' | 'caches' | 'clip-packs',
+): Promise<RemoteEntry[]> => invoke<RemoteEntry[]>('sync_webdav_list', { config, subpath });
+export const syncWebdavGetGz = (config: WebDavConfig, relPath: string): Promise<string> =>
+  invoke<string>('sync_webdav_get_gz', { config, relPath });
+export const syncWebdavPutGz = (config: WebDavConfig, relPath: string, content: string): Promise<string | null> =>
+  invoke<string | null>('sync_webdav_put_gz', { config, relPath, content });
+export const syncWebdavDelete = (config: WebDavConfig, relPath: string): Promise<void> =>
+  invoke<void>('sync_webdav_delete', { config, relPath });
+export const syncUploadClipPack = (
+  config: WebDavConfig,
+  relPath: string,
+  files: string[],
+  maxBytes?: number,
+  maxFileBytes?: number,
+): Promise<string[]> => invoke<string[]>('sync_upload_clip_pack', { config, relPath, files, maxBytes, maxFileBytes });
+export const syncDownloadClipPack = (
+  config: WebDavConfig,
+  relPath: string,
+  wantedFiles: string[],
+): Promise<string[]> => invoke<string[]>('sync_download_clip_pack', { config, relPath, wantedFiles });
+export const syncWriteMergePack = (
+  dest: string | null,
+  snapshotJson: string,
+  subs: [string, string][],
+  clipFiles: string[],
+): Promise<string> => invoke<string>('sync_write_merge_pack', { dest, snapshotJson, subs, clipFiles });
+export const syncWriteMergeJson = (dest: string | null, content: string): Promise<string> =>
+  invoke<string>('sync_write_merge_json', { dest, content });
+export const syncReadMergePack = (path: string): Promise<MergePackContents> =>
+  invoke<MergePackContents>('sync_read_merge_pack', { path });
+export const syncUnpackMergePack = (path: string, wantedFiles: string[]): Promise<string[]> =>
+  invoke<string[]>('sync_unpack_merge_pack', { path, wantedFiles });
+export const syncRekeyFiles = (fromId: string, toId: string): Promise<RekeyFilesResult> =>
+  invoke<RekeyFilesResult>('sync_rekey_files', { fromId, toId });
+export const syncClipNetworkOk = async (_wifiOnly: boolean): Promise<boolean> => true;
+
+const SYNC_PACK_OPEN_FILTER = { name: 'LinguaClip Sync', extensions: ['zip', 'json'] };
+export async function pickSyncPackDest(defaultName: string, ext: 'zip' | 'json' = 'zip'): Promise<string | null> {
+  return save({ defaultPath: defaultName, filters: [{ name: 'LinguaClip Sync', extensions: [ext] }] });
+}
+export async function pickSyncPackFile(): Promise<
+  | { kind: 'zip'; path: string; cleanup?: () => Promise<void> }
+  | { kind: 'json'; text: string }
+  | null
+> {
+  const selected = await open({ multiple: false, filters: [SYNC_PACK_OPEN_FILTER] });
+  if (typeof selected !== 'string') return null;
+  if (selected.toLowerCase().endsWith('.json')) {
+    return { kind: 'json', text: await readTextFile(selected) };
+  }
+  return { kind: 'zip', path: selected };
+}
+export const shareSyncPackFile = async (_path: string, _title: string, _mime?: string): Promise<void> => {};

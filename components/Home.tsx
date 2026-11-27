@@ -7,7 +7,7 @@ import { ShelfPos, cardFinished, cardWhere, lastWayName, lastWaySec } from '../u
 import { parseSRT } from '../utils/srtParser';
 import { buildSections, sectionAt, sectionLengthOf } from '../utils/sections';
 import { fileNameFromPath, isAudioRecord, isVideoFile, listenDragDrop, trashFile, relatedFilePaths, cacheFilePaths } from '../utils/desktop';
-import { cancelImport, canConvertRetry, formatImportError, isCookieError, openYouTubeLogin, retryImport, subscribeImportJobs } from '../utils/importJob';
+import { cancelImport, canConvertRetry, canYouTubeLogin, formatImportError, openYouTubeLogin, retryImport, subscribeImportJobs } from '../utils/importJob';
 import { Btn, Menu, MenuItem, inputCls } from './ui';
 import { DECK_LANGS, langName, videoLang } from '../utils/deckLang';
 import type { DictLang } from '../utils/dictionary';
@@ -27,6 +27,7 @@ import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribe
 import { cancelSegments, getSegJob, subscribeSeg } from '../utils/jaSegments';
 import { deckCounts, deleteVideoCards, getAllCards, keepOrphans, subscribeCards } from '../utils/review';
 import { clipVideoNow } from '../utils/clips';
+import { subscribeSyncApplied } from '../utils/syncEngine';
 import WeekStats from './WeekStats';
 import TodayBar from './TodayBar';
 
@@ -124,7 +125,8 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
   }, [onThisPage]);
   useEffect(() => {
     loadVideos();
-    return subscribeImportJobs(loadVideos);
+    const offImport = subscribeImportJobs(loadVideos), offSync = subscribeSyncApplied(loadVideos);
+    return () => { offImport(); offSync(); };
   }, [loadVideos]);
 
   // The whole window takes a dropped video and/or .srt; it opens the add dialog
@@ -275,6 +277,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
     const pct = job.percent ?? 0;
     if (job.stage === 'queued') return t('import.stageQueued');
     if (job.stage === 'setup') return t('import.stageSetup', { pct });
+    if (job.stage === 'ytSetup') return t('import.stageYtSetup', { pct });
     if (job.stage === 'convertSetup') return t('import.stageConvertSetup', { pct });
     if (job.stage === 'convert') return t('import.stageConvert', { pct });
     if (job.stage === 'download') return t('import.stageDownload', { pct });
@@ -372,7 +375,7 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
     return (
       <p className="mt-1 text-xs text-mute">
         {formatImportError(job.error)}
-        {isCookieError(job.error) && <><span className="mx-2 text-mute">·</span><button type="button" onClick={handleYouTubeLogin} className="text-ink hover:underline underline-offset-4">{t('home.ytLogin')}</button></>}
+        {canYouTubeLogin(job.error) && <><span className="mx-2 text-mute">·</span><button type="button" onClick={handleYouTubeLogin} className="text-ink hover:underline underline-offset-4">{t('home.ytLogin')}</button></>}
         {canConvertRetry(job) && <><span className="mx-2 text-mute">·</span><button type="button" onClick={() => handleRetry(v, true)} disabled={retryingId === v.id} className="text-ink hover:underline underline-offset-4 disabled:opacity-40">{t('home.retryConvert')}</button></>}
         <span className="mx-2 text-mute">·</span><button type="button" onClick={() => handleRetry(v)} disabled={retryingId === v.id} className="text-ink hover:underline underline-offset-4 disabled:opacity-40">{t('home.retry')}</button>
       </p>

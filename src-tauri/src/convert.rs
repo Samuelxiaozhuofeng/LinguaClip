@@ -68,6 +68,10 @@ pub(crate) fn find() -> Option<PathBuf> {
   crate::import::find_bin("ffmpeg").ok()
 }
 
+pub(crate) fn download_bytes() -> u64 {
+  FFMPEG.size
+}
+
 // Returns ffmpeg, downloading it first when there is none. `on_pct` is not
 // called at all when nothing needs downloading. A failed download says
 // "convertSetup:", so the user is not told the transcription parts failed.

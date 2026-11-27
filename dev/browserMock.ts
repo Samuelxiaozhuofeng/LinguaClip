@@ -56,6 +56,106 @@ const readZip = (path: string) => {
   return z;
 };
 
+type SyncFile = { content: string; etag: string; size: number };
+type SyncPack = { snapshotJson: string; subs: [string, string][]; clips: Record<string, string> };
+const byteLen = (s: string) => new TextEncoder().encode(s).byteLength;
+const loadObj = <T extends Record<string, any>>(key: string): T => {
+  try { return JSON.parse(sessionStorage.getItem(key) || '{}') as T; } catch { return {} as T; }
+};
+const saveObj = (key: string, v: unknown) => sessionStorage.setItem(key, JSON.stringify(v));
+const storeProxy = <T extends Record<string, any>>(key: string) => new Proxy({} as T, {
+  get: (_, prop) => (typeof prop === 'string' ? loadObj<T>(key)[prop] : undefined),
+  has: (_, prop) => typeof prop === 'string' && prop in loadObj<T>(key),
+  set: (_, prop, val) => { if (typeof prop === 'string') { const d = loadObj<T>(key); (d as any)[prop] = val; saveObj(key, d); } return true; },
+  deleteProperty: (_, prop) => { if (typeof prop === 'string') { const d = loadObj<T>(key); delete d[prop]; saveObj(key, d); } return true; },
+  ownKeys: () => Reflect.ownKeys(loadObj<T>(key)),
+  getOwnPropertyDescriptor: (_, prop) => {
+    const d = loadObj<T>(key);
+    return typeof prop === 'string' && prop in d ? { configurable: true, enumerable: true, value: d[prop], writable: true } : undefined;
+  },
+});
+const SYNC_FILES_KEY = '__mock_sync_webdav';
+const SYNC_PACKS_KEY = '__mock_sync_merge_packs';
+const SYNC_CLIPS_KEY = '__mock_sync_clips';
+let syncEtagSeq = 0;
+const nextEtag = () => `"mock-${Date.now()}-${++syncEtagSeq}"`;
+const syncEntryOf = (raw: unknown): SyncFile | null => typeof raw === 'string'
+  ? { content: raw, etag: `"raw-${raw.length}"`, size: byteLen(raw) }
+  : raw && typeof raw === 'object' && typeof (raw as SyncFile).content === 'string'
+    ? raw as SyncFile : null;
+const isLocalHost = (host: string) => {
+  const h = host.replace(/^\[|\]$/g, '').toLowerCase();
+  if (h === 'localhost' || h === '::1' || h.endsWith('.local') || h.endsWith('.lan') || h.endsWith('.ts.net')) return true;
+  if (/^f[cd][0-9a-f]{2}:/i.test(h) || /^fe80:/i.test(h)) return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254);
+};
+const VALID_ID = /^[A-Za-z0-9_-]{1,128}$/;
+const VALID_SHA = /^[0-9a-f]{64}$/;
+const SAFE_CLIP = /^[A-Za-z0-9._-]+$/;
+const SYNC_SUBS = new Set(['devices', 'subs', 'caches', 'clip-packs']);
+const SYNC_CACHE_KINDS = new Set(['cloze', 'breakdown', 'segments', 'levels', 'trans', 'keywords', 'phrases']);
+const REKEY_KINDS = ['words', 'cloze', 'breakdown', 'segments', 'levels', 'trans', 'keywords', 'phrases'];
+const checkClipName = (name: string) => {
+  if (!name || name.length > 200 || name.startsWith('.') || name.includes('..') || !SAFE_CLIP.test(name)) throw `clip:bad_name:${name}`;
+};
+const checkRelPath = (rel: string) => {
+  if (!rel || rel.startsWith('/') || rel.includes('\\') || rel.includes('..') || /[\u0000-\u001f]/.test(rel)) throw `sync:invalid_path:${rel}`;
+  const idx = rel.indexOf('/');
+  const [sub, rest] = idx < 0 ? ['', ''] : [rel.slice(0, idx), rel.slice(idx + 1)];
+  const ok = (sub === 'devices' && rest.endsWith('.json.gz') && VALID_ID.test(rest.slice(0, -8)))
+    || (sub === 'subs' && rest.endsWith('.srt.gz') && VALID_SHA.test(rest.slice(0, -7)))
+    || (sub === 'caches' && rest.endsWith('.json.gz') && (() => { const s = rest.slice(0, -8); const d = s.indexOf('.'); return d > 0 && VALID_ID.test(s.slice(0, d)) && SYNC_CACHE_KINDS.has(s.slice(d + 1)); })())
+    || (sub === 'clip-packs' && rest.endsWith('.zip') && /^[A-Za-z0-9_-]{1,196}$/.test(rest.slice(0, -4)));
+  if (!ok) throw `sync:invalid_path:${rel}`;
+};
+const checkSyncCfg = (cfg: Args | undefined, isGetGz = false) => {
+  if (mock.sync.fail && (isGetGz || !mock.sync.fail.startsWith('sync:corrupt:'))) throw mock.sync.fail;
+  let u: URL;
+  try { u = new URL(String(cfg?.url ?? '').trim()); } catch { throw 'sync:insecure_url'; }
+  if (!u.hostname || u.search || u.hash || (u.protocol !== 'https:' && !(u.protocol === 'http:' && isLocalHost(u.hostname)))) throw 'sync:insecure_url';
+  const rawRoot = String(cfg?.rootDir ?? 'LinguaClip').trim().replace(/^\/+|\/+$/g, '');
+  const rootSegs = rawRoot ? rawRoot.split('/') : ['LinguaClip'];
+  if (rootSegs.some(s => !s || s === '.' || s === '..' || s.length > 128 || /[\u0000-\u001f\\?#:*"<>|]/.test(s))) throw `sync:invalid_path:${cfg?.rootDir}`;
+  if (!String(cfg?.username ?? '').trim() || !String(cfg?.password ?? '')) throw 'sync:auth';
+  const baseSegs = u.pathname.split('/').filter(Boolean);
+  return `${u.origin}/${[...baseSegs, ...rootSegs, 'LinguaClipSync'].map(encodeURIComponent).join('/')}/`;
+};
+
+const syncMock = {
+  get files(): Record<string, SyncFile> { return storeProxy<Record<string, SyncFile>>(SYNC_FILES_KEY); },
+  set files(v: Record<string, SyncFile>) { saveObj(SYNC_FILES_KEY, v ?? {}); },
+  get mergePacks(): Record<string, SyncPack> { return storeProxy<Record<string, SyncPack>>(SYNC_PACKS_KEY); },
+  set mergePacks(v: Record<string, SyncPack>) { saveObj(SYNC_PACKS_KEY, v ?? {}); },
+  get clips(): Record<string, string> { return storeProxy<Record<string, string>>(SYNC_CLIPS_KEY); },
+  set clips(v: Record<string, string>) { saveObj(SYNC_CLIPS_KEY, v ?? {}); },
+  fail: null as string | null,
+  putPeer(devId: string, snapshotObj: unknown, subsMap?: Record<string, string>, clipPacksMap?: Record<string, Record<string, string> | string[] | string>) {
+    const store = loadObj<Record<string, SyncFile>>(SYNC_FILES_KEY);
+    const snap = typeof snapshotObj === 'string' ? snapshotObj : JSON.stringify(snapshotObj);
+    store[`devices/${devId}.json.gz`] = { content: snap, etag: nextEtag(), size: byteLen(snap) };
+    if (subsMap) for (const [k, srt] of Object.entries(subsMap)) {
+      const path = k.startsWith('subs/') ? k : `subs/${k.endsWith('.srt.gz') ? k : `${k}.srt.gz`}`;
+      store[path] = { content: srt, etag: nextEtag(), size: byteLen(srt) };
+    }
+    if (clipPacksMap) for (const [k, clips] of Object.entries(clipPacksMap)) {
+      const path = k.startsWith('clip-packs/') ? k : `clip-packs/${k.endsWith('.zip') ? k : `${k}.zip`}`;
+      const body = typeof clips === 'string' ? clips : JSON.stringify(Array.isArray(clips) ? Object.fromEntries(clips.map(n => [n, `mock-clip:${n}`])) : clips);
+      store[path] = { content: body, etag: nextEtag(), size: byteLen(body) };
+    }
+    saveObj(SYNC_FILES_KEY, store);
+  },
+  reset() {
+    this.fail = null;
+    sessionStorage.removeItem(SYNC_FILES_KEY);
+    sessionStorage.removeItem(SYNC_PACKS_KEY);
+    sessionStorage.removeItem(SYNC_CLIPS_KEY);
+    sessionStorage.removeItem('__mock_last_sync_pack');
+  },
+};
+
 const mock = {
   pick: null as string | null,
   // set to (args) => ArrayBuffer to fake Edge TTS; unset = null = system voice
@@ -65,6 +165,12 @@ const mock = {
   tools: { whisper: false, youtube: false },
   jaDict: false,
   convertTool: false,
+  // youtube_tool_status: yt-dlp + deno + ffmpeg downloaded (docs/youtube.md)
+  youtubeTool: false,
+  // open_youtube_window: what the main window handed over (the window itself only exists in the app)
+  youtubeWindow: null as Args | null,
+  // youtube_pick_done: the main window's answers to "youtube-pick" ({ id, ok })
+  youtubePicksDone: [] as Args[],
   // list_gpus: the cards a Windows PC would report
   gpus: [] as { name: string; discrete: boolean }[],
   // device_info: set another id to act as a second computer (license seats)
@@ -77,6 +183,7 @@ const mock = {
   dictFail: null as string | null,
   putBackup: (path: string, zip: Zip) => setZips({ ...zips(), [path]: zip }),
   failUnpack: (msg: string | null) => (msg ? sessionStorage.setItem('__mock_unpack_fail', msg) : sessionStorage.removeItem('__mock_unpack_fail')),
+  sync: syncMock,
   emit,
 };
 (window as any).__MOCK__ = mock;
@@ -160,7 +267,8 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
     case 'plugin:dialog|save': {
       const pick = mock.pick ?? `${__DEV_HOME__}/Desktop/${args.options?.defaultPath}`;
       mock.pick = null;
-      sessionStorage.setItem('__mock_last_saved', pick);
+      const key = args.options?.filters?.[0]?.name === 'LinguaClip Sync' ? '__mock_last_sync_pack' : '__mock_last_saved';
+      sessionStorage.setItem(key, pick);
       return pick;
     }
     case 'backup_write': {
@@ -208,9 +316,15 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
       return null;
     }
     case 'plugin:dialog|open': {
-      const exts: string[] = args.options?.filters?.[0]?.extensions ?? [];
-      if (args.options?.filters?.[0]?.name === 'LinguaClip') { // a backup (utils/desktop.ts pickBackupFile)
+      const filter = args.options?.filters?.[0];
+      const exts: string[] = filter?.extensions ?? [];
+      if (filter?.name === 'LinguaClip') { // a backup (utils/desktop.ts pickBackupFile)
         const pick = mock.pick ?? sessionStorage.getItem('__mock_last_saved');
+        mock.pick = null;
+        return pick;
+      }
+      if (filter?.name === 'LinguaClip Sync') { // a sync merge pack (utils/desktop.ts pickSyncPackFile)
+        const pick = mock.pick ?? sessionStorage.getItem('__mock_last_sync_pack');
         mock.pick = null;
         return pick;
       }
@@ -218,12 +332,24 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
       mock.pick = null;
       return pick;
     }
-    case 'plugin:fs|exists':
+    case 'plugin:fs|exists': {
       if (cache.has(args.path)) return true;
+      const clipPrefix = `${OWN}/clips/`;
+      if (typeof args.path === 'string' && args.path.startsWith(clipPrefix) && args.path.slice(clipPrefix.length) in loadObj(SYNC_CLIPS_KEY)) return true;
       return (await fetch(fsUrl(args.path), { method: 'HEAD' })).ok;
+    }
     case 'plugin:fs|read_file': {
       // anki_* = a batch's cuts for Anki (utils/ankiExport.ts); cut_clip makes no file here, so hand back a few bytes.
       if (/\/clips\/anki_[^/]+$/.test(args.path)) return new Uint8Array([1, 2, 3, 4]).buffer;
+      const clipPrefix = `${OWN}/clips/`;
+      if (typeof args.path === 'string' && args.path.startsWith(clipPrefix)) {
+        const clipBody = loadObj<Record<string, string>>(SYNC_CLIPS_KEY)[args.path.slice(clipPrefix.length)];
+        if (clipBody != null) return new TextEncoder().encode(clipBody).buffer;
+      }
+      if (typeof args.path === 'string') {
+        const jsonPack = loadObj<Record<string, string>>('__mock_sync_json_packs')[args.path];
+        if (jsonPack != null) return new TextEncoder().encode(jsonPack).buffer;
+      }
       const ja = /^\/__ja-dict\/([\w.]+)$/.exec(args.path);
       const res = await fetch(ja ? `/node_modules/kuromoji/dict/${ja[1]}` : fsUrl(args.path));
       if (!res.ok) throw new Error(`mock fs: ${res.status} ${args.path}`);
@@ -253,13 +379,36 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
       }
       mock.convertTool = true;
       return null;
+    case 'youtube_tool_status': {
+      const dir = `${__DEV_HOME__}/Library/Application Support/com.linguaclip.app/youtube`;
+      return { ready: mock.youtubeTool, path: mock.youtubeTool ? `${dir}/yt-dlp` : null, dir, bytes: mock.youtubeTool ? 0 : 104_644_070 };
+    }
+    case 'install_youtube_tool':
+      for (let pct = 0; pct < 100; pct += 20) {
+        await emit('youtube-tool-progress', pct);
+        await new Promise(r => setTimeout(r, 300));
+      }
+      mock.youtubeTool = true;
+      return null;
+    case 'open_youtube_window':
+      mock.youtubeWindow = args;
+      return null;
+    case 'youtube_pick_done':
+      mock.youtubePicksDone.push(args);
+      return null;
     case 'probe_video':
       if (!mock.convertTool) throw 'missing:ffmpeg';
       return mock.probe;
     // Nothing is cut here: files named like the real ones can be made by hand in ~/Movies/LinguaClip/clips.
-    case 'cut_clip':
+    case 'cut_clip': {
       if (mock.clipFail) throw mock.clipFail;
-      return args.kind === 'video' ? { file: `${args.name}.mp4`, image: null } : { file: `${args.name}.m4a`, image: `${args.name}.jpg` };
+      const res = args.kind === 'video' ? { file: `${args.name}.mp4`, image: null } : { file: `${args.name}.m4a`, image: `${args.name}.jpg` };
+      const clips = loadObj<Record<string, string>>(SYNC_CLIPS_KEY);
+      clips[res.file] = `mock-clip:${res.file}`;
+      if (res.image) clips[res.image] = `mock-clip:${res.image}`;
+      saveObj(SYNC_CLIPS_KEY, clips);
+      return res;
+    }
     case 'sweep_clips':
       return 0;
     case 'clips_info':
@@ -270,6 +419,8 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
     case 'plugin:fs|read_text_file': {
       const hit = cache.get(args.path);
       if (hit != null) return new TextEncoder().encode(hit).buffer;
+      const packHit = loadObj<Record<string, SyncPack>>(SYNC_PACKS_KEY)[args.path];
+      if (packHit && typeof packHit.snapshotJson === 'string') return new TextEncoder().encode(packHit.snapshotJson).buffer;
       const res = await fetch(fsUrl(args.path));
       if (!res.ok) throw new Error(`mock fs: ${res.status} ${args.path}`);
       return res.arrayBuffer();
@@ -359,6 +510,161 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
     case 'android_purge_files':
     case 'android_sweep_orphans':
       return 0;
+    case 'sync_webdav_test': {
+      const remoteRoot = checkSyncCfg(args.config);
+      const store = loadObj<Record<string, unknown>>(SYNC_FILES_KEY);
+      const existingDevices = Object.keys(store).filter(k => k.startsWith('devices/') && k.endsWith('.json.gz') && !k.slice(8).includes('/')).length;
+      return { ok: true, remoteRoot, existingDevices };
+    }
+    case 'sync_webdav_list': {
+      checkSyncCfg(args.config);
+      const sub = String(args.subpath ?? '');
+      if (!SYNC_SUBS.has(sub)) throw `sync:invalid_path:${sub}`;
+      const prefix = `${sub}/`;
+      const store = loadObj<Record<string, unknown>>(SYNC_FILES_KEY);
+      return Object.entries(store).flatMap(([k, raw]) => {
+        if (!k.startsWith(prefix)) return [];
+        const name = k.slice(prefix.length);
+        if (!name || name.includes('/')) return [];
+        const entry = syncEntryOf(raw);
+        return entry ? [{ name, etag: entry.etag, size: entry.size }] : [];
+      });
+    }
+    case 'sync_webdav_get_gz': {
+      checkSyncCfg(args.config, true);
+      const rel = String(args.relPath ?? '');
+      checkRelPath(rel);
+      if (!rel.endsWith('.gz')) throw `sync:invalid_path:${rel}`;
+      const entry = syncEntryOf(loadObj<Record<string, unknown>>(SYNC_FILES_KEY)[rel]);
+      if (!entry) throw 'sync:notfound';
+      return entry.content;
+    }
+    case 'sync_webdav_put_gz': {
+      checkSyncCfg(args.config);
+      const rel = String(args.relPath ?? '');
+      checkRelPath(rel);
+      if (!rel.endsWith('.gz')) throw `sync:invalid_path:${rel}`;
+      const content = String(args.content ?? '');
+      const etag = nextEtag();
+      const store = loadObj<Record<string, SyncFile>>(SYNC_FILES_KEY);
+      store[rel] = { content, etag, size: byteLen(content) };
+      saveObj(SYNC_FILES_KEY, store);
+      return etag;
+    }
+    case 'sync_webdav_delete': {
+      checkSyncCfg(args.config);
+      const rel = String(args.relPath ?? '');
+      checkRelPath(rel);
+      const store = loadObj<Record<string, unknown>>(SYNC_FILES_KEY);
+      delete store[rel];
+      saveObj(SYNC_FILES_KEY, store);
+      return null;
+    }
+    case 'sync_upload_clip_pack': {
+      checkSyncCfg(args.config);
+      const rel = String(args.relPath ?? '');
+      checkRelPath(rel);
+      if (!rel.startsWith('clip-packs/')) throw `sync:invalid_path:${rel}`;
+      const maxBytes = typeof args.maxBytes === 'number' ? args.maxBytes : 10 * 1024 * 1024;
+      const maxFile = typeof args.maxFileBytes === 'number' ? args.maxFileBytes : 1_572_864;
+      const localClips = loadObj<Record<string, string>>(SYNC_CLIPS_KEY);
+      const packed: string[] = [];
+      const packMap: Record<string, string> = {};
+      let total = 0;
+      for (const name of new Set<string>(args.files ?? [])) {
+        checkClipName(name);
+        if (!(name in localClips)) continue;
+        const body = localClips[name];
+        const sz = byteLen(body);
+        if (sz > maxFile || total + sz > maxBytes) continue;
+        total += sz;
+        packed.push(name);
+        packMap[name] = body;
+      }
+      if (!packed.length) return [];
+      const body = JSON.stringify(packMap);
+      const store = loadObj<Record<string, SyncFile>>(SYNC_FILES_KEY);
+      store[rel] = { content: body, etag: nextEtag(), size: byteLen(body) };
+      saveObj(SYNC_FILES_KEY, store);
+      return packed;
+    }
+    case 'sync_download_clip_pack': {
+      checkSyncCfg(args.config);
+      const rel = String(args.relPath ?? '');
+      checkRelPath(rel);
+      if (!rel.startsWith('clip-packs/')) throw `sync:invalid_path:${rel}`;
+      const wanted = new Set<string>();
+      for (const n of (args.wantedFiles ?? []) as string[]) { checkClipName(n); wanted.add(n); }
+      if (!wanted.size) return [];
+      const entry = syncEntryOf(loadObj<Record<string, unknown>>(SYNC_FILES_KEY)[rel]);
+      if (!entry) throw 'sync:notfound';
+      let packMap: Record<string, string>;
+      try { packMap = JSON.parse(entry.content); } catch { throw 'sync:corrupt:bad_zip'; }
+      const localClips = loadObj<Record<string, string>>(SYNC_CLIPS_KEY);
+      const extracted: string[] = [];
+      for (const [name, body] of Object.entries(packMap)) {
+        if (wanted.has(name) && typeof body === 'string') { localClips[name] = body; extracted.push(name); }
+      }
+      saveObj(SYNC_CLIPS_KEY, localClips);
+      return extracted;
+    }
+    case 'sync_write_merge_pack': {
+      const dest = args.dest ? String(args.dest) : `${OWN}/tmp/exports/mock-${Date.now()}/LinguaClip-sync-${stamp(new Date(), false)}.zip`;
+      const subs: [string, string][] = [];
+      const seenSub = new Set<string>();
+      for (const [hash, srt] of (args.subs ?? []) as [string, string][]) {
+        if (!VALID_SHA.test(hash)) throw `sync:invalid_path:subs/${hash}.srt.gz`;
+        if (!seenSub.has(hash)) { seenSub.add(hash); subs.push([hash, String(srt)]); }
+      }
+      const localClips = loadObj<Record<string, string>>(SYNC_CLIPS_KEY);
+      const clips: Record<string, string> = {};
+      for (const name of new Set<string>(args.clipFiles ?? [])) {
+        checkClipName(name);
+        if (name in localClips) clips[name] = localClips[name];
+      }
+      const packs = loadObj<Record<string, SyncPack>>(SYNC_PACKS_KEY);
+      packs[dest] = { snapshotJson: String(args.snapshotJson ?? ''), subs, clips };
+      saveObj(SYNC_PACKS_KEY, packs);
+      return dest;
+    }
+    case 'sync_write_merge_json': {
+      const dest = args.dest ? String(args.dest) : `${OWN}/tmp/exports/mock-${Date.now()}/LinguaClip-sync-${stamp(new Date(), false)}.json`;
+      const jsonPacks = loadObj<Record<string, string>>('__mock_sync_json_packs');
+      jsonPacks[dest] = String(args.content ?? '');
+      saveObj('__mock_sync_json_packs', jsonPacks);
+      return dest;
+    }
+    case 'sync_read_merge_pack': {
+      const pack = loadObj<Record<string, SyncPack>>(SYNC_PACKS_KEY)[String(args.path ?? '')];
+      if (!pack) throw 'sync:io:not found';
+      if (typeof pack.snapshotJson !== 'string') throw 'sync:corrupt:missing_sync_json';
+      return { snapshotJson: pack.snapshotJson, subs: pack.subs ?? [], clipNames: Object.keys(pack.clips ?? {}) };
+    }
+    case 'sync_unpack_merge_pack': {
+      const pack = loadObj<Record<string, SyncPack>>(SYNC_PACKS_KEY)[String(args.path ?? '')];
+      if (!pack) throw 'sync:io:not found';
+      const wanted = new Set<string>();
+      for (const n of (args.wantedFiles ?? []) as string[]) { checkClipName(n); wanted.add(n); }
+      if (!wanted.size) return [];
+      const localClips = loadObj<Record<string, string>>(SYNC_CLIPS_KEY);
+      const extracted: string[] = [];
+      for (const [name, body] of Object.entries(pack.clips ?? {})) {
+        if (wanted.has(name) && typeof body === 'string') { localClips[name] = body; extracted.push(name); }
+      }
+      saveObj(SYNC_CLIPS_KEY, localClips);
+      return extracted;
+    }
+    case 'sync_rekey_files': {
+      const fromId = String(args.fromId ?? ''), toId = String(args.toId ?? '');
+      if (!VALID_ID.test(fromId) || !VALID_ID.test(toId)) throw 'sync:invalid_id';
+      if (fromId === toId) return { moved: 0, mediaPaths: [] };
+      let moved = 0;
+      for (const kind of REKEY_KINDS) {
+        const src = `${OWN}/${fromId}.${kind}.json`, dst = `${OWN}/${toId}.${kind}.json`;
+        if (cache.has(src) && !cache.has(dst)) { cache.set(dst, cache.get(src)!); cache.delete(src); moved++; }
+      }
+      return { moved, mediaPaths: [] };
+    }
     default:
       // start_import, open_youtube_login, window chrome… nothing to do in a browser
       return null;

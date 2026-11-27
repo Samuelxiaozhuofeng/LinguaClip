@@ -2,7 +2,7 @@
 // screen, step 2's hard-line bar, the card after listening blind ("how much did you
 // follow" and what comes next) and the section's summary (hard lines into review,
 // starred lines, words looked up).
-import React, { useState } from 'react';
+import React from 'react';
 import type { Subtitle } from '../types';
 import { useT, type DictKey } from '../utils/i18n';
 import type { Heard, Way } from '../pro/listenLevel';
@@ -23,9 +23,21 @@ export const StepBar: React.FC<{ step: number; onStep: (n: number) => void; clas
   );
 };
 
-export const Blind: React.FC<{ lines: Subtitle[]; at: number; marked: Set<number>; hint: string | null }> = ({ lines, at, marked, hint }) => {
+export const Blind: React.FC<{
+  lines: Subtitle[];
+  at: number;
+  marked: Set<number>;
+  hint: string | null;
+  embedded?: boolean;
+  multiSection?: boolean;
+}> = ({ lines, at, marked, hint, embedded = false, multiSection = false }) => {
   const t = useT();
   const n = lines.filter(l => marked.has(l.id)).length;
+  const lineLabel = !embedded
+    ? t('m.lineOf', { n: Math.max(0, at) + 1, total: lines.length })
+    : multiSection
+      ? t('m.w1SecLineOf', { n: Math.max(0, at) + 1, total: lines.length })
+      : null;
   return (
     <div className="h-full flex flex-col items-center justify-center gap-[18px] px-7 text-center">
       {hint && <p className="text-[13px] text-mute">{hint}</p>}
@@ -34,7 +46,7 @@ export const Blind: React.FC<{ lines: Subtitle[]; at: number; marked: Set<number
           <span key={l.id} className={`w-1 rounded-sm ${k === at ? 'h-9 bg-accent' : marked.has(l.id) ? 'h-6 bg-accent/70' : k < at ? 'h-3.5 bg-mute' : 'h-3.5 bg-faint'}`} />
         ))}
       </div>
-      <p className="text-[15px] text-mute">{t('m.lineOf', { n: Math.max(0, at) + 1, total: lines.length })}</p>
+      {lineLabel && <p className="text-[15px] text-mute">{lineLabel}</p>}
       {n > 0 && <p className="text-[13px] text-mute bg-page rounded-full px-3 py-1.5">{t('m.markedN', { n })}</p>}
     </div>
   );
@@ -103,28 +115,49 @@ export const PassSheet: React.FC<{ ask: React.ReactNode; hard: number; on: strin
 };
 
 export type Looked = { word: string; key: string; kept: boolean; can: boolean };
+export type SummaryMissed = { line: Subtitle; saved: boolean; removed: boolean };
 
-// The summary: hard lines (ticked = needs more work or not worked on) go into review
-// with "save"; starred lines are already there; words looked up can be kept.
+// The summary: hard lines are already in review (can be removed with undo); starred lines
+// stay in review; words looked up can be kept.
 export const Summary: React.FC<{
-  title: string; missed: { line: Subtitle; on: boolean; saved: boolean }[]; saved: Subtitle[]; words: Looked[];
-  busy: boolean; fail: boolean; added: boolean; onward: boolean;
-  onAdd: (picked: Subtitle[]) => void; onKeep: (key: string) => void; onAgain: () => void; onNext: () => void; onHome: () => void; onClose: () => void;
-}> = ({ title, missed, saved, words, busy, fail, added, onward, onAdd, onKeep, onAgain, onNext, onHome, onClose }) => {
+  title: string; missed: SummaryMissed[]; saved: Subtitle[]; words: Looked[];
+  onward: boolean;
+  onRemoveMissed: (line: Subtitle) => void; onUndoMissed: (line: Subtitle) => void;
+  onKeep: (key: string) => void; onAgain: () => void; onNext: () => void; onHome: () => void; onClose: () => void;
+}> = ({ title, missed, saved, words, onward, onRemoveMissed, onUndoMissed, onKeep, onAgain, onNext, onHome, onClose }) => {
   const t = useT();
-  const [ticked, setTicked] = useState(() => new Set(missed.filter(m => m.on).map(m => m.line.id)));
-  const picked = missed.filter(m => ticked.has(m.line.id)).map(m => m.line);
-  const flip = (id: number) => setTicked(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const activeMissed = missed.filter(m => !m.removed).length;
   return (
     <Sheet label={title} onClose={onClose}>
       {missed.length > 0 && (
-        <section className="flex flex-col gap-1">
-          <p className="text-[13px] text-mute">{t('listen.missedHead', { n: missed.length })}</p>
+        <section className="flex flex-col gap-1.5">
+          <p className="text-[13px] text-mute">{t('m.w1MissedHead', { n: activeMissed })}</p>
           {missed.map(m => (
-            <label key={m.line.id} className="min-h-[44px] flex items-start gap-3 py-2">
-              <input type="checkbox" className="mt-1 w-5 h-5 accent-accent" checked={ticked.has(m.line.id)} disabled={added} onChange={() => flip(m.line.id)} />
-              <span className="font-serif text-[16px] leading-snug">{m.saved ? '★ ' : ''}{m.line.text}</span>
-            </label>
+            <div key={m.line.id} className="min-h-[44px] flex items-start gap-2.5 py-1.5 border-b border-shade last:border-0">
+              <div className="flex-1 min-w-0">
+                <p className={`font-serif text-[16px] leading-snug ${m.removed ? 'line-through text-mute' : ''}`}>
+                  {m.saved ? '★ ' : ''}{m.line.text}
+                </p>
+                {m.removed && <p className="text-xs text-mute mt-0.5">{t('m.w1RemovedReview')}</p>}
+              </div>
+              {m.removed ? (
+                <button
+                  type="button"
+                  onClick={() => onUndoMissed(m.line)}
+                  className="shrink-0 min-h-[44px] px-3 rounded-[10px] bg-accent-soft text-accent text-[13px] font-medium active:opacity-80"
+                >
+                  {t('review.undo')}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onRemoveMissed(m.line)}
+                  className="shrink-0 min-h-[44px] px-3 rounded-[10px] bg-shade text-mute text-[13px] active:bg-line"
+                >
+                  {t('m.w1RemoveReview')}
+                </button>
+              )}
+            </div>
           ))}
         </section>
       )}
@@ -134,7 +167,7 @@ export const Summary: React.FC<{
           {saved.map(l => <p key={l.id} className="font-serif text-[16px] leading-snug">★ {l.text}</p>)}
         </section>
       )}
-      {!missed.length && !saved.length && <p className="text-sm text-mute leading-relaxed">{t('m.summaryEmpty')}</p>}
+      {!missed.length && !saved.length && <p className="text-sm text-mute leading-relaxed">{t('m.w1SummaryEmpty')}</p>}
       {words.length > 0 && (
         <section className="flex flex-col gap-1.5">
           <p className="text-[13px] text-mute">{t('m.lookedHead')}</p>
@@ -148,9 +181,6 @@ export const Summary: React.FC<{
           </div>
         </section>
       )}
-      {fail && <p role="alert" className="text-sm text-accent">{t('listen.addFail')}</p>}
-      {picked.length > 0 && !added && <button className={btnPrimary} disabled={busy} onClick={() => onAdd(picked)}>{t('m.addMissed', { n: picked.length })}</button>}
-      {added && <p className="text-sm text-mute">{t('m.addedMissed')}</p>}
       <div className="grid grid-cols-2 gap-2.5">
         <button className={btnPlain} onClick={onAgain}>{t('listen.again')}</button>
         {onward ? <button className={btnPlain} onClick={onNext}>{t('listen.next')}</button> : <button className={btnPlain} onClick={onHome}>{t('m.toHome')}</button>}

@@ -14,6 +14,7 @@ import { addLine, clearMastered } from '../../utils/review';
 import { getLooseJudge, getPracticeConfig, savePracticeConfig } from '../../utils/storage';
 import { getWordTokens, judgeWord, tokenizeText } from '../../utils/textTokenizer';
 import { countLine } from '../../utils/today';
+import { autoAddOn } from '../autoAdd';
 import { errText } from '../ui';
 import { useWordLookup } from '../useWordLookup';
 import { WordSheet } from '../WordSheet';
@@ -22,13 +23,14 @@ import { ClozeBar, ClozeLine } from './ClozeLine';
 import {
   AUTO_NEXT_MS,
   aroundOf,
+  hasAnyClozeInput,
   padSecOf,
   sortedLines,
   startIndexForSec,
   stripLookupPunct,
 } from './drillCommon';
 import type { WayProps } from './types';
-import { useKeyboardInset } from './useKeyboardInset';
+import { useKeyboardBackClose, useKeyboardInset } from './useKeyboardInset';
 import { PlayerAudio, useLinePlayer } from './useLinePlayer';
 
 type ClozeDensity = 'easy' | 'medium';
@@ -81,7 +83,8 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
   const inputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const composingRef = useRef<Record<number, boolean>>({});
   const autoTimer = useRef<number | null>(null);
-  const countedRef = useRef(false);
+  const countedLinesRef = useRef<Set<number>>(new Set());
+  const stuckLineRef = useRef(false);
 
   const clearAuto = useCallback(() => {
     if (autoTimer.current !== null) {
@@ -91,8 +94,11 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
   }, []);
   useEffect(() => clearAuto, [clearAuto]);
 
+  useKeyboardBackClose(kbInset, showBreakdown || !!def);
+
   useEffect(() => {
     clearAuto();
+    countedLinesRef.current = new Set();
     setIdx(startIndexForSec(lines, startSec));
     setDone(false);
   }, [record.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -144,7 +150,7 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
 
   useEffect(() => {
     clearAuto();
-    countedRef.current = false;
+    stuckLineRef.current = false;
     setInputs({});
     setLeftBlanks(new Set());
     setSubmitted(false);
@@ -156,6 +162,12 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
     onLine?.(idx + 1, lines.length);
     player.playLine(idx, pad);
   }, [idx, done, line?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const countOnce = useCallback(() => {
+    if (!line || countedLinesRef.current.has(line.id)) return;
+    countedLinesRef.current.add(line.id);
+    countLine();
+  }, [line]);
 
   const changeDensity = (next: ClozeDensity) => {
     setDensity(next);
@@ -177,9 +189,10 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
   }, [clearAuto, idx, lines.length, player]);
 
   const recordStuck = useCallback((reason: 'wrong' | 'peek') => {
-    if (!line) return;
+    if (!line || stuckLineRef.current) return;
+    stuckLineRef.current = true;
     clearMastered(record.id, line.startTime).catch(() => {});
-    if (getPracticeConfig().autoAddReview) {
+    if (autoAddOn()) {
       addLine(
         {
           videoId: record.id,
@@ -197,16 +210,13 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
   const finishRight = useCallback(() => {
     setAllRight(true);
     setSubmitted(true);
-    if (!countedRef.current) {
-      countedRef.current = true;
-      countLine();
-    }
+    countOnce();
     clearAuto();
     autoTimer.current = window.setTimeout(() => {
       autoTimer.current = null;
       advance();
     }, AUTO_NEXT_MS);
-  }, [advance, clearAuto]);
+  }, [advance, clearAuto, countOnce]);
 
   const isBlankRight = useCallback((bi: number, map: Record<number, string>) => {
     const tk = wordTokens[bi];
@@ -234,7 +244,8 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
   };
 
   const handleSubmit = () => {
-    if (blanks.length === 0) return;
+    if (blanks.length === 0 || !hasAnyClozeInput(blanks, inputs)) return;
+    countOnce();
     if (blanks.every(b => isBlankRight(b, inputs))) {
       finishRight();
     } else {
@@ -298,6 +309,7 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
     : '';
   const isSaved = !!line && savedIds.has(line.id);
   const canFill = hasAi && blanks.length > 0;
+  const canSubmit = hasAnyClozeInput(blanks, inputs);
 
   return (
     <div
@@ -373,13 +385,17 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
                 setInputs(nextMap);
                 settleBlank(bi, nextMap);
               }}
-              onBlankFocus={bi => setLeftBlanks(prev => {
-                if (!prev.has(bi)) return prev;
-                const n = new Set(prev);
-                n.delete(bi);
-                return n;
-              })}
-              onBlankBlur={bi => setLeftBlanks(prev => new Set(prev).add(bi))}
+              onBlankFocus={bi => {
+                setLeftBlanks(prev => {
+                  if (!prev.has(bi)) return prev;
+                  const n = new Set(prev);
+                  n.delete(bi);
+                  return n;
+                });
+              }}
+              onBlankBlur={bi => {
+                setLeftBlanks(prev => new Set(prev).add(bi));
+              }}
               onBlankEnter={bi => {
                 const nextB = blanks.find(b => b > bi && !isBlankRight(b, inputs));
                 if (nextB !== undefined) inputRefs.current[nextB]?.focus();
@@ -390,7 +406,7 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
 
             {allRight && (
               <p role="status" data-testid="cloze-all-right" className="self-start px-3 py-1.5 rounded-full bg-shade text-ink text-[13px] font-medium">
-                {t('m.dictAllRightAuto')}
+                {stuckLineRef.current ? t('m.fxRightAfterWrong') : t('m.dictAllRightAuto')}
               </p>
             )}
 
@@ -428,6 +444,7 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
 
       <ClozeBar
         canFill={canFill}
+        canSubmit={canSubmit}
         submitted={submitted}
         rate={player.rate}
         kbInset={kbInset}
@@ -435,7 +452,7 @@ export const ClozeWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, 
         canNext={idx + 1 < lines.length}
         onReplay={() => player.playLine(idx, pad)}
         onToggleSlow={() => player.setRate(player.rate < 0.99 ? 1 : 0.75)}
-        onReveal={() => { setSubmitted(true); recordStuck('peek'); }}
+        onReveal={() => { countOnce(); setSubmitted(true); recordStuck('peek'); }}
         onSubmit={handleSubmit}
         onPrev={() => setIdx(i => Math.max(0, i - 1))}
         onNext={advance}

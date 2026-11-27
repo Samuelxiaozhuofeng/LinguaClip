@@ -1,6 +1,7 @@
-// Touch dictation way (docs/android-roadmap.md M2.2).
-// Renders sentence blanks / word-by-word graded feedback (right / near dashed / wrong)
-// in a scrollable body above a keyboard-safe fixed 4-button + input dock.
+// Touch dictation way (docs/android.md「手机学习闭环」).
+// Renders sentence blanks / graded feedback (right / near dashed / wrong / extra struck-through),
+// optional cached translation, independent vs helped-correct feedback, per-section summary,
+// and a keyboard-safe dock with Replay / 0.75x / Hint / Reveal + Prev / Skip / Next + auto-grow input.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Subtitle } from '../../types';
 import { useSavedLines } from '../../hooks/useSavedLines';
@@ -9,31 +10,49 @@ import { useT } from '../../utils/i18n';
 import { loadJa, useJaVersion } from '../../utils/japanese';
 import { settleSplits } from '../../utils/jaSegments';
 import { addLine, clearMastered } from '../../utils/review';
-import { getLooseJudge, getPracticeConfig } from '../../utils/storage';
-import { getWordTokens, tokenizeText } from '../../utils/textTokenizer';
+import { buildSections, sectionLengthOf } from '../../utils/sections';
+import { getLooseJudge } from '../../utils/storage';
+import { getWordTokens } from '../../utils/textTokenizer';
 import { countLine } from '../../utils/today';
-import { checkDictation, type Checked } from '../dictation';
+import { autoAddOn } from '../autoAdd';
+import { checkDictation, tokenizeDictation, type Checked } from '../dictation';
 import { errText } from '../ui';
 import { useWordLookup } from '../useWordLookup';
 import { WordSheet } from '../WordSheet';
 import { BreakdownSheet } from './BreakdownSheet';
 import { DictDock } from './DictDock';
+import { DictSectionSummary } from './DictSectionSummary';
+import { DictStatusBar } from './DictStatusBar';
 import { GradedLine } from './GradedLine';
 import {
   AUTO_NEXT_MS,
   aroundOf,
+  clearSectionStats,
+  getSectionStats,
   nextHintIndex,
   padSecOf,
+  prevLineInSection,
+  recordSectionIndependent,
+  recordSectionStuck,
+  sectionForLine,
+  sectionRangesOf,
   sortedLines,
   startIndexForSec,
+  type SectionStatsMap,
 } from './drillCommon';
 import type { WayProps } from './types';
-import { useKeyboardInset } from './useKeyboardInset';
+import { useCachedTrans } from './useCachedTrans';
+import { useKeyboardBackClose, useKeyboardInset } from './useKeyboardInset';
 import { PlayerAudio, useLinePlayer } from './useLinePlayer';
 
-export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, onExit }) => {
+export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, onExit, onReview }) => {
   const t = useT();
   const lines = useMemo(() => sortedLines(record.subtitleText), [record.subtitleText]);
+  const sections = useMemo(
+    () => buildSections(lines, sectionLengthOf(record)),
+    [lines, record.podcast?.feed], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const ranges = useMemo(() => sectionRangesOf(lines, sections), [lines, sections]);
   const lang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
   const ja = lang === 'ja';
   const jaVersion = useJaVersion();
@@ -43,6 +62,7 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
     settleSplits(record.id, lines.map(l => l.text)).catch(() => {});
   }, [ja, record.id, lines]);
 
+  const trans = useCachedTrans(record.id, lines);
   const player = useLinePlayer(record, lines);
   const { savedIds, toggleSave } = useSavedLines({
     videoId: record.id,
@@ -53,16 +73,21 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
   const kbInset = useKeyboardInset();
 
   const [idx, setIdx] = useState(() => startIndexForSec(lines, startSec));
-  const [done, setDone] = useState(false);
+  const [roundKey, setRoundKey] = useState(0);
+  const [sectionSummary, setSectionSummary] = useState<number | null>(null);
+  const [statsBySec, setStatsBySec] = useState<SectionStatsMap>({});
   const [typed, setTyped] = useState('');
   const [hinted, setHinted] = useState<Set<number>>(() => new Set());
   const [result, setResult] = useState<Checked | null>(null);
   const [revealed, setRevealed] = useState(false);
+  const [everRevealed, setEverRevealed] = useState(false);
+  const [wrongTries, setWrongTries] = useState(0);
   const [showBreakdown, setShowBreakdown] = useState(false);
 
   const autoTimer = useRef<number | null>(null);
-  const countedRef = useRef(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const countedLinesRef = useRef<Set<number>>(new Set());
+  const stuckLineRef = useRef(false);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lenient = useMemo(getLooseJudge, []);
   const pad = useMemo(padSecOf, []);
 
@@ -75,49 +100,77 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
 
   useEffect(() => clearAuto, [clearAuto]);
 
+  useKeyboardBackClose(kbInset, showBreakdown || !!def);
+
   // Reset when switching record.
   useEffect(() => {
     clearAuto();
+    countedLinesRef.current = new Set();
     setIdx(startIndexForSec(lines, startSec));
-    setDone(false);
+    setSectionSummary(null);
+    setStatsBySec({});
   }, [record.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const line: Subtitle | undefined = lines[idx];
+  const curRange = useMemo(() => sectionForLine(ranges, idx), [ranges, idx]);
+  const curSecIdx = curRange?.index ?? 0;
   const tokens = useMemo(
-    () => (line ? tokenizeText(line.text) : []),
-    [line, jaVersion], // eslint-disable-line react-hooks/exhaustive-deps
+    () => (line ? tokenizeDictation(line.text, lang) : []),
+    [line, lang, jaVersion], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const wordCount = useMemo(() => getWordTokens(tokens).length, [tokens]);
 
   // Report position & line number and auto-play each line when entering it.
   useEffect(() => {
     clearAuto();
-    countedRef.current = false;
+    stuckLineRef.current = false;
     setTyped('');
     setHinted(new Set());
     setResult(null);
     setRevealed(false);
+    setEverRevealed(false);
+    setWrongTries(0);
     setShowBreakdown(false);
-    if (!line || done) return;
+    if (!line || sectionSummary !== null) return;
     onPos(line.startTime);
     onLine?.(idx + 1, lines.length);
     player.playLine(idx, pad);
-  }, [idx, done, line?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [idx, sectionSummary, roundKey, line?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const countOnce = useCallback(() => {
+    if (!line || countedLinesRef.current.has(line.id)) return;
+    countedLinesRef.current.add(line.id);
+    countLine();
+  }, [line]);
 
   const advance = useCallback(() => {
     clearAuto();
+    if (curRange && idx + 1 >= curRange.endIdx) {
+      // Nothing answered in this section this time (e.g. resumed on its last line and skipped):
+      // no empty 0 / 0 summary, just carry on into the next section.
+      const s = getSectionStats(statsBySec, curRange.index);
+      if (s.independent.size + s.stuck.size === 0 && idx + 1 < lines.length) {
+        setIdx(i => i + 1);
+        return;
+      }
+      player.pause();
+      setSectionSummary(curRange.index);
+      return;
+    }
     if (idx + 1 < lines.length) {
       setIdx(i => i + 1);
     } else {
       player.pause();
-      setDone(true);
+      setSectionSummary(Math.max(0, ranges.length - 1));
     }
-  }, [clearAuto, idx, lines.length, player]);
+  }, [clearAuto, curRange, idx, lines.length, player, ranges.length, statsBySec]);
 
   const recordStuck = useCallback((reason: 'wrong' | 'peek') => {
-    if (!line) return;
+    if (!line || stuckLineRef.current) return;
+    stuckLineRef.current = true;
+    setStatsBySec(prev => recordSectionStuck(prev, curSecIdx, line.id));
     clearMastered(record.id, line.startTime).catch(() => {});
-    if (getPracticeConfig().autoAddReview) {
+    if (autoAddOn()) {
       addLine(
         {
           videoId: record.id,
@@ -130,17 +183,17 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
         reason,
       ).catch(console.error);
     }
-  }, [line, record.id, record.videoFileName, record.videoPath]);
+  }, [curSecIdx, line, record.id, record.videoFileName, record.videoPath]);
 
   const handleSubmit = useCallback(() => {
     if (!line || !typed.trim()) return;
-    const checked = checkDictation(line.text, typed, lenient);
+    countOnce();
+    const checked = checkDictation(line.text, typed, lenient, lang);
     setResult(checked);
     setRevealed(false);
     if (checked.correct) {
-      if (!countedRef.current) {
-        countedRef.current = true;
-        countLine();
+      if (!everRevealed && hinted.size === 0 && !stuckLineRef.current) {
+        setStatsBySec(prev => recordSectionIndependent(prev, curSecIdx, line.id));
       }
       clearAuto();
       autoTimer.current = window.setTimeout(() => {
@@ -148,28 +201,43 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
         advance();
       }, AUTO_NEXT_MS);
     } else {
+      setWrongTries(n => n + 1);
       recordStuck('wrong');
     }
-  }, [advance, clearAuto, lenient, line, recordStuck, typed]);
+  }, [advance, clearAuto, countOnce, curSecIdx, everRevealed, hinted.size, lang, lenient, line, recordStuck, typed]);
 
   const handleHint = useCallback(() => {
     if (!line || revealed || result?.correct) return;
-    const nextIdx = nextHintIndex(line.text, typed, hinted, lenient);
+    const nextIdx = nextHintIndex(line.text, typed, hinted, lenient, lang);
     if (nextIdx < 0) return;
+    recordStuck('peek');
     setHinted(prev => {
       const next = new Set(prev);
       next.add(nextIdx);
       return next;
     });
-  }, [hinted, lenient, line, result?.correct, revealed, typed]);
+  }, [hinted, lang, lenient, line, recordStuck, result?.correct, revealed, typed]);
 
   const handleReveal = useCallback(() => {
     if (!line || revealed) return;
     clearAuto();
+    countOnce();
     setRevealed(true);
+    setEverRevealed(true);
     setResult(null);
     recordStuck('peek');
-  }, [clearAuto, line, recordStuck, revealed]);
+  }, [clearAuto, countOnce, line, recordStuck, revealed]);
+
+  const prevIdx = prevLineInSection(idx, curRange);
+  const handlePrev = useCallback(() => {
+    if (prevIdx === null) return;
+    clearAuto();
+    setIdx(prevIdx);
+  }, [clearAuto, prevIdx]);
+
+  const handleSkip = useCallback(() => {
+    advance();
+  }, [advance]);
 
   const handleInputChange = (val: string) => {
     setTyped(val);
@@ -212,37 +280,45 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
     );
   }
 
-  if (done) {
+  if (sectionSummary !== null) {
+    const finished = ranges[sectionSummary] ?? ranges[0];
+    const nextSec = ranges[sectionSummary + 1];
+    const summaryStats = getSectionStats(statsBySec, sectionSummary);
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8 text-center">
+      <>
         <PlayerAudio player={player} />
-        <h2 className="text-xl font-semibold text-ink">{t('m.dictDoneTitle')}</h2>
-        <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => { setDone(false); setIdx(0); }}
-            className="min-h-[46px] px-5 rounded-xl bg-page shadow-card text-[15px] font-medium text-ink"
-          >
-            {t('m.dictRestart')}
-          </button>
-          <button
-            type="button"
-            onClick={onExit}
-            className="min-h-[46px] px-5 rounded-xl bg-accent text-white text-[15px] font-semibold"
-          >
-            {t('m.toHome')}
-          </button>
-        </div>
-      </div>
+        <DictSectionSummary
+          sectionNum={sectionSummary + 1}
+          totalSections={ranges.length}
+          independentCount={summaryStats.independent.size}
+          stuckCount={summaryStats.stuck.size}
+          autoAddEnabled={autoAddOn()}
+          onReview={onReview}
+          onRetrySection={() => {
+            setStatsBySec(prev => clearSectionStats(prev, sectionSummary));
+            setSectionSummary(null);
+            setIdx(finished ? finished.startIdx : 0);
+            setRoundKey(k => k + 1);
+          }}
+          onNextSection={nextSec ? () => {
+            setSectionSummary(null);
+            setIdx(nextSec.startIdx);
+            setRoundKey(k => k + 1);
+          } : undefined}
+          onExit={onExit}
+        />
+      </>
     );
   }
 
   const audioErr = player.errorCode
     ? (player.errorCode === 'listen.failed' ? t('listen.failed') : errText(player.errorCode))
     : '';
-  const showActions = !!line && (revealed || (result !== null && !result.correct));
   const isSaved = !!line && savedIds.has(line.id);
-  const canHint = !!line && !revealed && !result?.correct && nextHintIndex(line.text, typed, hinted, lenient) >= 0;
+  const curSecStats = getSectionStats(statsBySec, curSecIdx);
+  const canHint = !!line && !revealed && !result?.correct && nextHintIndex(line.text, typed, hinted, lenient, lang) >= 0;
+  const needsNext = revealed || (result !== null && !result.correct);
+  const answered = revealed || result !== null;
 
   return (
     <div
@@ -251,18 +327,18 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
     >
       <PlayerAudio player={player} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-3 pb-4 flex flex-col gap-3">
-        <p className="text-xs text-mute px-1">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-2.5 pb-3 flex flex-col gap-2.5" data-testid="dict-scroll">
+        <p className="text-[13px] text-mute px-1">
           {t('m.dictPrompt', { n: wordCount })}
         </p>
 
         {audioErr && (
-          <p role="alert" className="text-xs text-accent px-1">
+          <p role="alert" className="text-[13px] text-accent px-1">
             {audioErr}
           </p>
         )}
 
-        <div className="bg-page rounded-2xl shadow-card px-4 py-5 flex flex-col gap-4">
+        <div className="bg-page rounded-2xl shadow-card px-4 py-4 flex flex-col gap-3">
           <GradedLine
             tokens={tokens}
             hinted={hinted}
@@ -271,54 +347,19 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
             onWord={handleWordTap}
           />
 
-          {result?.correct && (
-            <p
-              role="status"
-              data-testid="dict-all-right"
-              className="self-start px-3 py-1.5 rounded-full bg-shade text-ink text-[13px] font-medium"
-            >
-              {t('m.dictAllRightAuto')}
-            </p>
-          )}
-
-          {result && !result.correct && (() => {
-            const wrongWords = result.words.filter(w => w.verdict !== 'right').length || result.wrong;
-            return (
-              <p className="text-xs text-mute" role="status">
-                {result.near > 0
-                  ? t('m.dictNearSummary', { wrong: wrongWords, near: result.near })
-                  : t('m.dictWrongSummary', { wrong: wrongWords })}
-              </p>
-            );
-          })()}
-
-          {showActions && line && (
-            <div className="pt-1 border-t border-shade flex flex-wrap items-center gap-2" data-testid="dict-actions">
-              <button
-                type="button"
-                onClick={() => { player.pause(); setShowBreakdown(true); }}
-                className="min-h-[44px] px-3.5 rounded-xl bg-shade text-ink text-[14px] font-medium"
-              >
-                {t('studio.breakdown')}
-              </button>
-              <button
-                type="button"
-                aria-pressed={isSaved}
-                onClick={() => toggleSave(line)}
-                className={`min-h-[44px] px-3.5 rounded-xl text-[14px] font-medium ${
-                  isSaved ? 'bg-accent-soft text-accent' : 'bg-shade text-ink'
-                }`}
-              >
-                {isSaved ? t('m.saved') : t('m.dictSaveLine')}
-              </button>
-              <button
-                type="button"
-                onClick={advance}
-                className="ml-auto min-h-[44px] px-4 rounded-xl bg-accent text-white text-[14px] font-semibold"
-              >
-                {t('m.nextLine')}
-              </button>
-            </div>
+          {line && (
+            <DictStatusBar
+              result={result}
+              revealed={revealed}
+              everRevealed={everRevealed}
+              usedHint={hinted.size > 0}
+              wrongTries={wrongTries}
+              alreadyStuck={curSecStats.stuck.has(line.id)}
+              trans={trans?.[idx] ?? null}
+              isSaved={isSaved}
+              onBreakdown={() => { player.pause(); setShowBreakdown(true); }}
+              onToggleSave={() => toggleSave(line)}
+            />
           )}
         </div>
       </div>
@@ -334,6 +375,12 @@ export const DictationWay: React.FC<WayProps> = ({ record, startSec, onPos, onLi
         hintDisabled={!canHint}
         onReveal={handleReveal}
         revealDisabled={revealed || !!result?.correct}
+        onPrev={handlePrev}
+        prevDisabled={prevIdx === null}
+        onSkip={handleSkip}
+        skipDisabled={answered}
+        onNext={advance}
+        nextHighlight={needsNext}
         submitDisabled={!!result?.correct}
         keyboardOpen={kbInset > 0}
         inputRef={inputRef}

@@ -2,11 +2,12 @@
 // language strip, button looks, how much of a record was heard, and what an import
 // error code means in words.
 import React from 'react';
-import type { VideoRecord } from '../types';
+import type { Subtitle, VideoRecord } from '../types';
 import { STARTER_FEED } from '../utils/sections';
 import { parseSRT } from '../utils/srtParser';
-import { getWatchPos } from '../utils/storage';
 import { t, useT } from '../utils/i18n';
+import { phoneLangName } from './homeHelpers';
+import { resumeSecOf } from './resumePos';
 
 export const btnPrimary = 'h-[52px] rounded-[14px] bg-accent text-white text-[15px] font-semibold disabled:opacity-50';
 export const btnPlain = 'h-[52px] rounded-[14px] bg-page text-ink text-[15px] font-semibold shadow-card disabled:opacity-50';
@@ -24,9 +25,7 @@ export const Header: React.FC<{ title: string; onBack: () => void }> = ({ title,
   );
 };
 
-export const langName = (l: string, ui: string) => {
-  try { return new Intl.DisplayNames([ui === 'zh' ? 'zh-CN' : 'en'], { type: 'language' }).of(l) ?? l; } catch { return l; }
-};
+export const langName = (l: string, ui: string) => phoneLangName(l, ui);
 
 export function LangBar<L extends string>({ langs, value, onChange, ui }: { langs: L[]; value: L; onChange: (l: L) => void; ui: string }) {
   return (
@@ -41,14 +40,19 @@ export function LangBar<L extends string>({ langs, value, onChange, ui }: { lang
   );
 }
 
-// "Heard n%": where listening stopped (linguaclip_watch_pos, as on the desktop) against the
-// last line's end; parsed once per record and transcript length.
-const ends = new Map<string, number>();
+// "Heard n%": where listening/practice stopped (resumeSecOf: phone watch_pos, else desktop fallback)
+// against the last line's end; parsed once per record and transcript length.
+const parsedCache = new Map<string, { lines: Subtitle[]; end: number }>();
 export const heardPct = (r: VideoRecord): number => {
   const key = `${r.id}|${r.subtitleText?.length ?? 0}`;
-  if (!ends.has(key)) ends.set(key, parseSRT(r.subtitleText ?? '').reduce((m, l) => Math.max(m, l.endTime), 0));
-  const end = ends.get(key)!;
-  return end > 0 ? Math.min(100, Math.round((getWatchPos(r.id) / end) * 100)) : 0;
+  let entry = parsedCache.get(key);
+  if (!entry) {
+    const lines = parseSRT(r.subtitleText ?? '');
+    const end = lines.reduce((m, l) => Math.max(m, l.endTime), 0);
+    entry = { lines, end };
+    parsedCache.set(key, entry);
+  }
+  return entry.end > 0 ? Math.min(100, Math.round((resumeSecOf(r, entry.lines) / entry.end) * 100)) : 0;
 };
 
 export const sourceOf = (r: VideoRecord) =>

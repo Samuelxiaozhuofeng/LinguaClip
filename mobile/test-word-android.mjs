@@ -77,7 +77,7 @@ await build({
       };
       export const renderSegText = (line: any) => toHtml(SegText({ line }));
       export { SegText, dictSourceLabel, errorKeyOf } from './mobile/WordSheet.tsx';
-      export { isSafeImgUrl, sanitizeSegs, senseFields, aiFields } from './mobile/useWordLookup.ts';
+      export { isSafeImgUrl, sanitizeSegs, senseFields, aiFields, jaBaseForm, cardWordOf, cardWordForFirst, isEmptyKeep, saveWordCard, phraseSaveFields } from './mobile/useWordLookup.ts';
       export { zh } from './utils/i18n.zh.ts';
       export { en } from './utils/i18n.en.ts';
       export { clean } from './utils/cleanHtml.ts';
@@ -99,7 +99,7 @@ await build({
         contents: 'export const localDictsFor = l => globalThis.__mockLocalFor ? globalThis.__mockLocalFor(l) : []; export const localDictsReady = async () => {}; export const lookupLocal = (w, l) => globalThis.__mockLookupLocal ? globalThis.__mockLookupLocal(w, l) : null;',
       }));
       b.onResolve({ filter: /(?:^|\/)review(\.ts)?$/ }, a => ({ path: a.path, namespace: 'revstub' }));
-      b.onLoad({ filter: /.*/, namespace: 'revstub' }, () => ({ contents: 'export const addWord = async () => {};' }));
+      b.onLoad({ filter: /.*/, namespace: 'revstub' }, () => ({ contents: 'export const addWord = async () => {}; export const addWordIfNew = async () => {};' }));
       b.onResolve({ filter: /(?:^|\/)desktop(\.ts)?$/ }, a => ({ path: a.path, namespace: 'dskstub' }));
       b.onLoad({ filter: /.*/, namespace: 'dskstub' }, () => ({
         contents: 'export const readBinaryFile = async () => new Uint8Array(); export const jaDictStatus = async () => ({ installed: false, size: 0 }); export const installJaDict = async () => {}; export const removeJaDict = async () => {}; export const onJaDictProgress = async () => () => {};',
@@ -466,5 +466,84 @@ try {
 
 // When native bridge is absent, speakWordAux returns false
 assert.equal(await androidMod.speakWordAux('apple', 'en'), false);
+
+// =========================================================================
+// 6. Japanese base-form display & card front saving (other languages untouched)
+// =========================================================================
+const { jaBaseForm, cardWordOf } = uiMod;
+const jaLine = { id: 1, startTime: 0, endTime: 2, text: '昨日リンゴを食べました。' };
+const jaEntry = { word: '食べる', phonetic: 'たべる', senses: [{ pos: '动', text: ['吃'], examples: [] }], source: 'jisho' };
+const jaDef = { word: '食べました', line: jaLine, around: '', lang: 'ja', phrase: false, dict: [jaEntry], ai: null };
+assert.equal(jaBaseForm(jaDef), '食べる', 'conjugated Japanese form shows dictionary base form');
+assert.equal(cardWordOf(jaDef, jaEntry), '食べる', 'Japanese word card saves base form');
+assert.equal(jaBaseForm({ ...jaDef, word: '食べる' }), null, 'same surface and base omits redundant badge');
+assert.equal(cardWordOf({ ...jaDef, word: '食べる' }, jaEntry), '食べる');
+assert.equal(jaBaseForm({ ...jaDef, word: '気をつけて', phrase: true }), null, 'Japanese dragged phrase keeps original phrase');
+assert.equal(cardWordOf({ ...jaDef, word: '気をつけて', phrase: true }, jaEntry), '気をつけて');
+const jaAiDef = { word: '走りました', line: jaLine, around: '', lang: 'ja', phrase: false, dict: null, ai: { word: '走る', partOfSpeech: 'v.', definition: '跑' } };
+assert.equal(jaBaseForm(jaAiDef), '走る', 'Japanese AI fallback headword also provides base form');
+assert.equal(cardWordOf(jaAiDef), '走る');
+
+const enEntry = { word: 'go', phonetic: '', senses: [{ pos: 'v.', text: ['to move'], examples: [] }], source: 'wiktionary' };
+const enDef = { word: 'went', line: jaLine, around: '', lang: 'en', phrase: false, dict: [enEntry], ai: null };
+assert.equal(jaBaseForm(enDef), null, 'English lookup must not show Japanese base-form badge');
+assert.equal(cardWordOf(enDef, enEntry), 'went', 'English word card must keep tapped word unchanged');
+
+// =========================================================================
+// 7. Summary Japanese base-form helper & non-clobbering empty phrase save
+// =========================================================================
+const { cardWordForFirst, isEmptyKeep, saveWordCard, phraseSaveFields } = uiMod;
+const jaMultiDef = {
+  ...jaDef,
+  loading: false,
+  aiBusy: false,
+  aiError: '',
+  error: '',
+  picked: 2,
+  dict: [
+    jaEntry,
+    { word: '食う', phonetic: 'くう', senses: [{ pos: '动', text: ['吃（口语）'], examples: [] }], source: 'jisho' },
+  ],
+};
+assert.equal(cardWordForFirst({ ...jaMultiDef, picked: null }), '食べる', 'summary save uses first dict entry base form');
+assert.equal(cardWordForFirst(jaMultiDef), '食う', 'summary save follows AI-picked dict entry base form');
+assert.equal(cardWordForFirst({ ...jaAiDef, loading: false, aiBusy: false, aiError: '', error: '' }), '走る', 'summary save uses AI headword base form');
+assert.equal(cardWordForFirst({ ...enDef, loading: false, aiBusy: false, aiError: '', error: '' }), 'went', 'English summary save stays unchanged');
+
+assert.equal(isEmptyKeep({ definition: '', example: '', ai: '' }), true);
+assert.equal(isEmptyKeep({ definition: '  ', example: '\n', ai: '' }), true);
+assert.equal(isEmptyKeep({ definition: 'meaning', example: '', ai: '' }), false);
+assert.equal(isEmptyKeep({ definition: '', example: '', ai: 'note' }), false);
+
+const saveCalls = [];
+const mockWriters = {
+  addWord: async (...args) => { saveCalls.push(['addWord', args]); },
+  addWordIfNew: async (...args) => { saveCalls.push(['addWordIfNew', args]); },
+};
+const lineRef = { videoId: 'v1', videoName: 'ep.mp3', text: 'come what may', start: 1, end: 3 };
+const emptyPhrase = phraseSaveFields({
+  word: 'come what may', line: jaLine, around: '', lang: 'en', phrase: true,
+  loading: false, dict: null, ai: null, aiBusy: false, aiError: '', picked: null, error: 'notFound',
+});
+assert.ok(emptyPhrase);
+await saveWordCard(lineRef, 'come what may', emptyPhrase, mockWriters);
+assert.equal(saveCalls.length, 1);
+assert.equal(saveCalls[0][0], 'addWordIfNew', 'empty-meaning phrase save uses addWordIfNew so existing card meaning is never overwritten');
+assert.equal(saveCalls[0][1][1], 'come what may');
+assert.equal(saveCalls[0][1][2], '');
+
+await saveWordCard(lineRef, 'come what may', { definition: '<b>whatever happens</b>', example: 'ex', ai: '' }, mockWriters);
+assert.equal(saveCalls.length, 2);
+assert.equal(saveCalls[1][0], 'addWord', 'non-empty meaning save uses addWord');
+
+// All W4 i18n keys exist in both zh & en
+for (const k of [
+  'm.w4NoAudioBanner', 'm.w4KanaNeedDict', 'm.w4KanaDownloadNow', 'm.w4JaBaseForm',
+  'm.w4KeepWordBtn', 'm.w4KeepWordShort', 'm.w4KeptWordBtn', 'm.w4KeptWordHint',
+  'm.w4BackupNoClips', 'm.w4BackupClipsPending',
+]) {
+  assert.ok(typeof uiMod.zh[k] === 'string' && uiMod.zh[k].length > 0, `missing zh key ${k}`);
+  assert.ok(typeof uiMod.en[k] === 'string' && uiMod.en[k].length > 0, `missing en key ${k}`);
+}
 
 console.log('mobile word-android ok');

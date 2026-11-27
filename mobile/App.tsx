@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { VideoRecord } from '../types';
 import { getAllVideoRecords, patchVideoRecord } from '../utils/videoStorage';
 import { deckCounts, getAllCards, subscribeCards } from '../utils/review';
+import { subscribeSyncApplied } from '../utils/syncEngine';
 import { useT } from '../utils/i18n';
 import { appleFeed } from '../pro/podcastFeed';
 import { markInterrupted, subscribeImports } from './importAudio';
@@ -22,7 +23,9 @@ import { ImportSheet, type ImportSheetConfirm } from './ImportSheet';
 import { callAndroid, isAndroidNative, onAndroidEvent, type ProbeTracksResult, type SharePayload } from './platform/androidBridge';
 import { pickAndroidSrt, probeAndroidMediaUri, startAndroidImport, sweepAndroidMediaOrphans } from './platform/homePlatform';
 import { closeTopOnBack } from './backClose';
+import { clearPendingImport, savePendingAndroidImport } from './pendingImportStore';
 import { classifySharePayload, sanitizeShareText, shareDedupeKey } from './shareHelper';
+import { SyncHost } from './SyncHost';
 import { btnPlain, errText } from './ui';
 
 type Page =
@@ -153,11 +156,13 @@ export function App() {
     window.addEventListener('focus', refreshCards);
     const a = subscribeImports(load);
     const b = subscribeCards(refreshCards);
+    const c = subscribeSyncApplied(() => { void load(); void refreshCards(); });
     return () => {
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('focus', refreshCards);
       a();
       b();
+      c();
     };
   }, [boot, load]);
 
@@ -178,6 +183,7 @@ export function App() {
         const probe = await probeAndroidMediaUri(intent.uri);
         if (shareSeqRef.current !== seq || !probe) return;
         const safeName = sanitizeShareText(probe.displayName) || 'Audio';
+        clearPendingImport();
         setShareImport({ reqId: seq, uri: intent.uri, probe: { ...probe, displayName: safeName } });
       } catch (e: unknown) {
         if (shareSeqRef.current !== seq) return;
@@ -237,28 +243,28 @@ export function App() {
     else navigate({ name: 'settings' });
   }, [navigate]);
 
-  const confirmShareImport = useCallback(async (opts: ImportSheetConfirm) => {
+  const confirmShareImport = useCallback(async (cur: PendingShareImport, opts: ImportSheetConfirm) => {
     setShareNote('');
     try {
       await startAndroidImport({ ...opts, displayName: sanitizeShareText(opts.displayName) || 'Audio' });
+      clearPendingImport();
       setShareImport(null);
       navigate({ name: 'home' });
       void load();
     } catch (e: unknown) {
       const code = e instanceof Error ? e.message : String(e);
-      if (code === 'cloud:nokey') {
+      if (code === 'cloud:nokey' || code === 'cloud:missing-url') {
+        savePendingAndroidImport(cur.uri, cur.probe, opts);
         setShareImport(null);
-        needKey();
-      } else if (code === 'cloud:missing-url') {
-        setShareImport(null);
-        setShareNote(errText(code));
-        needKey();
+        if (code === 'cloud:missing-url') setShareNote(errText(code));
+        // Always return to Home after filling the key so Home's resume effect starts the saved import.
+        navigate({ name: 'settings', needKey: true, back: { name: 'home' } });
       } else {
         setShareImport(null);
         setShareNote(errText(code));
       }
     }
-  }, [load, navigate, needKey]);
+  }, [load, navigate]);
 
   const studyRecord = page.name === 'study' && Array.isArray(records) ? records.find(x => x.id === page.id) : undefined;
   const showTabBar = Array.isArray(records) && !studyRecord && page.name !== 'cards';
@@ -279,6 +285,7 @@ export function App() {
         </div>
       )}
       {body}
+      {Array.isArray(records) && <SyncHost busy={page.name === 'study' || page.name === 'review'} />}
       {showTabBar && <TabBar active={activeTabOf(page)} due={cardStats.due} onSelect={selectTab} />}
       {shareImport && (
         <ImportSheet
@@ -286,8 +293,8 @@ export function App() {
           uri={shareImport.uri}
           probe={shareImport.probe}
           onPickSrt={pickAndroidSrt}
-          onCancel={() => setShareImport(null)}
-          onConfirm={opts => { void confirmShareImport(opts); }}
+          onCancel={() => { clearPendingImport(); setShareImport(null); }}
+          onConfirm={opts => { void confirmShareImport(shareImport, opts); }}
         />
       )}
     </div>
@@ -301,7 +308,7 @@ export function App() {
   );
 
   if (studyRecord && page.name === 'study') {
-    return wrap(<Study record={studyRecord} onBack={() => navigate(page.back)} />);
+    return wrap(<Study record={studyRecord} onBack={() => navigate(page.back)} onReview={() => navigate({ name: 'review' })} />);
   }
   switch (page.name) {
     case 'podcast':
@@ -311,7 +318,7 @@ export function App() {
     case 'settings':
       return wrap(<Settings needKey={!!page.needKey} onBack={page.back ? () => navigate(page.back!) : undefined} />);
     case 'review':
-      return wrap(<Review onOpenLibrary={() => navigate({ name: 'cards' })} />);
+      return wrap(<Review onOpenLibrary={() => navigate({ name: 'cards' })} onOpenRecord={open} />);
     case 'cards':
       return wrap(<CardLibrary onBack={() => navigate({ name: 'review' })} />);
   }

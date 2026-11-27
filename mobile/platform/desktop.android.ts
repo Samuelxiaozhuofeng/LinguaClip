@@ -7,7 +7,17 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile, readTextFile, remove } from '@tauri-apps/plugin-fs';
 import { callAndroid, isAndroidNative } from './androidBridge';
-import type { CacheKind, DictCheck, DictProgress, JaDictStatus, LocalDict } from '../../utils/desktop';
+import type {
+  CacheKind,
+  DictCheck,
+  DictProgress,
+  JaDictStatus,
+  LocalDict,
+  MergePackContents,
+  RemoteEntry,
+  WebDavTestResult,
+} from '../../utils/desktop';
+import type { WebDavConfig } from '../../utils/syncConfig';
 import { getAllVideosFromDB } from '../../utils/fileSystemAccess';
 import { readAll } from '../../utils/review';
 import { t } from '../../utils/i18n';
@@ -17,7 +27,7 @@ import { cancelAndroidImport } from './importAndroid';
 
 const MAX_JSON_BACKUP_BYTES = 50 * 1024 * 1024;
 
-export type { DictCheck, DictProgress, JaDictStatus, LocalDict };
+export type { DictCheck, DictProgress, JaDictStatus, LocalDict, MergePackContents, RemoteEntry, WebDavTestResult };
 
 const urls = new Map<string, string>();
 let cachedOwnDir: string | null = null;
@@ -390,3 +400,110 @@ export async function openExternal(url: string): Promise<void> {
 export const loadClipsRuntime = () => import('../../utils/clips');
 export const loadAnkiDroidExport = () => import('../ankiDroidExport');
 export const loadSupporterLicense = () => import('../../pro/license');
+
+// Cross-device serverless sync (docs/sync.md, same signatures as utils/desktop.ts).
+export const syncWebdavSupported = (): boolean => isAndroidNative();
+export const syncWebdavTest = (config: WebDavConfig): Promise<WebDavTestResult> =>
+  invoke<WebDavTestResult>('sync_webdav_test', { config });
+export const syncWebdavList = (
+  config: WebDavConfig,
+  subpath: 'devices' | 'subs' | 'caches' | 'clip-packs',
+): Promise<RemoteEntry[]> => invoke<RemoteEntry[]>('sync_webdav_list', { config, subpath });
+export const syncWebdavGetGz = (config: WebDavConfig, relPath: string): Promise<string> =>
+  invoke<string>('sync_webdav_get_gz', { config, relPath });
+export const syncWebdavPutGz = (config: WebDavConfig, relPath: string, content: string): Promise<string | null> =>
+  invoke<string | null>('sync_webdav_put_gz', { config, relPath, content });
+export const syncWebdavDelete = (config: WebDavConfig, relPath: string): Promise<void> =>
+  invoke<void>('sync_webdav_delete', { config, relPath });
+export const syncUploadClipPack = (
+  config: WebDavConfig,
+  relPath: string,
+  files: string[],
+  maxBytes?: number,
+  maxFileBytes?: number,
+): Promise<string[]> => invoke<string[]>('sync_upload_clip_pack', { config, relPath, files, maxBytes, maxFileBytes });
+export const syncDownloadClipPack = (
+  config: WebDavConfig,
+  relPath: string,
+  wantedFiles: string[],
+): Promise<string[]> => invoke<string[]>('sync_download_clip_pack', { config, relPath, wantedFiles });
+export const syncWriteMergePack = (
+  dest: string | null,
+  snapshotJson: string,
+  subs: [string, string][],
+  clipFiles: string[],
+): Promise<string> => invoke<string>('sync_write_merge_pack', { dest, snapshotJson, subs, clipFiles });
+export const syncWriteMergeJson = (dest: string | null, content: string): Promise<string> =>
+  invoke<string>('sync_write_merge_json', { dest, content });
+export const syncReadMergePack = (path: string): Promise<MergePackContents> =>
+  invoke<MergePackContents>('sync_read_merge_pack', { path });
+export const syncUnpackMergePack = (path: string, wantedFiles: string[]): Promise<string[]> =>
+  invoke<string[]>('sync_unpack_merge_pack', { path, wantedFiles });
+export const syncRekeyFiles = (fromId: string, toId: string): Promise<{ moved: number; mediaPaths: [string, string][] }> =>
+  invoke<{ moved: number; mediaPaths: [string, string][] }>('sync_rekey_files', { fromId, toId });
+
+export async function syncClipNetworkOk(wifiOnly: boolean): Promise<boolean> {
+  if (!wifiOnly || !isAndroidNative()) return true;
+  const res = await callAndroid<{ wifi?: boolean; metered?: boolean }>('system.networkState').catch(() => null);
+  return !!res?.wifi;
+}
+
+export const pickSyncPackDest = async (_defaultName: string, _ext?: 'zip' | 'json'): Promise<string | null> => null;
+
+export async function pickSyncPackFile(): Promise<
+  | { kind: 'zip'; path: string; cleanup?: () => Promise<void> }
+  | { kind: 'json'; text: string }
+  | null
+> {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'LinguaClip Sync', extensions: ['zip', 'json'] }],
+  });
+  if (typeof selected !== 'string') return null;
+  let localPath = selected;
+  let copiedTmp = false;
+  if (selected.startsWith('content://') && isAndroidNative()) {
+    const { tmpDir } = await getAndroidPaths();
+    const copied = await callAndroid<{ path: string }>('media.copyUriToPath', {
+      uri: selected,
+      destPath: `${tmpDir}/picked-sync-${Date.now()}.tmp`,
+    });
+    localPath = copied.path;
+    copiedTmp = true;
+  }
+  const removeTmp = async () => {
+    if (copiedTmp && isAndroidNative()) {
+      await callAndroid('media.removeFile', { path: localPath }).catch(() => {});
+    }
+  };
+  try {
+    if (isAndroidNative()) {
+      // Inspect only the first 2 bytes on native side so large sync ZIPs never enter WebView RAM.
+      const info = await callAndroid<{ exists: boolean; sizeBytes?: number; isZip?: boolean }>('media.fileInfo', { path: localPath });
+      if (!info.exists) {
+        await removeTmp();
+        return null;
+      }
+      if (info.isZip) {
+        return { kind: 'zip', path: localPath, cleanup: copiedTmp ? removeTmp : undefined };
+      }
+      if ((info.sizeBytes ?? 0) > MAX_JSON_BACKUP_BYTES) {
+        throw new BackupProblem('bad', 'tooBig');
+      }
+    } else if (localPath.toLowerCase().endsWith('.zip')) {
+      return { kind: 'zip', path: localPath };
+    }
+    const text = await readTextFile(localPath);
+    await removeTmp();
+    return { kind: 'json', text };
+  } catch (e) {
+    await removeTmp();
+    throw e;
+  }
+}
+
+export async function shareSyncPackFile(path: string, title: string, mime?: string): Promise<void> {
+  if (!isAndroidNative()) return;
+  const resolved = mime ?? (path.toLowerCase().endsWith('.json') ? 'application/json' : 'application/zip');
+  await callAndroid('system.shareFile', { path, mime: resolved, title });
+}

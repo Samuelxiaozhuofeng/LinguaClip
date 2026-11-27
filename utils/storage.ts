@@ -1,5 +1,6 @@
 import { Subtitle, PracticeConfig, AudioPaddingConfig, ClozeLevel, WordFront } from '../types';
 import { CustomConfig, parseCustomConfig } from './customPick';
+import { forgetPosAt, notifySyncDirty, touchPosAt, touchSyncSetting } from './syncMeta';
 
 const STORAGE_KEY_PRACTICE = 'linguaclip_practice_config';
 const STORAGE_KEY_AUDIO_PADDING = 'linguaclip_audio_padding';
@@ -39,6 +40,7 @@ export const getPracticeConfig = (): PracticeConfig => {
 
 export const savePracticeConfig = (config: PracticeConfig) => {
   localStorage.setItem(STORAGE_KEY_PRACTICE, JSON.stringify(config));
+  touchSyncSetting(STORAGE_KEY_PRACTICE);
 };
 
 export const getWordFront = (): WordFront => getPracticeConfig().wordFront === 'sentence' ? 'sentence' : 'word';
@@ -64,6 +66,7 @@ export const getAudioPaddingConfig = (): AudioPaddingConfig => {
 
 export const saveAudioPaddingConfig = (config: AudioPaddingConfig) => {
   localStorage.setItem(STORAGE_KEY_AUDIO_PADDING, JSON.stringify(config));
+  touchSyncSetting(STORAGE_KEY_AUDIO_PADDING);
 };
 // --- Custom practice (utils/customPick.ts) ---
 
@@ -99,8 +102,24 @@ const writeCustomPos = (edit: (all: Record<string, number>) => void) => {
   } catch { /* only costs where the next session starts */ }
 };
 
-export const setCustomPos = (videoId: string, sec: number) => writeCustomPos(all => { all[videoId] = sec; });
-export const forgetCustomPos = (videoId: string) => writeCustomPos(all => { delete all[videoId]; });
+export const getAllCustomPos = (): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(readCustomPos())) {
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[k] = v;
+  }
+  return out;
+};
+
+export const setCustomPos = (videoId: string, sec: number) => {
+  writeCustomPos(all => { all[videoId] = sec; });
+  touchPosAt(videoId, 'custom');
+  notifySyncDirty();
+};
+export const forgetCustomPos = (videoId: string) => {
+  writeCustomPos(all => { delete all[videoId]; });
+  forgetPosAt(videoId, 'custom');
+  notifySyncDirty();
+};
 
 // --- Watch mode (components/WatchPage.tsx) ---
 // Where each video's watching stopped, in seconds; its own map, so watching never
@@ -122,6 +141,14 @@ export const getWatchPos = (videoId: string): number => {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0;
 };
 
+export const getAllWatchPos = (): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(readWatchPos())) {
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[k] = v;
+  }
+  return out;
+};
+
 const writeWatchPos = (edit: (all: Record<string, number>) => void) => {
   try {
     const all = readWatchPos();
@@ -130,8 +157,16 @@ const writeWatchPos = (edit: (all: Record<string, number>) => void) => {
   } catch { /* only costs where watching resumes */ }
 };
 
-export const setWatchPos = (videoId: string, sec: number) => writeWatchPos(all => { all[videoId] = sec; });
-export const forgetWatchPos = (videoId: string) => writeWatchPos(all => { delete all[videoId]; });
+export const setWatchPos = (videoId: string, sec: number) => {
+  writeWatchPos(all => { all[videoId] = sec; });
+  touchPosAt(videoId, 'watch');
+  notifySyncDirty();
+};
+export const forgetWatchPos = (videoId: string) => {
+  writeWatchPos(all => { delete all[videoId]; });
+  forgetPosAt(videoId, 'watch');
+  notifySyncDirty();
+};
 
 // How each video was last started (docs/watch.md): clicking it starts that again, no panel.
 // Unreadable or unknown = never started = the panel asks.
@@ -149,12 +184,22 @@ export const getLastWay = (videoId: string): LastWay | null => {
   const w = readLastWay()[videoId];
   return w === 'all' || w === 'custom' || w === 'watch' || w === 'read' ? w : null;
 };
+export const getAllLastWay = (): Record<string, LastWay> => {
+  const out: Record<string, LastWay> = {};
+  for (const [k, w] of Object.entries(readLastWay())) {
+    if (w === 'all' || w === 'custom' || w === 'watch' || w === 'read') out[k] = w;
+  }
+  return out;
+};
 export const setLastWay = (videoId: string, way: LastWay | null) => {
   try {
     const all = readLastWay();
     if (way) all[videoId] = way; else delete all[videoId];
     localStorage.setItem(STORAGE_KEY_LAST_WAY, JSON.stringify(all));
   } catch { /* only costs a panel next time */ }
+  if (way) touchPosAt(videoId, 'lastWay');
+  else forgetPosAt(videoId, 'lastWay');
+  notifySyncDirty();
 };
 
 // How subtitles show, whether each line pauses at its end, whether the
@@ -189,4 +234,5 @@ export const getWatchPrefs = (): WatchPrefs => {
 
 export const saveWatchPrefs = (patch: Partial<WatchPrefs>) => {
   try { localStorage.setItem(STORAGE_KEY_WATCH_PREFS, JSON.stringify({ ...getWatchPrefs(), ...patch })); } catch { /* stays for this session only */ }
+  touchSyncSetting(STORAGE_KEY_WATCH_PREFS);
 };

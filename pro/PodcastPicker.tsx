@@ -11,6 +11,7 @@ import { SHOWS, SHOW_LANGS, asrOf, type Pick, type ShowLang } from './podcastSho
 import { appleFeed, classifyPaste, epKey, episodeName, loadFeed, type Episode, type Show } from './podcastFeed';
 import { Starter } from './Starter';
 import { STARTER_FEED } from '../utils/sections';
+import { episodeUuid } from '../utils/syncClock';
 
 // Picking a podcast episode to import: the recommended shows by
 // language and a box for an Apple Podcasts link or an RSS address; a show opens its
@@ -94,11 +95,11 @@ const PodcastPicker: React.FC<{ onClose?: () => void; onOpen: (r: VideoRecord) =
     const key = epKey(show.feed, ep.guid);
     if (busy.has(key) || mine.has(key)) return;
     setBusy(b => new Set(b).add(key));
-    const id = crypto.randomUUID();
+    const id = episodeUuid(show.feed, ep.guid);
     try {
       await startPodcastImport({
         id, title: ep.title, audio: ep.audio, lang: opened?.pick ? asrOf(opened.pick) : asr ?? show.lang,
-        podcast: { show: opened?.pick?.name ?? show.title, feed: show.feed, guid: ep.guid, image: show.image, name: episodeName(ep.title, key) },
+        podcast: { show: opened?.pick?.name ?? show.title, feed: show.feed, guid: ep.guid, image: show.image, name: episodeName(ep.title, key), audio: ep.audio },
       });
     } catch (err) {
       console.error(err);

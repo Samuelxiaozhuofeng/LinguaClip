@@ -14,7 +14,7 @@ await build({
     contents: `
       export * from './mobile/reader/phrasePick';
       export { tokenizeText, TokenType } from './utils/textTokenizer';
-      export { firstFields } from './mobile/useWordLookup';
+      export { firstFields, phraseSaveFields } from './mobile/useWordLookup';
     `,
     resolveDir: '.',
     loader: 'ts',
@@ -40,6 +40,7 @@ const {
   tokenizeText,
   TokenType,
   firstFields,
+  phraseSaveFields,
 } = await import(out);
 
 const toPickTokens = line =>
@@ -144,5 +145,33 @@ const aiOnlyCard = firstFields({
 });
 assert.ok(aiOnlyCard.definition.includes('祝你好运'));
 assert.equal(aiOnlyCard.ai, '源自戏剧界迷信说法。');
+
+// 8. phraseSaveFields allows saving a dragged phrase with empty definition when neither dict nor AI answered
+const basePhraseDef = {
+  word: 'come what may',
+  line: mockLine,
+  around: '',
+  lang: 'en',
+  phrase: true,
+  loading: false,
+  dict: null,
+  ai: null,
+  aiBusy: false,
+  aiError: '',
+  picked: null,
+  error: 'notFound',
+};
+assert.equal(phraseSaveFields({ ...basePhraseDef, phrase: false }), null, 'non-phrase returns null');
+assert.equal(phraseSaveFields({ ...basePhraseDef, loading: true }), null, 'still loading disables save');
+assert.equal(phraseSaveFields({ ...basePhraseDef, aiBusy: true }), null, 'AI still busy disables save');
+assert.deepEqual(
+  phraseSaveFields(basePhraseDef),
+  { definition: '', example: '', ai: '' },
+  'finished phrase lookup with no dict and no AI still yields saveable empty fields',
+);
+assert.ok(
+  phraseSaveFields({ ...basePhraseDef, dict: mockDict })?.definition.includes('calculate'),
+  'phraseSaveFields still prefers dict/AI meaning when present',
+);
 
 console.log('mobile reader phone ok');

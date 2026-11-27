@@ -14,11 +14,11 @@ import {
   buildSectionStops,
   drillProgressFromLoops,
   lineStopTime,
-  mergeBgMarks,
   resolveBgMarkLineId,
   sectionEndOf,
   type Mark,
 } from './listenBoundaries';
+import { useListenMarks } from './listenMissed';
 import {
   AUDIO_ENGINE_PLATFORM,
   createAudioEngine,
@@ -68,7 +68,6 @@ export function useListen(record: VideoRecord, opts?: UseListenOptions) {
   const toggleThrough = () => { setThrough(!throughPref); saveWatchPrefs({ listenThrough: !throughPref }); };
   const [pass, setPass] = useState(1);
   const [passCard, setPassCard] = useState(false);
-  const [marks, setMarks] = useState<Map<number, Mark>>(new Map());
   const [queue, setQueue] = useState<number[] | null>(null);
   const [qAt, setQAt] = useState(0);
   const [tries] = useState(() => getWatchPrefs().listenTries);
@@ -78,7 +77,8 @@ export function useListen(record: VideoRecord, opts?: UseListenOptions) {
   const [peek, setPeek] = useState<number | null>(null); // "see this line": pinned until closed
   const [said, setSaid] = useState<Map<number, { a: Heard; way: Way | null }>>(new Map());
   const [note, setNote] = useState<{ text: string; n: number } | null>(null);
-  const say = (text: string) => setNote(x => ({ text, n: (x?.n ?? 0) + 1 }));
+  const say = useCallback((text: string) => setNote(x => ({ text, n: (x?.n ?? 0) + 1 })), []);
+  const { marks, markLine, flipMark, setMarkState, setLineMarked, mergeBg } = useListenMarks(record, lines, indexOf, say);
 
   pausedRef.current.paused = !playing;
 
@@ -182,7 +182,7 @@ export function useListen(record: VideoRecord, opts?: UseListenOptions) {
 
   const drillNext = () => {
     if (target === null || !queue) return;
-    setMarks(m => new Map(m).set(target, shown ? 'more' : 'ok'));
+    setMarkState(target, shown ? 'more' : 'ok');
     setPlay(1); setShown(false);
     const nx = qAt + 1 < queue.length ? lines[indexOf.get(queue[qAt + 1]) ?? -1] : undefined;
     if (nx) {
@@ -251,7 +251,7 @@ export function useListen(record: VideoRecord, opts?: UseListenOptions) {
         const idx = queue.indexOf(lineId);
         if (idx >= 0 && idx !== qAt) {
           if (delta > 0 && target !== null) {
-            setMarks(m => new Map(m).set(target, shown ? 'more' : 'ok'));
+            setMarkState(target, shown ? 'more' : 'ok');
           }
           setQAt(idx);
           setPlay(1);
@@ -278,7 +278,7 @@ export function useListen(record: VideoRecord, opts?: UseListenOptions) {
       if (ev.mediaId !== record.id) return;
       const lineId = resolveBgMarkLineId(lines, ev);
       if (lineId !== null) {
-        setMarks(m => mergeBgMarks(m, [lineId]));
+        mergeBg([lineId]);
       }
     },
   };
@@ -433,16 +433,10 @@ export function useListen(record: VideoRecord, opts?: UseListenOptions) {
   const answer = (a: Heard) => { if (!said.has(sec)) { const way = noteHeard(showKey(record), a); setSaid(m => new Map(m).set(sec, { a, way })); } };
 
   // --- Hard lines ---
-  const flipMark = (id: number, onMsg: string, offMsg: string) => {
-    const on = marks.has(id);
-    say(on ? offMsg : onMsg);
-    setMarks(m => { const n = new Map(m); if (on) n.delete(id); else n.set(id, 'open'); return n; });
-  };
   const markPrevIndex = () => {
     const i = at >= 0 && time > lines[at].endTime - 0.05 ? at : at - 1;
     return i < 0 || (sectionOf.get(lines[i].id) ?? 0) !== sec ? -1 : i;
   };
-  useEffect(() => { if (peek !== null) setMarks(m => (m.has(peek) ? m : new Map(m).set(peek, 'open'))); }, [peek]);
 
   // "See this line" / a word's meaning pause; closing plays the paused line again from its start.
   const holdFor = () => {
@@ -466,7 +460,7 @@ export function useListen(record: VideoRecord, opts?: UseListenOptions) {
       }
     }
   };
-  const openPeek = () => { if (cur) { holdFor(); setPeek(cur.id); } };
+  const openPeek = () => { if (cur) { holdFor(); setPeek(cur.id); markLine(cur.id); } };
   const closePeek = () => { setPeek(null); release(); };
   // Plays one line inside "see this line"; closing it still goes back where it paused.
   const playLine = (l: Subtitle) => {
@@ -492,6 +486,6 @@ export function useListen(record: VideoRecord, opts?: UseListenOptions) {
     pass, passCard, setPassCard, marks, queue, qAt, tries, play, shown, summary, setSummary, peek, said, note, say,
     at, cur, sec, section, lastSec, hard, secMarks, easy, inDrill, drillLine,
     seek, playOn, pauseNow, toggle, prev, next, replay, goSection, startPass, drillShow, drillNext, moveOn, goStep, answer,
-    flipMark, markPrevIndex, openPeek, closePeek, holdFor, release, playLine, sectionEnd, leavePage,
+    flipMark, setLineMarked, markPrevIndex, openPeek, closePeek, holdFor, release, playLine, sectionEnd, leavePage,
   };
 }

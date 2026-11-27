@@ -5,9 +5,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetch as httpFetch } from '@tauri-apps/plugin-http';
 import type { VideoRecord } from '../types';
 import { useT } from '../utils/i18n';
+import { episodeUuid } from '../utils/syncClock';
 import { androidCloudArgs } from '../utils/transcribeConfig';
 import { asrOf } from '../pro/podcastShows';
 import { epKey, episodeName, parseFeed, type Show } from '../pro/podcastFeed';
+import { useBackClose } from './backClose';
 import { cancelImport, importEpisode, retryImport, subscribeImports } from './importAudio';
 import { MAX_BYTES, NO_MEDIA, groqKey } from './transcribe';
 import { getVideoRecord } from '../utils/videoStorage';
@@ -19,6 +21,7 @@ import {
 } from './opml';
 import { isAndroidNative } from './platform/androidBridge';
 import type { ShowRef } from './Podcast';
+import { Starter } from './Starter';
 import { Header, btnSmall, btnSoft, errText, sheet } from './ui';
 
 type Loaded = Show & { sizes: Map<string, number> };
@@ -72,7 +75,10 @@ export const Episodes: React.FC<{ show: ShowRef; records: VideoRecord[]; onBack:
   const android = isAndroidNative();
   const [state, setState] = useState<Loaded | 'loading' | 'error'>('loading');
   const [subscribed, setSubscribed] = useState(() => isPodcastSubscribed(show.url));
+  const [starterOpen, setStarterOpen] = useState(false);
   const waiting = useRef<string | null>(null);
+
+  useBackClose(starterOpen, () => setStarterOpen(false));
 
   useEffect(() => {
     setSubscribed(isPodcastSubscribed(show.url));
@@ -109,9 +115,56 @@ export const Episodes: React.FC<{ show: ShowRef; records: VideoRecord[]; onBack:
     }).catch(console.error);
   }), [onOpen]);
 
+  const hasKey = android ? !!androidCloudArgs() : !!groqKey();
+
+  const noKeyBanner = !hasKey && (
+    <div data-testid="episodes-no-key-banner" className="mx-5 mb-3 px-4 py-3 bg-page rounded-2xl shadow-card flex flex-col gap-2.5">
+      <p className="text-[13px] text-ink leading-relaxed">{t('m.w3EpNoKeyTitle')}</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={btnSmall} onClick={onNeedKey}>
+          {t('m.w3EpGoSettings')}
+        </button>
+        <button type="button" className={btnSoft} onClick={() => setStarterOpen(true)}>
+          {t('m.w3EpTryStarter')}
+        </button>
+      </div>
+    </div>
+  );
+
+  const starterSheet = starterOpen && (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('starter.title')}
+      className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center"
+      onClick={() => setStarterOpen(false)}
+    >
+      <div
+        className="w-full max-w-lg max-h-[85vh] supports-[height:1dvh]:max-h-[85dvh] overflow-y-auto bg-paper rounded-t-3xl px-5 pt-4 pb-[max(24px,env(safe-area-inset-bottom))] flex flex-col gap-3"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex justify-end">
+          <button
+            type="button"
+            aria-label={t('m.close')}
+            onClick={() => setStarterOpen(false)}
+            className="w-11 h-11 flex items-center justify-center rounded-full text-xl text-mute"
+          >
+            ×
+          </button>
+        </div>
+        <Starter
+          records={records}
+          onOpen={id => { setStarterOpen(false); onOpen(id); }}
+          onChanged={() => {}}
+        />
+      </div>
+    </div>
+  );
+
   const title = typeof state === 'object' ? state.title : show.pick?.name ?? show.title ?? '';
-  if (state === 'loading') return <><Header title={title} onBack={onBack} /><p className="px-5 text-sm text-mute">{t('m.loading')}</p></>;
-  if (state === 'error') return <><Header title={title} onBack={onBack} /><p role="alert" className={`${sheet} mx-5 p-4 text-[15px]`}>{t('m.feedFail')}</p></>;
+  if (state === 'loading') return <><Header title={title} onBack={onBack} />{noKeyBanner}<p className="px-5 text-sm text-mute">{t('m.loading')}</p>{starterSheet}</>;
+  if (state === 'error') return <><Header title={title} onBack={onBack} />{noKeyBanner}<p role="alert" className={`${sheet} mx-5 p-4 text-[15px]`}>{t('m.feedFail')}</p>{starterSheet}</>;
 
   const lang = show.pick ? asrOf(show.pick) : state.lang;
   const mine = new Map(records.filter(r => r.podcast).map(r => [epKey(r.podcast!.feed, r.podcast!.guid), r]));
@@ -127,14 +180,16 @@ export const Episodes: React.FC<{ show: ShowRef; records: VideoRecord[]; onBack:
   };
 
   const start = async (ep: Show['episodes'][number]) => {
+    const key = epKey(show.url, ep.guid);
+    if (mine.has(key)) return;
     if (android && !(await confirmPodcastDownloadNetwork())) return;
-    const id = crypto.randomUUID();
+    const id = episodeUuid(show.url, ep.guid);
     importEpisode({
       id,
       title: ep.title,
       audio: ep.audio,
       lang,
-      podcast: { show: state.title, feed: show.url, guid: ep.guid, image: state.image, name: episodeName(ep.title, epKey(show.url, ep.guid)) },
+      podcast: { show: state.title, feed: show.url, guid: ep.guid, image: state.image, name: episodeName(ep.title, key), audio: ep.audio },
     }).then(() => { waiting.current = id; }, (e: unknown) => {
       if (e instanceof Error && e.message === 'cloud:nokey') onNeedKey();
       else console.error(e);
@@ -147,19 +202,18 @@ export const Episodes: React.FC<{ show: ShowRef; records: VideoRecord[]; onBack:
     retryImport(r.id).catch(console.error);
   };
 
-  const hasKey = android ? !!androidCloudArgs() : !!groqKey();
-
   const rawCover = state.image ?? show.image;
   const cover = rawCover?.replace(/^http:\/\//i, 'https://');
 
   return (
     <>
       <Header title={title} onBack={onBack} />
+      {noKeyBanner}
       <div className="px-5 pb-3 flex gap-3.5 items-center">
         {cover && (
           <img src={cover} alt="" className="w-16 h-16 rounded-xl object-cover bg-shade shrink-0" />
         )}
-        <span className="text-xs text-mute flex-1">{t('m.epHint')}</span>
+        <span className="text-[13px] text-mute flex-1">{t('m.epHint')}</span>
         <button
           className={subscribed ? btnSoft : btnSmall}
           onClick={toggleSub}
@@ -192,7 +246,7 @@ export const Episodes: React.FC<{ show: ShowRef; records: VideoRecord[]; onBack:
                   <span className="flex-1 flex items-center flex-wrap gap-1.5">
                     <span>{meta}</span>
                     {offline && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-shade text-ink font-medium">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[13px] bg-shade text-ink font-medium">
                         {t('m.offlineReady')}
                       </span>
                     )}
@@ -201,7 +255,7 @@ export const Episodes: React.FC<{ show: ShowRef; records: VideoRecord[]; onBack:
                     <span className="flex items-center gap-2 shrink-0">
                       <span className="text-accent font-semibold">{jobLabel(job, t)}</span>
                       <button
-                        className="min-h-[36px] px-2.5 rounded-lg bg-shade text-ink text-xs font-medium"
+                        className="min-h-[36px] px-2.5 rounded-lg bg-shade text-ink text-[13px] font-medium"
                         onClick={() => {
                           if (waiting.current === r.id) waiting.current = null;
                           cancelImport(r.id);
@@ -227,8 +281,8 @@ export const Episodes: React.FC<{ show: ShowRef; records: VideoRecord[]; onBack:
             </div>
           );
         })}
-        {!hasKey && <p className={`${sheet} mt-2 px-3.5 py-3 text-[13px] text-mute`}>{t('m.noKeyNote')}</p>}
       </div>
+      {starterSheet}
     </>
   );
 };

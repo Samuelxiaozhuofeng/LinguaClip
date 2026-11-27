@@ -5,6 +5,7 @@ import { useT } from '../utils/i18n';
 import { IS_WINDOWS } from '../utils/platform';
 import { useDueSnapshot } from '../hooks/useDueSnapshot';
 import { UpdatePill } from './UpdateUI';
+import YouTubeEntry from './YouTubeEntry';
 
 // Page frame for the non-practice screens: wordmark, a centred pill of tabs (the two
 // libraries carry how many cards are due), the quiet "add video" button, scrolling body.
@@ -41,13 +42,16 @@ const Shell: React.FC<{ active: AppState; onNav: (s: AppState) => void; onAdd: (
           );
         })}
       </nav>
-      {/* Home's empty state carries its own big add button; one is enough. */}
-      {!hideAdd && (
-        <button onClick={onAdd}
-          className="press h-[42px] pl-3.5 pr-4 rounded-full bg-page border border-line flex items-center gap-1.5 text-[13px] hover:border-ink/20">
-          <Plus size={16} strokeWidth={2.25} className="text-accent" />{t(active === AppState.PODCASTS ? 'home.addPodcast' : 'home.addVideo')}
-        </button>
-      )}
+      <span className="flex items-center gap-2">
+        {active === AppState.UPLOAD && <YouTubeEntry />}
+        {/* Home's empty state carries its own big add button; one is enough. */}
+        {!hideAdd && (
+          <button onClick={onAdd}
+            className="press h-[42px] pl-3.5 pr-4 rounded-full bg-page border border-line flex items-center gap-1.5 text-[13px] hover:border-ink/20">
+            <Plus size={16} strokeWidth={2.25} className="text-accent" />{t(active === AppState.PODCASTS ? 'home.addPodcast' : 'home.addVideo')}
+          </button>
+        )}
+      </span>
     </header>
     <main className="flex-1 overflow-y-auto">
       <div className="max-w-[1280px] mx-auto px-6 md:px-12 lg:px-24 pt-4 pb-12">{children}</div>

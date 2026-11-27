@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { jaLemma, jaMorphs, jaReady } from './japanese';
+import { forgetPosAt, notifySyncDirty, touchPosAt } from './syncMeta';
 
 // What the reader (pro/ReaderPage.tsx) keeps per video, in localStorage:
 // - `linguaclip_read_looked`: words looked up while reading, so the watch page can mark
@@ -70,6 +71,7 @@ export const addLooked = (videoId: string, word: string, ja: boolean) => {
     const list = getLooked(videoId).filter(w => w !== key);
     all[videoId] = [...list, key].slice(-MAX);
   });
+  notifySyncDirty();
 };
 
 // word key → meaning, for this video's looked-up words.
@@ -91,16 +93,53 @@ export const setGloss = (videoId: string, word: string, ja: boolean, meaning: st
     now[key] = text.length > GLOSS_LEN ? `${text.slice(0, GLOSS_LEN)}…` : text;
     all[videoId] = now;
   });
+  notifySyncDirty();
 };
 
 export const getReadPos = (videoId: string): number => {
   const n = read(POS)[videoId];
   return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0;
 };
-export const setReadPos = (videoId: string, sec: number) => write(POS, all => { all[videoId] = Math.max(0, sec); }, true);
+export const setReadPos = (videoId: string, sec: number) => {
+  write(POS, all => { all[videoId] = Math.max(0, sec); }, true);
+  touchPosAt(videoId, 'read');
+  notifySyncDirty();
+};
+
+export const getAllReadPos = (): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(read(POS))) {
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[k] = v;
+  }
+  return out;
+};
+
+export const getAllReadLooked = (): Record<string, string[]> => {
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(read(LOOKED))) {
+    if (Array.isArray(v)) {
+      const list = v.filter((w): w is string => typeof w === 'string');
+      if (list.length) out[k] = list;
+    }
+  }
+  return out;
+};
+
+export const getAllReadGloss = (): Record<string, Record<string, string>> => {
+  const out: Record<string, Record<string, string>> = {};
+  for (const [k, v] of Object.entries(read(GLOSS))) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const entries = Object.entries(v).filter((e): e is [string, string] => typeof e[1] === 'string');
+      if (entries.length) out[k] = Object.fromEntries(entries);
+    }
+  }
+  return out;
+};
 
 export const forgetLooked = (videoId: string) => {
   for (const key of [LOOKED, GLOSS, POS]) write(key, all => { delete all[videoId]; });
+  forgetPosAt(videoId, 'read');
+  notifySyncDirty();
 };
 
 const subscribe = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };

@@ -14,6 +14,7 @@ import { useT } from '../utils/i18n';
 import { IS_WINDOWS } from '../utils/platform';
 import { Btn, Field, Group, Seg, inputCls } from './ui';
 import ConvertToolRow from './ConvertToolRow';
+import SettingsYouTube from './SettingsYouTube';
 
 // Settings → Import & transcribe: this machine (standard / light model, graphics card
 // on Windows, where its parts live) or a cloud service (link to get a key, the key itself),
@@ -158,6 +159,8 @@ const SettingsTranscribe: React.FC<{ onSaved: () => void; children: React.ReactN
       <Group title={t('settings.group.videoFormat')}>
         <ConvertToolRow />
       </Group>
+
+      <SettingsYouTube />
 
       {children}
     </div>

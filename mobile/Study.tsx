@@ -1,16 +1,20 @@
-// Unified full-screen study page for one record (docs/android-roadmap.md M2.1).
+// Unified full-screen study page for one record (docs/android-roadmap.md M2.1, docs/android.md「手机学习闭环」).
 // Owns the shared header (back, title, section/line position), the way switcher
-// ("Listen | Dictation" + "More ▾" drawer), position continuity across ways via
-// linguaclip_watch_pos, and the app-wide practice clock.
+// ("Listen | Dictation" + "More ▾" drawer), shared Japanese dictionary banner,
+// no-audio read-only fallback, position continuity across ways via linguaclip_watch_pos,
+// desktop progress/way fallback via resumePos.ts, and the app-wide practice clock.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VideoRecord } from '../types';
+import { detectLang } from '../utils/dictionary';
 import { useT } from '../utils/i18n';
+import { loadJa } from '../utils/japanese';
 import { parseSRT } from '../utils/srtParser';
 import { buildSections, sectionLengthOf } from '../utils/sections';
-import { getWatchPos, setWatchPos } from '../utils/storage';
+import { setWatchPos } from '../utils/storage';
 import { usePracticeClock } from '../utils/today';
+import { useRecordAudio } from './audioAvail';
+import { JaBanner } from './JaBanner';
 import {
-  getPhoneLastWay,
   lineNumberAt,
   MORE_WAY_DESC_KEY,
   moreWaysOn,
@@ -18,16 +22,19 @@ import {
   subscribeWays,
   WAY_LABEL_KEY,
 } from './phoneWays';
+import { resumeSecOf, resumeWayOf } from './resumePos';
 import { WAY_VIEWS } from './ways/registry';
 import { MAIN_WAYS, MORE_WAYS, type PhoneWay } from './ways/types';
 import { useBackClose } from './backClose';
 
-const SWITCH_TOAST_MS = 1600;
+const SWITCH_TOAST_MS = 1800;
+const NO_AUDIO_TOAST_MS = 3200;
 
 export const Study: React.FC<{
   record: VideoRecord;
   onBack: () => void;
-}> = ({ record, onBack }) => {
+  onReview?: () => void;
+}> = ({ record, onBack, onReview }) => {
   const t = useT();
   usePracticeClock();
 
@@ -44,8 +51,15 @@ export const Study: React.FC<{
     [sections],
   );
 
-  const initialPos = useMemo(() => getWatchPos(record.id), [record.id]);
-  const [way, setWay] = useState<PhoneWay>(() => getPhoneLastWay(record.id));
+  const lang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
+  const ja = lang === 'ja';
+  useEffect(() => { if (ja) void loadJa(); }, [ja]);
+
+  const audioAvail = useRecordAudio(record);
+  const noAudio = audioAvail === false;
+
+  const initialPos = useMemo(() => resumeSecOf(record, lines), [record.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [way, setWay] = useState<PhoneWay>(() => resumeWayOf(record));
   const [startSec, setStartSec] = useState<number>(initialPos);
   const [lineInfo, setLineInfo] = useState<{ n: number; total: number }>(() => ({
     n: lineNumberAt(lines, initialPos),
@@ -57,19 +71,31 @@ export const Study: React.FC<{
   const [toast, setToast] = useState<string | null>(null);
 
   const posRef = useRef(initialPos);
+  const prevRecordIdRef = useRef(record.id);
   const toastTimer = useRef<number | null>(null);
 
   useEffect(() => subscribeWays(() => setMoreList(moreWaysOn())), []);
   useEffect(() => () => { if (toastTimer.current) window.clearTimeout(toastTimer.current); }, []);
 
-  // Keep local state in sync if the record prop changes.
+  // Keep local state in sync only when switching to a different record.
   useEffect(() => {
-    const pos = getWatchPos(record.id);
+    if (prevRecordIdRef.current === record.id) return;
+    prevRecordIdRef.current = record.id;
+    const pos = resumeSecOf(record, lines);
     posRef.current = pos;
     setStartSec(pos);
-    setWay(getPhoneLastWay(record.id));
+    setWay(resumeWayOf(record));
     setLineInfo({ n: lineNumberAt(lines, pos), total: lines.length });
-  }, [record.id, lines]);
+  }, [record, lines]);
+
+  const showToast = useCallback((msg: string, ms = SWITCH_TOAST_MS) => {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => {
+      toastTimer.current = null;
+      setToast(null);
+    }, ms);
+  }, []);
 
   const handlePos = useCallback((sec: number) => {
     if (!Number.isFinite(sec) || sec < 0) return;
@@ -78,12 +104,20 @@ export const Study: React.FC<{
   }, [record.id]);
 
   const handleLine = useCallback((n: number, total: number) => {
-    setLineInfo(prev => (prev.n === n && prev.total === total ? prev : { n, total }));
+    const safeTotal = Math.max(0, total);
+    const safeN = safeTotal > 0 ? Math.min(Math.max(n, 1), safeTotal) : 0;
+    setLineInfo(prev => (prev.n === safeN && prev.total === safeTotal ? prev : { n: safeN, total: safeTotal }));
   }, []);
+
+  const activeWay: PhoneWay = noAudio ? 'read' : way;
 
   const switchTo = (nextWay: PhoneWay) => {
     setMoreOpen(false);
-    if (nextWay === way) return;
+    if (noAudio && nextWay !== 'read') {
+      showToast(t('m.w4NoAudioBanner'), NO_AUDIO_TOAST_MS);
+      return;
+    }
+    if (nextWay === activeWay) return;
     const curPos = posRef.current;
     setPhoneLastWay(record.id, nextWay);
     setWatchPos(record.id, curPos);
@@ -92,12 +126,7 @@ export const Study: React.FC<{
 
     const n = lineInfo.total > 0 ? lineInfo.n : lineNumberAt(lines, curPos);
     const label = t(WAY_LABEL_KEY[nextWay]);
-    setToast(n > 0 ? t('m.switchedWay', { way: label, n }) : t('m.switchedWayPlain', { way: label }));
-    if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => {
-      toastTimer.current = null;
-      setToast(null);
-    }, SWITCH_TOAST_MS);
+    showToast(n > 0 ? t('m.switchedWay', { way: label, n }) : t('m.switchedWayPlain', { way: label }));
   };
 
   const secIdx = useMemo(() => {
@@ -112,8 +141,13 @@ export const Study: React.FC<{
       : t('m.studyPos', { n: lineInfo.n, total: lineInfo.total })
     : '';
 
-  const isMoreActive = MORE_WAYS.includes(way);
-  const View = WAY_VIEWS[way];
+  const isMoreActive = MORE_WAYS.includes(activeWay);
+  const drawerWays = useMemo(
+    () => (noAudio && !moreList.includes('read') ? [...moreList, 'read' as PhoneWay] : moreList),
+    [noAudio, moreList],
+  );
+  const readyToMount = audioAvail !== null || activeWay === 'read';
+  const View = WAY_VIEWS[activeWay];
 
   return (
     <div className="fixed inset-0 bg-paper flex flex-col pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
@@ -128,22 +162,26 @@ export const Study: React.FC<{
         </button>
         <div className="flex-1 min-w-0 flex flex-col">
           <h1 className="text-[15px] font-semibold truncate">{record.displayName}</h1>
-          {posText && <span className="text-xs text-mute tabular-nums truncate">{posText}</span>}
+          {posText && <span data-testid="study-pos" className="text-xs text-mute tabular-nums truncate">{posText}</span>}
         </div>
       </header>
 
       <div className="px-4 pb-2 flex items-center gap-2 shrink-0">
         <div className="inline-flex items-center bg-page rounded-full p-0.5 shadow-card" role="tablist" aria-label={t('m.practiceTitle')}>
           {MAIN_WAYS.map(w => {
-            const active = way === w;
+            const active = activeWay === w;
+            const locked = noAudio && w !== 'read';
             return (
               <button
                 key={w}
                 type="button"
                 role="tab"
                 aria-selected={active}
+                data-locked={locked || undefined}
                 onClick={() => switchTo(w)}
-                className={`min-h-[44px] px-4 rounded-full text-[13px] whitespace-nowrap ${active ? 'bg-ink text-white font-medium' : 'text-mute'}`}
+                className={`min-h-[44px] px-4 rounded-full text-[13px] whitespace-nowrap ${
+                  active ? 'bg-ink text-white font-medium' : locked ? 'text-mute/50' : 'text-mute'
+                }`}
               >
                 {t(WAY_LABEL_KEY[w])}
               </button>
@@ -157,30 +195,46 @@ export const Study: React.FC<{
           onClick={() => setMoreOpen(true)}
           className={`min-h-[44px] px-3.5 rounded-full text-[13px] whitespace-nowrap shadow-card flex items-center gap-1 ${isMoreActive ? 'bg-ink text-white font-medium' : 'bg-page text-mute'}`}
         >
-          <span>{isMoreActive ? t(WAY_LABEL_KEY[way]) : t('m.moreWays')}</span>
+          <span>{isMoreActive ? t(WAY_LABEL_KEY[activeWay]) : t('m.moreWays')}</span>
           <span aria-hidden className="text-[11px] leading-none">▾</span>
         </button>
       </div>
+
+      {noAudio && (
+        <p
+          role="status"
+          data-testid="study-no-audio-banner"
+          className="mx-4 mb-2 px-3.5 py-2.5 rounded-xl bg-page shadow-card text-[13px] text-mute leading-snug shrink-0"
+        >
+          {t('m.w4NoAudioBanner')}
+        </p>
+      )}
+
+      {ja && <JaBanner />}
 
       {toast && (
         <p
           role="status"
           data-testid="way-switch-toast"
-          className="fixed left-1/2 -translate-x-1/2 top-[calc(env(safe-area-inset-top)+112px)] z-30 px-4 py-2 rounded-full bg-ink text-white text-[13px] whitespace-nowrap shadow-lift pointer-events-none"
+          className="fixed left-1/2 -translate-x-1/2 max-w-[calc(100vw-32px)] top-[calc(env(safe-area-inset-top)+112px)] z-30 px-4 py-2 rounded-2xl bg-ink text-white text-[13px] text-center shadow-lift pointer-events-none"
         >
           {toast}
         </p>
       )}
 
       <div className="flex-1 min-h-0 flex flex-col">
-        <View
-          key={`${record.id}:${way}`}
-          record={record}
-          startSec={startSec}
-          onPos={handlePos}
-          onLine={handleLine}
-          onExit={onBack}
-        />
+        {readyToMount && (
+          <View
+            key={`${record.id}:${activeWay}`}
+            record={record}
+            startSec={startSec}
+            onPos={handlePos}
+            onLine={handleLine}
+            noAudio={noAudio}
+            onExit={onBack}
+            onReview={onReview}
+          />
+        )}
       </div>
 
       {moreOpen && (
@@ -193,19 +247,21 @@ export const Study: React.FC<{
           />
           <div className="relative max-h-[80vh] supports-[height:1dvh]:max-h-[80dvh] overflow-y-auto bg-page rounded-t-[22px] shadow-lift px-5 pt-5 pb-[max(24px,env(safe-area-inset-bottom))] flex flex-col gap-3">
             <h2 className="text-[17px] font-semibold">{t('m.moreWaysTitle')}</h2>
-            {moreList.length === 0 ? (
+            {drawerWays.length === 0 ? (
               <p className="py-4 text-sm text-mute text-center">{t('m.moreWaysAllOff')}</p>
             ) : (
               <div className="flex flex-col divide-y divide-shade">
-                {moreList.map(w => {
-                  const selected = way === w;
+                {drawerWays.map(w => {
+                  const selected = activeWay === w;
+                  const locked = noAudio && w !== 'read';
                   const descKey = MORE_WAY_DESC_KEY[w as keyof typeof MORE_WAY_DESC_KEY];
                   return (
                     <button
                       key={w}
                       type="button"
+                      data-locked={locked || undefined}
                       onClick={() => switchTo(w)}
-                      className="w-full min-h-[56px] py-3 text-left flex items-center justify-between gap-3"
+                      className={`w-full min-h-[56px] py-3 text-left flex items-center justify-between gap-3 ${locked ? 'opacity-50' : ''}`}
                     >
                       <span className="flex flex-col gap-0.5 min-w-0">
                         <span className={`text-[15px] ${selected ? 'font-semibold text-accent' : 'font-medium text-ink'}`}>

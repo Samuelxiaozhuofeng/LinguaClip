@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { touchSyncSetting } from './syncMeta';
 
 // Line loop, shared by the practice page and review's sentence cards (docs/loop.md):
 // on = replay the line after a short pause until it has played `times` times (0 = forever).
@@ -24,6 +25,7 @@ const listeners = new Set<() => void>();
 function set(next: Partial<Loop>) {
   state = { ...state, ...next };
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* localStorage unavailable */ }
+  touchSyncSetting(KEY);
   listeners.forEach(l => l());
 }
 

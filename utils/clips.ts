@@ -105,14 +105,30 @@ const fillOnce = async () => {
     if (n === 'noVideo') { noVideo += line.filter(c => !c.clip).length; set({ noVideo }); }
   }
   // Read again: the files the cards use right now are the ones to keep, and so are the ones
-  // any backup in <own dir>/backups needs (docs/backup.md). No cards at all (the database may
-  // have just been lost), or the backups unreadable: sweep nothing this time.
+  // any backup in <own dir>/backups needs (docs/backup.md), plus any platform-registered extra
+  // snapshots (e.g. Android IndexedDB pre/staged restore copies). No cards at all (the database
+  // may have just been lost), or any snapshot source unreadable: sweep nothing this time.
   // Backups first: nothing awaited between reading the cards (and the held files) and the sweep.
   const kept = await backupKeptClips().catch(e => { console.error(e); return null; });
+  let extraKept: string[] | null = [];
+  for (const fn of extraKeptProviders) {
+    const list = await fn().catch(e => { console.error(e); return null; });
+    if (!list) { extraKept = null; break; }
+    extraKept.push(...list);
+  }
   const now = await getAllCards();
   set(counts(now));
-  if (now.length === 0 || !kept) return;
-  await sweepClips([...clipFiles(now), ...kept, ...held.keys()]);
+  if (now.length === 0 || !kept || !extraKept) return;
+  await sweepClips([...new Set([...clipFiles(now), ...kept, ...extraKept, ...held.keys()])]);
+};
+
+// Extra kept-clips providers (unused on desktop; Android registers IndexedDB pre/staged snapshots).
+// Returning null or rejecting skips the sweep for that pass.
+type ExtraKeptProvider = () => Promise<string[] | null>;
+const extraKeptProviders = new Set<ExtraKeptProvider>();
+export const registerExtraKeptClips = (fn: ExtraKeptProvider): (() => void) => {
+  extraKeptProviders.add(fn);
+  return () => { extraKeptProviders.delete(fn); };
 };
 
 // Undo of a delete pending (docs/review.md「复习里删卡」): keep this card's files; call the result to let go.

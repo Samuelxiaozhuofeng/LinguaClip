@@ -33,29 +33,38 @@ export const pickAndroidSrt = pickAndroidSrtFile;
 export const startAndroidImport = (opts: LocalImportArgs): Promise<string> =>
   startAndroidLocalImport(opts);
 
-export async function repickAndroidRecordAudio(id: string, trackIndex = -1): Promise<string | null> {
-  const picked = await pickAndroidMediaFile();
-  if (!picked) return null;
+export async function extractAndroidRecordAudio(
+  id: string,
+  uri: string,
+  displayName: string,
+  trackIndex: number,
+): Promise<string> {
   const paths = await invoke<{ mediaDir: string }>('android_paths');
-  const chosenTrack = trackIndex >= 0 ? trackIndex : picked.probe.defaultTrackIndex;
   const jobId = `repick-${id}`;
   await callAndroid('processing.begin', {
     jobId,
-    title: picked.probe.displayName || 'Audio',
+    title: displayName || 'Audio',
     detail: '',
     percent: -1,
   });
   try {
     const res = await callAndroid<ExtractedAudio>('processing.runExtract', {
       jobId,
-      input: picked.uri,
+      input: uri,
       outStemPath: `${paths.mediaDir}/${id}`,
-      trackIndex: chosenTrack,
+      trackIndex,
     });
     return res.path;
   } finally {
     await callAndroid('processing.end', { jobId }).catch(() => {});
   }
+}
+
+export async function repickAndroidRecordAudio(id: string, trackIndex = -1): Promise<string | null> {
+  const picked = await pickAndroidMediaFile();
+  if (!picked) return null;
+  const chosenTrack = trackIndex >= 0 ? trackIndex : picked.probe.defaultTrackIndex;
+  return extractAndroidRecordAudio(id, picked.uri, picked.probe.displayName, chosenTrack);
 }
 
 export async function clearAndroidJobTmp(id: string): Promise<void> {

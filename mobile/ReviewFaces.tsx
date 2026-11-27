@@ -2,42 +2,148 @@
 // a sentence card's dictation (one box, the phone's keyboard; the check marks what differs),
 // a word card's two faces (think, then turn, with front/back word pronunciation speaker),
 // and the four FSRS buttons plus optional "Got it" (mastered) button on sentence cards.
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Check, Volume2 } from 'lucide-react';
 import { Rating, type Grade } from 'ts-fsrs';
 import type { ReviewCard } from '../utils/review';
 import type { WordFront } from '../types';
-import { sentenceParts } from '../utils/textTokenizer';
+import { letters, sentenceParts } from '../utils/textTokenizer';
 import { useJaVersion } from '../utils/japanese';
+import { getLooseJudge } from '../utils/storage';
 import { clean } from '../utils/cleanHtml';
 import { useT, type DictKey } from '../utils/i18n';
-import { checkDictation, type Checked } from './dictation';
+import { checkDictation, type Checked, type Piece } from './dictation';
+import { filterPairedNearExtras } from './gradedPieces';
 import { btnPrimary } from './ui';
 
 export const Html: React.FC<{ html?: string; className?: string }> = ({ html, className }) =>
   html ? <div className={className} dangerouslySetInnerHTML={{ __html: clean(html) }} /> : null;
 
-export const Dictation: React.FC<{ card: ReviewCard; trans: string | null; onChecked: (c: Checked) => void }> = ({ card, trans, onChecked }) => {
+const PieceView: React.FC<{ piece: Piece; fallbackMarks?: boolean[] | null }> = ({ piece, fallbackMarks }) => {
+  if (piece.kind === 'extra') {
+    return <span data-piece="extra" className="text-accent line-through">{piece.s}</span>;
+  }
+  if (piece.kind === 'miss' && piece.near) {
+    const chars = letters(piece.s);
+    const marks = piece.marks ?? fallbackMarks ?? null;
+    return (
+      <span
+        data-piece="near"
+        className="text-ink underline decoration-dashed decoration-accent decoration-2 underline-offset-[6px]"
+      >
+        {marks && marks.length === chars.length
+          ? chars.map((ch, k) => (
+              marks[k]
+                ? <span key={k} data-near-diff className="text-accent">{ch}</span>
+                : <React.Fragment key={k}>{ch}</React.Fragment>
+            ))
+          : piece.s}
+      </span>
+    );
+  }
+  if (piece.kind === 'miss') {
+    return <span data-piece="miss" className="font-semibold underline decoration-2 underline-offset-4">{piece.s}</span>;
+  }
+  return <span>{piece.s}</span>;
+};
+
+export const Dictation: React.FC<{ card: ReviewCard; trans: string | null; lang?: string; onChecked: (c: Checked) => void }> = ({ card, trans, lang, onChecked }) => {
   const t = useT();
   const [typed, setTyped] = useState('');
   const [res, setRes] = useState<Checked | null>(null);
-  const submit = () => { if (res) return; const c = checkDictation(card.text, typed); setRes(c); onChecked(c); };
+  const composingRef = useRef(false);
+  const canSubmit = typed.trim().length > 0;
+
+  const submit = () => {
+    if (res || composingRef.current || !typed.trim()) return;
+    const c = checkDictation(card.text, typed, getLooseJudge(), lang);
+    setRes(c);
+    onChecked(c);
+  };
+
+  const revealAnswer = () => {
+    if (res) return;
+    const raw = checkDictation(card.text, '', getLooseJudge(), lang);
+    const c: Checked = { ...raw, wrong: Math.max(1, raw.wrong), correct: false };
+    setRes(c);
+    onChecked(c);
+  };
+
+  const displayPieces = useMemo(() => (res ? filterPairedNearExtras(res.pieces) : []), [res]);
+
   if (!res) return (
-    <form className="flex flex-col gap-3" onSubmit={e => { e.preventDefault(); submit(); }}>
-      <textarea value={typed} onChange={e => setTyped(e.target.value)} rows={3} enterKeyHint="done" autoCapitalize="off" autoCorrect="off" spellCheck={false}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); } }}
-        aria-label={t('m.typeHere')} placeholder={t('m.typeHere')} className="w-full rounded-xl bg-shade px-3.5 py-3 font-serif text-[18px] leading-normal outline-none focus:ring-2 focus:ring-accent/30" />
-      <button type="submit" className={btnPrimary}>{t('m.check')}</button>
+    <form className="flex flex-col gap-2.5" onSubmit={e => { e.preventDefault(); submit(); }}>
+      <textarea
+        value={typed}
+        onChange={e => setTyped(e.target.value)}
+        onCompositionStart={() => { composingRef.current = true; }}
+        onCompositionEnd={() => { composingRef.current = false; }}
+        rows={3}
+        enterKeyHint="done"
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        onKeyDown={e => {
+          if (e.key !== 'Enter' || e.shiftKey) return;
+          if (composingRef.current || e.nativeEvent.isComposing || e.keyCode === 229) return;
+          e.preventDefault();
+          submit();
+        }}
+        aria-label={t('m.typeHere')}
+        placeholder={t('m.typeHere')}
+        className="w-full rounded-xl bg-shade px-3.5 py-3 font-serif text-[18px] leading-normal outline-none focus:ring-2 focus:ring-accent/30"
+      />
+      <button type="submit" disabled={!canSubmit} className={btnPrimary}>{t('m.check')}</button>
+      <button type="button" onClick={revealAnswer} className="min-h-[44px] rounded-[12px] text-[14px] text-mute active:bg-shade">
+        {t('m.w1RevealAnswer')}
+      </button>
     </form>
   );
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-mute">{t('m.youTyped')}</p>
       <p className="font-serif text-[20px] leading-relaxed" data-wrong={res.wrong}>
-        {res.pieces.map((p, i) => (
-          <span key={i} className={p.kind === 'extra' ? 'text-accent line-through' : p.kind === 'miss' ? 'font-semibold underline decoration-2 underline-offset-4' : undefined}>{p.s}</span>
+        {displayPieces.map((p, i) => (
+          <PieceView
+            key={i}
+            piece={p}
+            fallbackMarks={p.wordIndex !== undefined ? res.words[p.wordIndex]?.marks : null}
+          />
         ))}
       </p>
+      {trans && <><div className="h-px bg-shade" /><p className="text-sm text-mute">{trans}</p></>}
+    </div>
+  );
+};
+
+// Sentence card when audio is absent or fails to play: hide the original line until revealed.
+export const SilentLineFace: React.FC<{
+  card: ReviewCard;
+  trans: string | null;
+  turned: boolean;
+  onTurn: () => void;
+}> = ({ card, trans, turned, onTurn }) => {
+  const t = useT();
+  if (!turned) {
+    return (
+      <div className="flex flex-col gap-3.5">
+        <p className="text-[13px] text-mute">{t('m.w1NoAudioHint')}</p>
+        {trans && (
+          <div className="rounded-xl bg-shade px-3.5 py-3 flex flex-col gap-1">
+            <span className="text-[12px] text-mute">{t('m.w1TransHint')}</span>
+            <p className="text-[16px] leading-relaxed text-ink">{trans}</p>
+          </div>
+        )}
+        <button type="button" className={`${btnPrimary} w-full`} onClick={onTurn}>
+          {t('m.w1ShowLine')}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-[13px] text-mute">{t('m.reviewNoAudio')}</p>
+      <p className="font-serif text-[20px] leading-relaxed">{card.text}</p>
       {trans && <><div className="h-px bg-shade" /><p className="text-sm text-mute">{trans}</p></>}
     </div>
   );

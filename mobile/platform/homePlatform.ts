@@ -31,6 +31,15 @@ export async function repickAndroidRecordAudio(_id: string, _trackIndex?: number
   return null;
 }
 
+export async function extractAndroidRecordAudio(
+  _id: string,
+  _uri: string,
+  _displayName: string,
+  _trackIndex: number,
+): Promise<string> {
+  throw new Error('android:unavailable');
+}
+
 export async function clearAndroidJobTmp(_id: string): Promise<void> {}
 
 export async function sweepAndroidMediaOrphans(): Promise<number> {

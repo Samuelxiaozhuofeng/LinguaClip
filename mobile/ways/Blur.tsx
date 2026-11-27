@@ -10,9 +10,9 @@ import { useT } from '../../utils/i18n';
 import { loadJa, useJaVersion } from '../../utils/japanese';
 import { settleSplits } from '../../utils/jaSegments';
 import { addLine, clearMastered } from '../../utils/review';
-import { getPracticeConfig } from '../../utils/storage';
 import { TokenType, tokenizeText } from '../../utils/textTokenizer';
 import { countLine } from '../../utils/today';
+import { autoAddOn } from '../autoAdd';
 import { errText } from '../ui';
 import { useWordLookup } from '../useWordLookup';
 import { WordSheet } from '../WordSheet';
@@ -25,6 +25,7 @@ import {
   stripLookupPunct,
 } from './drillCommon';
 import type { WayProps } from './types';
+import { useCachedTrans } from './useCachedTrans';
 import { PlayerAudio, useLinePlayer } from './useLinePlayer';
 
 const SPEEDS = [1, 0.75, 1.25];
@@ -41,6 +42,7 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
     settleSplits(record.id, lines.map(l => l.text)).catch(() => {});
   }, [ja, record.id, lines]);
 
+  const trans = useCachedTrans(record.id, lines);
   const player = useLinePlayer(record, lines);
   const { savedIds, toggleSave } = useSavedLines({
     videoId: record.id,
@@ -57,10 +59,11 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
   const [showBreakdown, setShowBreakdown] = useState(false);
 
   const missedLineRef = useRef(false);
-  const countedLineRef = useRef(false);
+  const countedLinesRef = useRef<Set<number>>(new Set());
   const pad = useMemo(padSecOf, []);
 
   useEffect(() => {
+    countedLinesRef.current = new Set();
     setIdx(startIndexForSec(lines, startSec));
   }, [record.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -81,21 +84,27 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
     setMissedHere(false);
     setShowBreakdown(false);
     missedLineRef.current = false;
-    countedLineRef.current = false;
     if (!line) return;
     onPos(line.startTime);
     onLine?.(idx + 1, lines.length);
     player.playLine(idx, pad);
   }, [idx, line?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const countOnce = useCallback(() => {
+    if (!line || countedLinesRef.current.has(line.id)) return;
+    countedLinesRef.current.add(line.id);
+    countLine();
+  }, [line]);
+
   // Count "missed / revealed" at most once per line (matches desktop BlurLine countReveal).
   const countRevealOnce = useCallback(() => {
     if (missedLineRef.current || !line) return;
     missedLineRef.current = true;
+    countOnce();
     setMissedHere(true);
     setMissedCount(c => c + 1);
     clearMastered(record.id, line.startTime).catch(() => {});
-    if (getPracticeConfig().autoAddReview) {
+    if (autoAddOn()) {
       addLine(
         {
           videoId: record.id,
@@ -108,7 +117,7 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
         'blur',
       ).catch(console.error);
     }
-  }, [line, record.id, record.videoFileName, record.videoPath]);
+  }, [countOnce, line, record.id, record.videoFileName, record.videoPath]);
 
   const handleWordClick = (wordIdx: number, raw: string) => {
     if (!line) return;
@@ -142,10 +151,7 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
   };
 
   const goNext = () => {
-    if (!countedLineRef.current) {
-      countedLineRef.current = true;
-      countLine();
-    }
+    countOnce();
     if (idx + 1 < lines.length) setIdx(i => i + 1);
   };
 
@@ -233,6 +239,15 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
               );
             })}
           </div>
+
+          {allShown && trans?.[idx] && (
+            <p
+              data-testid="blur-trans"
+              className="text-[14px] leading-relaxed text-mute border-t border-shade pt-3"
+            >
+              {trans[idx]}
+            </p>
+          )}
 
           <button
             type="button"

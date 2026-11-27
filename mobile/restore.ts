@@ -14,11 +14,120 @@ import { BackupProblem, checkMobile, fromDesktopBackup, makeBackup, parseBackup,
 import { isAndroidNative } from './platform/androidBridge';
 import { cleanupAndroidStagedZip, exportAndroidBackupZip, pickAndroidBackup, prepareAndroidRestore, unpackAndroidZip } from './platform/desktop';
 import { RESTORE_LOCK, deleteCopy, getCopy, putCopy, readAllCache, replaceAllCache } from './store';
+import { prepareUndoPlan, stageRestorePlan, type StageRestoreDeps } from './restorePlan';
 
 const LOCK = RESTORE_LOCK;
+const RESULT_KEY = 'linguaclip_phone_restore_result';
+const INTENT_KEY = 'linguaclip_phone_restore_intent';
+const AUDIO_DB = 'linguaclip_audio';
+const AUDIO_STORES = ['audio', 'cache', 'pre'] as const;
 const locked = <T>(fn: () => Promise<T>): Promise<T> => (navigator.locks ? navigator.locks.request(LOCK, fn) : fn());
 const never = () => new Promise<never>(() => {});
 const reloading = () => { location.reload(); return never(); };
+
+let audioDbOpening: Promise<IDBDatabase> | null = null;
+const openAudioDb = () => (audioDbOpening ??= new Promise<IDBDatabase>((resolve, reject) => {
+  const req = indexedDB.open(AUDIO_DB, 1);
+  req.onupgradeneeded = () => {
+    for (const s of AUDIO_STORES) {
+      if (!req.result.objectStoreNames.contains(s)) req.result.createObjectStore(s);
+    }
+  };
+  req.onsuccess = () => resolve(req.result);
+  req.onerror = () => { audioDbOpening = null; reject(req.error ?? new Error('cannot open linguaclip_audio')); };
+}));
+
+const settleTx = (tx: IDBTransaction) => new Promise<void>((resolve, reject) => {
+  tx.oncomplete = () => resolve();
+  tx.onerror = () => reject(tx.error ?? new Error('pre transaction failed'));
+  tx.onabort = () => reject(tx.error ?? new Error('pre transaction aborted'));
+});
+
+// Writes `staged` and `pre` in one atomic IDB transaction so any quota/write failure
+// leaves the previous `pre` snapshot untouched and commits neither copy.
+async function commitCopiesAtomically(staged: MobileBackup, newPre: MobileBackup): Promise<unknown> {
+  const tx = (await openAudioDb()).transaction('pre', 'readwrite');
+  const s = tx.objectStore('pre');
+  let prevPre: unknown = null;
+  const getReq = s.get('pre');
+  getReq.onsuccess = () => { prevPre = getReq.result ?? null; };
+  s.put(staged, 'staged');
+  s.put(newPre, 'pre');
+  await settleTx(tx);
+  return prevPre;
+}
+
+async function rollbackCopiesAtomically(prevPre: unknown): Promise<void> {
+  const tx = (await openAudioDb()).transaction('pre', 'readwrite');
+  const s = tx.objectStore('pre');
+  s.delete('staged');
+  if (prevPre !== null && prevPre !== undefined) s.put(prevPre, 'pre');
+  else s.delete('pre');
+  await settleTx(tx);
+}
+
+const setSessionIntent = (intent: 'restore' | 'undo') => {
+  try { sessionStorage.setItem(INTENT_KEY, intent); } catch { /* sessionStorage unavailable */ }
+};
+const clearSessionIntent = () => {
+  try { sessionStorage.removeItem(INTENT_KEY); } catch { /* sessionStorage unavailable */ }
+};
+const readSessionIntent = (): 'restore' | 'undo' | null => {
+  try {
+    const v = sessionStorage.getItem(INTENT_KEY);
+    return v === 'undo' || v === 'restore' ? v : null;
+  } catch {
+    return null;
+  }
+};
+
+export interface PreSnapshotInfo {
+  at: number;
+  videos: number;
+  cards: number;
+}
+
+export interface RestoreResult {
+  kind: 'restore' | 'undo';
+  videos: number;
+  cards: number;
+}
+
+/** Reads current record and card counts; throws if either database is unreadable. */
+export async function currentCounts(): Promise<{ videos: number; cards: number }> {
+  const [videos, review] = await Promise.all([getAllVideosFromDB(), readAll()]);
+  return { videos: videos.length, cards: review.cards.length };
+}
+
+/** Summary of the pre-restore snapshot saved in IndexedDB, or null when none exists or unreadable. */
+export async function getPreSnapshotInfo(): Promise<PreSnapshotInfo | null> {
+  try {
+    const raw = await getCopy('pre');
+    if (raw === null || checkMobile(raw) !== null) return null;
+    const b = raw as MobileBackup;
+    return { at: b.at, videos: b.videos.length, cards: b.review.cards.length };
+  } catch {
+    return null;
+  }
+}
+
+/** Reads and clears the one-shot post-reload restore/undo summary from sessionStorage. */
+export function consumeRestoreResult(): RestoreResult | null {
+  try {
+    const raw = sessionStorage.getItem(RESULT_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(RESULT_KEY);
+    const parsed = JSON.parse(raw) as Partial<RestoreResult>;
+    if ((parsed.kind !== 'restore' && parsed.kind !== 'undo')
+      || typeof parsed.videos !== 'number'
+      || typeof parsed.cards !== 'number') {
+      return null;
+    }
+    return { kind: parsed.kind, videos: parsed.videos, cards: parsed.cards };
+  } catch {
+    return null;
+  }
+}
 
 const allLocal = () => {
   const o: Record<string, string> = {};
@@ -90,20 +199,22 @@ export async function pickAndReadAndroidBackup(): Promise<PickedBackup | null> {
 
 export const discardAndroidStagedZip = (): Promise<void> => cleanupAndroidStagedZip();
 
-// The user said yes: keep the current state, stage the backup, then reload into the restore.
-// Either copy failing to save = nothing restored, nothing changed. Another window already
-// restoring (its marker is there) = its copies are left alone, this one just reloads.
+const stageDeps = (): StageRestoreDeps => ({
+  hasPending: () => localStorage.getItem(PENDING_KEY) !== null,
+  prepare: () => prepareAndroidRestore(),
+  snapshot,
+  commitCopies: commitCopiesAtomically,
+  rollbackCopies: rollbackCopiesAtomically,
+  setPending: p => { localStorage.setItem(PENDING_KEY, JSON.stringify(p)); },
+  setIntent: setSessionIntent,
+  clearIntent: clearSessionIntent,
+});
+
+// The user said yes: keep the current state, stage the backup atomically, then reload into the restore.
+// Any failure leaves any existing `pre` untouched. Another window already restoring (its marker is
+// there) = its copies are left alone, this one just reloads.
 export const startRestore = (b: MobileBackup, opts?: { zip?: string; cross?: boolean }): Promise<void> => locked(async () => {
-  if (localStorage.getItem(PENDING_KEY) !== null) return reloading();
-  await prepareAndroidRestore().catch(console.error);
-  const why = (e: unknown) => new BackupProblem('pre', e instanceof Error ? e.message : String(e));
-  const now = await snapshot().catch(e => { throw why(e); });
-  await putCopy('pre', now).catch(e => { throw why(e); });
-  await putCopy('staged', b).catch(e => { throw why(e); });
-  const pending: Pending = { use: 'staged', tries: 0 };
-  if (opts?.zip) pending.zip = opts.zip;
-  if (opts?.cross) pending.cross = true;
-  localStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+  await stageRestorePlan(b, opts, stageDeps());
   return reloading(); // the lock goes with the page
 });
 
@@ -129,8 +240,27 @@ async function run(p: Pending): Promise<void> {
   for (const [k, v] of plan.set) localStorage.setItem(k, v);
   for (const k of plan.remove) localStorage.removeItem(k);
   await replaceAllCache(b.cache);
+  const intent = readSessionIntent();
+  const kind: RestoreResult['kind'] = p.use === 'pre' || intent === 'undo' ? 'undo' : 'restore';
+  clearSessionIntent();
+  try {
+    sessionStorage.setItem(RESULT_KEY, JSON.stringify({
+      kind,
+      videos: b.videos.length,
+      cards: b.review.cards.length,
+    } satisfies RestoreResult));
+  } catch { /* sessionStorage unavailable */ }
   localStorage.removeItem(PENDING_KEY);
-  await deleteCopy('staged').catch(console.error);
+  if (p.use === 'pre' && intent === 'undo') {
+    // A failed swap ("换回上一份") went back to the state before it: `staged` still holds the
+    // older copy the swap was bringing back, so it becomes the new `pre` and can still be swapped in.
+    const older = await getCopy('staged').catch(() => null);
+    if (older !== null) await putCopy('pre', older as MobileBackup).catch(console.error);
+    await deleteCopy('staged').catch(console.error);
+  } else {
+    await deleteCopy('staged').catch(console.error);
+    if (p.use === 'pre') await deleteCopy('pre').catch(console.error);
+  }
   if (p.zip) await cleanupAndroidStagedZip().catch(console.error);
   location.reload();
 }
@@ -191,7 +321,14 @@ export const restorePre = () => locked(async () => {
   await run({ use: 'pre', tries: 0 });
   return never();
 });
+// From Settings after a completed restore: snapshots the current state into `pre`, stages the
+// previous `pre` into `staged`, and reloads via PENDING_KEY so the swap itself can be undone too.
+export const undoLastRestore = (): Promise<void> => locked(async () => {
+  await prepareUndoPlan({ ...stageDeps(), getPre: () => getCopy('pre') });
+  return reloading();
+});
 export const abandonRestore = () => locked(async () => {
+  clearSessionIntent();
   localStorage.removeItem(PENDING_KEY);
   await deleteCopy('staged').catch(console.error);
   await cleanupAndroidStagedZip().catch(console.error);

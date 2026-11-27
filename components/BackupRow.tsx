@@ -6,7 +6,9 @@ import { pickBackupDest, pickBackupFile } from '../utils/desktop';
 import { IS_WINDOWS } from '../utils/platform';
 import { countsOk, kindOf, lastAuto, type Listed } from '../utils/backup';
 import { getAutoState, listBackups, noteLastAuto, saveBackup, subscribeAuto } from '../utils/backupData';
+import { getAllCards, hasAudio } from '../utils/review';
 import { cancelBackup, describe, openBackup, startRestore } from '../utils/restore';
+import { getPracticeConfig } from '../utils/storage';
 
 // "today 09:12", else the date and time.
 const when = (ms: number, lang: string) => {
@@ -44,7 +46,15 @@ const BackupRow: React.FC = () => {
     if (!dest) return;
     try {
       const done = await saveBackup('manual', dest);
-      if (done) await dialog.alert(t('backup.doneTitle'), t('backup.doneBody', { videos: done.manifest.videos, cards: done.manifest.cards }));
+      if (done) {
+        const cards = await getAllCards().catch(() => []);
+        const unclipped = cards.filter(c => hasAudio(c) && !c.clip).length;
+        const base = t('backup.doneBody', { videos: done.manifest.videos, cards: done.manifest.cards });
+        const body = unclipped > 0
+          ? `${base}\n${t(getPracticeConfig().saveClips ? 'm.w4BackupClipsPending' : 'm.w4BackupNoClips', { n: unclipped })}`
+          : base;
+        await dialog.alert(t('backup.doneTitle'), body);
+      }
     } catch (e) {
       console.error(e);
       await dialog.alert(t('backup.failedTitle'), String(e).includes('tooBig') ? t('backup.tooBig') : e instanceof Error ? e.message : String(e));

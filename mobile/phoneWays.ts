@@ -84,10 +84,16 @@ export const setWayOn = (w: PhoneWay, on: boolean) => {
   listeners.forEach(fn => fn());
 };
 
+// The raw last way recorded on this phone, or null if never opened here yet.
+export const readPhoneLastWay = (videoId: string): PhoneWay | null => {
+  const v = readJson<Record<string, unknown>>(LAST_KEY, {})[videoId];
+  return isWay(v) ? v : null;
+};
+
 // The way a record opens with: the last one used, unless it has been switched off since.
 export const getPhoneLastWay = (videoId: string): PhoneWay => {
-  const v = readJson<Record<string, unknown>>(LAST_KEY, {})[videoId];
-  return isWay(v) && isWayOn(v) ? v : 'listen';
+  const v = readPhoneLastWay(videoId);
+  return v && isWayOn(v) ? v : 'listen';
 };
 export const setPhoneLastWay = (videoId: string, w: PhoneWay) => {
   try {

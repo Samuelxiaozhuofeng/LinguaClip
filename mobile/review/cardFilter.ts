@@ -1,8 +1,10 @@
 // Pure logic for phone review & card library (docs/android-roadmap.md M2.5, docs/review.md):
 // language deck pills, search/filter/sort, queue deletion, defer checks, AnkiDroid state & summary.
+import type { VideoRecord } from '../../types';
 import { DECK_LANGS, type DeckLang } from '../../utils/deckLang';
 import { hasAudio, isDue, type Deck, type ReviewCard } from '../../utils/review';
 import type { ExportResult } from '../../utils/ankiExport';
+import { blobId } from '../backup';
 import type { AnkiDroidStatus } from '../platform/ankiDroid';
 
 export type LangFilter = DeckLang | 'all';
@@ -70,6 +72,58 @@ export function shouldDeferCard(card: ReviewCard | undefined, done: boolean, rep
 // Count unique cards finished this round, excluding deleted cards (docs/review.md).
 export function finishedCardCount(queue: ReviewCard[], removedIds: ReadonlySet<string>): number {
   return new Set(queue.map(c => c.id).filter(id => !removedIds.has(id))).size;
+}
+
+export interface RoundSummaryCounts {
+  completed: number;
+  unfinished: number;
+}
+
+// Accurate end-of-round summary (docs/android.md「手机学习闭环」):
+// only cards truly graded or marked "Got it" (and not deleted) count as completed;
+// skipped or deleted cards count as unfinished.
+export function roundSummaryCounts(
+  queue: ReviewCard[],
+  completedIds: ReadonlySet<string>,
+  removedIds: ReadonlySet<string>,
+): RoundSummaryCounts {
+  const unique = new Set(queue.map(c => c.id));
+  let completed = 0;
+  for (const id of unique) {
+    if (completedIds.has(id) && !removedIds.has(id)) completed++;
+  }
+  return { completed, unfinished: Math.max(0, unique.size - completed) };
+}
+
+function hasPlayableContinueAudio(
+  r: VideoRecord,
+  opts?: { haveBlobs?: ReadonlySet<string> | null; android?: boolean; missingAndroid?: ReadonlySet<string> },
+): boolean {
+  if (r.importJob || !r.videoPath) return false;
+  const p = r.videoPath;
+  const bId = blobId(p);
+  if (opts?.android) {
+    if (bId) return false;
+    return !opts.missingAndroid?.has(r.id);
+  }
+  if (bId) return !opts?.haveBlobs || opts.haveBlobs.has(bId);
+  return /^https?:\/\//i.test(p) || p.startsWith('data:') || p.startsWith('/starter/');
+}
+
+// Picks the most recently practiced record for the review-done "Continue" button
+// (same rule as Home.tsx's `last`: playable audio first, else subtitle-only record).
+export function pickContinueRecord(
+  records: VideoRecord[],
+  opts?: { haveBlobs?: ReadonlySet<string> | null; android?: boolean; missingAndroid?: ReadonlySet<string> },
+): VideoRecord | null {
+  const sorted = [...records].sort((a, b) => (b.lastPracticed || 0) - (a.lastPracticed || 0));
+  for (const r of sorted) {
+    if (hasPlayableContinueAudio(r, opts)) return r;
+  }
+  for (const r of sorted) {
+    if (!r.importJob && !!r.subtitleText?.trim()) return r;
+  }
+  return null;
 }
 
 export function classifyAnkiStatus(status: AnkiDroidStatus | null): AnkiSetupState {

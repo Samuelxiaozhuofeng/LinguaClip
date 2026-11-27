@@ -17,6 +17,7 @@ import { useT, useLang, setLang, Lang } from '../utils/i18n';
 import { openExternal } from '../utils/desktop';
 import { ProFooter } from '@pro';
 import { UpdateRow } from './UpdateUI';
+import SettingsSync from './SettingsSync';
 import BackupRow from './BackupRow';
 
 type DeckByLang = NonNullable<AnkiCardTemplateConfig['deckByLang']>;
@@ -315,6 +316,7 @@ const Settings: React.FC = () => {
         </SettingsCards>
       )}
 
+      <SettingsSync />
       <BackupRow />
       <p className="mt-12 text-center text-xs text-mute">
         {ProFooter ? <ProFooter /> : (
