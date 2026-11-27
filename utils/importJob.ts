@@ -2,9 +2,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { VideoRecord } from '../types';
 import { dialog } from '../components/Dialog';
-import { fileNameFromPath, isAudioPath, needsConvert, onYouTubePick, pathExists, trashFile, youtubePickDone } from './desktop';
+import { fileNameFromPath, isAudioPath, needsConvert, onYouTubePick, onYouTubeRetry, pathExists, trashFile, youtubePickDone, youtubePickError } from './desktop';
 import { IS_WINDOWS } from './platform';
-import { saveImportLang } from './importLangs';
+import { loadImportLang, saveImportLang } from './importLangs';
 import { getYouTubeQuality } from './youtube';
 import { getLang, t } from './i18n';
 import { getAIConfig } from './aiConfig';
@@ -49,6 +49,8 @@ export type ImportQuality = (typeof IMPORT_QUALITIES)[number];
 
 export type QualitySizes = Record<ImportQuality, number | null>;
 
+const YT_ID = /^[A-Za-z0-9_-]{11}$/;
+
 export function isYouTubeUrl(input: string): boolean {
   try {
     const u = new URL(input.trim());
@@ -57,6 +59,24 @@ export function isYouTubeUrl(input: string): boolean {
     return host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtu.be';
   } catch {
     return false;
+  }
+}
+
+export function youtubeVideoIdFromUrl(input: string): string | null {
+  try {
+    const u = new URL(input.trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    let id: string | null = null;
+    if (host === 'youtu.be') {
+      id = /^\/([^/]+)\/?$/.exec(u.pathname)?.[1] ?? null;
+    } else if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+      if (u.pathname === '/watch') id = u.searchParams.get('v');
+      else id = /^\/shorts\/([^/]+)(?:\/|$)/.exec(u.pathname)?.[1] ?? null;
+    }
+    return id && YT_ID.test(id) ? id : null;
+  } catch {
+    return null;
   }
 }
 
@@ -172,6 +192,13 @@ const jobArgs = (job: NonNullable<VideoRecord['importJob']>) => ({
   subs: job.subs === undefined ? null : String(job.subs),
 });
 
+function notifyYouTubeError(source: string, rawErr: string): void {
+  const ytId = youtubeVideoIdFromUrl(source);
+  if (!ytId) return;
+  const kind = isCookieError(rawErr) ? (IS_WINDOWS ? 'winLogin' : 'needLogin') : 'dlError';
+  youtubePickError(ytId, kind, formatImportError(rawErr)).catch(() => {});
+}
+
 async function startImport(
   source: string,
   lang: string,
@@ -179,19 +206,22 @@ async function startImport(
   quality: ImportQuality,
   opts: LocalImportOptions = {},
   episode?: PodcastImport,
-): Promise<void> {
+): Promise<boolean> {
   const id = episode?.id ?? crypto.randomUUID();
   const record = pendingRecord(id, source, fromUrl, lang, quality, opts, episode);
   await VideoStorage.updateVideoRecord(record);
   notify();
   try {
     await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...jobArgs(record.importJob!), name: episode?.podcast.name ?? null });
+    return true;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     await VideoStorage.updateVideoWith(id, rec => rec.importJob
       ? { ...rec, importJob: { ...rec.importJob, error: formatImportError(detail) } }
       : null);
     notify();
+    notifyYouTubeError(source, detail);
+    return false;
   }
 }
 
@@ -201,17 +231,17 @@ export function cancelImport(id: string): Promise<void> {
   return invoke('cancel_import', { id });
 }
 
-export function startUrlImport(url: string, lang: string, quality: ImportQuality = 1080): Promise<void> {
+export function startUrlImport(url: string, lang: string, quality: ImportQuality = 1080): Promise<boolean> {
   return startImport(url.trim(), lang, true, quality);
 }
 
-export function startLocalImport(path: string, lang: string, opts: LocalImportOptions = {}): Promise<void> {
+export function startLocalImport(path: string, lang: string, opts: LocalImportOptions = {}): Promise<boolean> {
   return startImport(path, lang, false, 1080, opts);
 }
 
 // Resolves once the card is saved (the import itself goes on in the background). `subs`: a
 // starter episode's own transcript (docs/starter.md) — downloaded only, nothing transcribed.
-export function startPodcastImport(episode: PodcastImport, subs?: LocalImportOptions['subs']): Promise<void> {
+export function startPodcastImport(episode: PodcastImport, subs?: LocalImportOptions['subs']): Promise<boolean> {
   return startImport(episode.audio, episode.lang, true, 1080, subs ? { subs } : {}, episode);
 }
 
@@ -226,47 +256,49 @@ export function canConvertRetry(job: NonNullable<VideoRecord['importJob']>): boo
 // language and quality the user originally picked are reused. Two clicks in the
 // moment before the card repaints would start two runs writing the same file, so a
 // click is ignored while its retry is in flight.
-const retrying = new Set<string>();
+const retrying = new Map<string, Promise<boolean>>();
 
 // `convert`: the "convert and retry" button, for a video whose sound could not be read.
-export async function retryImport(id: string, convert = false): Promise<void> {
-  if (retrying.has(id)) return;
-  const rec = await VideoStorage.getVideoRecord(id);
-  const job = rec?.importJob;
-  if (!rec || !job) return;
-  retrying.add(id);
-  const lang = job.lang ?? 'en';
-  const quality = (job.quality ?? 1080) as ImportQuality;
-  const stage = isYouTubeUrl(job.source) || rec.podcast ? 'download' as const : 'extract' as const;
-  // Everything the user chose at the start (own subtitles, conversion, trashing
-  // the original) carries over; only the progress starts again.
-  const next = { ...job, stage, percent: 0, error: undefined, lang, quality, ...(convert && { convert: true }) };
-  delete next.error;
-  // Already converted: start from that mp4. Not when a subtitle track is still to
-  // be read out of the original.
-  const reuse = !!next.converted && typeof next.subs !== 'number' && await pathExists(next.converted);
-  if (!reuse) delete next.converted;
-  const source = reuse ? next.converted! : job.source;
-  const args = reuse ? { convert: false, subs: jobArgs(next).subs } : jobArgs(next);
-  // Deleted while we looked for the converted file: nothing to retry.
-  const saved = await VideoStorage.updateVideoWith(id, r => r.importJob ? { ...r, importJob: next } : null)
-    .catch(err => { console.error(err); return null; });
-  if (!saved) {
-    retrying.delete(id);
-    return;
-  }
-  notify();
-  try {
-    // Uses the engine picked in Settings now, not the one this card started
-    // with: switching to the cloud after a failed download is a way out.
-    await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...args, name: rec.podcast?.name ?? null });
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    await VideoStorage.updateVideoWith(id, r => r.importJob ? { ...r, importJob: { ...r.importJob, error: detail } } : null);
+export function retryImport(id: string, convert = false): Promise<boolean> {
+  const inflight = retrying.get(id);
+  if (inflight) return inflight;
+  const run = (async (): Promise<boolean> => {
+    const rec = await VideoStorage.getVideoRecord(id);
+    const job = rec?.importJob;
+    if (!rec || !job) return false;
+    const lang = job.lang ?? 'en';
+    const quality = (job.quality ?? 1080) as ImportQuality;
+    const stage = isYouTubeUrl(job.source) || rec.podcast ? 'download' as const : 'extract' as const;
+    // Everything the user chose at the start (own subtitles, conversion, trashing
+    // the original) carries over; only the progress starts again.
+    const next = { ...job, stage, percent: 0, error: undefined, lang, quality, ...(convert && { convert: true }) };
+    delete next.error;
+    // Already converted: start from that mp4. Not when a subtitle track is still to
+    // be read out of the original.
+    const reuse = !!next.converted && typeof next.subs !== 'number' && await pathExists(next.converted);
+    if (!reuse) delete next.converted;
+    const source = reuse ? next.converted! : job.source;
+    const args = reuse ? { convert: false, subs: jobArgs(next).subs } : jobArgs(next);
+    // Deleted while we looked for the converted file: nothing to retry.
+    const saved = await VideoStorage.updateVideoWith(id, r => r.importJob ? { ...r, importJob: next } : null)
+      .catch(err => { console.error(err); return null; });
+    if (!saved) return false;
     notify();
-  } finally {
-    retrying.delete(id);
-  }
+    try {
+      // Uses the engine picked in Settings now, not the one this card started
+      // with: switching to the cloud after a failed download is a way out.
+      await invoke('start_import', { id, source, lang, quality, ...engineArgs(), ...args, name: rec.podcast?.name ?? null });
+      return true;
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      await VideoStorage.updateVideoWith(id, r => r.importJob ? { ...r, importJob: { ...r.importJob, error: detail } } : null);
+      notify();
+      notifyYouTubeError(job.source, detail);
+      return false;
+    }
+  })().finally(() => { retrying.delete(id); });
+  retrying.set(id, run);
+  return run;
 }
 
 export type ImportTools = { whisper: boolean; youtube: boolean };
@@ -344,9 +376,11 @@ async function applyProgress(payload: ImportProgressPayload): Promise<void> {
   }
 
   if (payload.stage === 'error') {
-    await VideoStorage.updateVideoWith(rec.id, r => r.importJob
-      ? { ...r, importJob: { ...r.importJob, error: payload.error ?? '' } }
+    const err = payload.error ?? '';
+    const updated = await VideoStorage.updateVideoWith(rec.id, r => r.importJob
+      ? { ...r, importJob: { ...r.importJob, error: err } }
       : null);
+    if (updated) notifyYouTubeError(rec.importJob.source, err);
     return;
   }
 
@@ -396,17 +430,37 @@ export async function startImportListener(): Promise<() => void> {
   const offProgress = await listen<ImportProgressPayload>('import-progress', event => {
     enqueueProgress(event.payload);
   });
+  // Reuse an in-flight or failed YouTube import for the same video id so retries from
+  // either window (or re-clicking the pill) never create a duplicate card.
+  const startOrReuseYouTube = async (ytId: string, url: string, lang: string): Promise<boolean> => {
+    const records = await VideoStorage.getAllVideoRecords();
+    const matching = records
+      .filter(r => r.importJob && youtubeVideoIdFromUrl(r.importJob.source) === ytId)
+      .sort((a, b) => b.dateAdded - a.dateAdded);
+    const active = matching.find(r => r.importJob && r.importJob.error === undefined);
+    if (active) return true;
+    const failed = matching.find(r => r.importJob && r.importJob.error !== undefined);
+    if (failed) return retryImport(failed.id);
+    return startUrlImport(url, lang, getYouTubeQuality());
+  };
   const offPick = await onYouTubePick(({ id, url, lang }) => {
     const done = (ok: boolean) => youtubePickDone(id, ok).catch(err => console.error(err));
     if (!isYouTubeUrl(url)) { done(false); return; }
     saveImportLang(lang);
-    // Resolves once the card is saved; the import goes on in the background.
-    startUrlImport(url, lang, getYouTubeQuality()).then(
-      () => done(true),
+    startOrReuseYouTube(id, url, lang).then(
+      ok => { if (ok) done(true); },
       err => { console.error('YouTube pick failed:', err); done(false); },
     );
   }).catch(err => { console.error(err); return () => {}; });
-  return () => { offProgress(); offPick(); };
+  const offRetry = await onYouTubeRetry(ytId => {
+    const done = (ok: boolean) => youtubePickDone(ytId, ok).catch(err => console.error(err));
+    if (!YT_ID.test(ytId)) { done(false); return; }
+    startOrReuseYouTube(ytId, `https://www.youtube.com/watch?v=${ytId}`, loadImportLang()).then(
+      ok => { if (ok) done(true); },
+      err => { console.error('YouTube retry failed:', err); done(false); },
+    );
+  }).catch(err => { console.error(err); return () => {}; });
+  return () => { offProgress(); offPick(); offRetry(); };
 }
 
 export async function markInterruptedJobs(): Promise<void> {

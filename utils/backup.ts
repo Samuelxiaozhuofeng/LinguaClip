@@ -16,7 +16,7 @@ export const SECRET_KEYS = ['linguaclip_ai_config', 'linguaclip_transcribe_confi
 // This computer's own state: never in a backup, never overwritten or removed by a restore.
 const LOCAL_ONLY = [
   LICENSE_KEY, 'linguaclip_anki_tpl', 'linguaclip_today', 'linguaclip_days', PENDING_KEY,
-  SYNC_DEVICE_KEY, SYNC_STATE_KEY, DAYS_DEV_KEY,
+  SYNC_DEVICE_KEY, SYNC_STATE_KEY, DAYS_DEV_KEY, 'linguaclip_auto_add_default',
 ];
 // Platform-specific keys: kept in same-platform backups, skipped during cross-platform migration
 // so desktop shortcuts and mobile hints never overwrite or wipe each other.

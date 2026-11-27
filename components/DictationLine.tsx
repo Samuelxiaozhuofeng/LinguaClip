@@ -9,7 +9,7 @@ import { ArrowRight } from 'lucide-react';
 import { Btn } from './ui';
 import { useT } from '../utils/i18n';
 import { usePhraseDrag } from '../hooks/usePhraseDrag';
-import { getCombo, isDefault, loose, matches, sameCombo } from '../utils/shortcuts';
+import { formatCombo, getCombo, isDefault, loose, matches, sameCombo } from '../utils/shortcuts';
 import { IS_WINDOWS } from '../utils/platform';
 import { useJaVersion } from '../utils/japanese';
 import { wordSpans } from '../utils/wordTimes';
@@ -21,6 +21,8 @@ interface Props {
   targetText: string;
   mode: PracticeMode;
   onComplete: (wasCorrect: boolean) => void;
+  // Typing or IME composition started while LISTENING: switch to INPUT without pausing the video.
+  onStartInput?: () => void;
   // fromRatio / toRatio: 0..1 into the line; toRatio set = stop there (one word).
   onReplay: (autoAdvanceAfter?: boolean, fromRatio?: number, toRatio?: number) => void;
   onLookup: (word: string) => void;
@@ -33,6 +35,7 @@ interface Props {
   // come out right, and was help used (peek, or playing from a word).
   onResult?: (o: { correct: boolean; helped: boolean }) => void;
   extra?: React.ReactNode; // shown beside the feedback's forward button
+  inputExtra?: React.ReactNode; // shown beside the input bar's reveal button
   // Japanese: when the line may re-split (the practice page decides, so its blanks
   // and these boxes always count the same split). Omitted: re-split until typed in.
   splitVersion?: number;
@@ -56,15 +59,21 @@ export const slotEm = (word: string) =>
 // Typing and the answer share one setting, so submitting changes colours, not positions.
 export const LINE = 'flex flex-wrap justify-center items-baseline gap-x-[0.3em] font-serif text-[38px] leading-[54px]';
 
-const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay, onLookup, onTogglePlay, blanks, nextLabel, hideNext, onResult, extra, splitVersion, timedWords, inReview }) => {
+const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onStartInput, onReplay, onLookup, onTogglePlay, blanks, nextLabel, hideNext, onResult, extra, inputExtra, splitVersion, timedWords, inReview }) => {
   const t = useT();
   // A Japanese line is re-split when its dictionary or AI cut points arrive, but
   // never under the user's fingers: once something is typed the split holds.
   const jaVersion = useJaVersion();
   const [ownVersion, setOwnVersion] = useState(jaVersion);
   const typedRef = useRef(false);
-  useEffect(() => { if (!typedRef.current) setOwnVersion(jaVersion); }, [jaVersion, targetText]);
-  const version = splitVersion ?? ownVersion;
+  const composingRef = useRef(false);
+  useEffect(() => { if (!typedRef.current && !composingRef.current) setOwnVersion(jaVersion); }, [jaVersion, targetText]);
+  const wantedVersion = splitVersion ?? ownVersion;
+  const verRef = useRef({ targetText, version: wantedVersion });
+  if (verRef.current.targetText !== targetText || (!typedRef.current && !composingRef.current)) {
+    verRef.current = { targetText, version: wantedVersion };
+  }
+  const version = verRef.current.version;
   const lenient = useMemo(getLooseJudge, []); // 宽松判对 (docs/dictation-judge.md)
   const tokens = useMemo(() => tokenizeText(targetText), [targetText, version]); // eslint-disable-line react-hooks/exhaustive-deps
   const wordTokens = useMemo(() => getWordTokens(tokens), [tokens]);
@@ -87,7 +96,16 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     });
     return out;
   }, [tokens]);
-  const blankSet = useMemo(() => blanks ? new Set(blanks) : null, [blanks]);
+  const [ownBlanks, setOwnBlanks] = useState<number[] | undefined>(blanks);
+  const lineKey = `${targetText}\0${version}`;
+  const lastLineKey = useRef(lineKey);
+  useEffect(() => {
+    if (lastLineKey.current !== lineKey || (!typedRef.current && !composingRef.current)) {
+      lastLineKey.current = lineKey;
+      setOwnBlanks(blanks);
+    }
+  }, [lineKey, blanks]);
+  const blankSet = useMemo(() => ownBlanks ? new Set(ownBlanks) : null, [ownBlanks]);
   const isBlank = (i: number) => blankSet === null || blankSet.has(i);
   const stepBlank = (from: number, dir: number) => {
     for (let i = from + dir; i >= 0 && i < wordTokens.length; i += dir) {
@@ -107,7 +125,8 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
   };
 
   const [inputs, setInputs] = useState<string[]>([]);
-  typedRef.current = mode === PracticeMode.INPUT && inputs.some((w, i) => isBlank(i) && !!w);
+  const typingMode = mode === PracticeMode.INPUT || mode === PracticeMode.LISTENING;
+  typedRef.current = typingMode && inputs.some((w, i) => isBlank(i) && !!w);
   const refs = useRef<(HTMLInputElement | null)[]>([]);
   const [peek, setPeek] = useState<number | null>(null);
   const peekTimer = useRef<number | null>(null);
@@ -123,14 +142,30 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     onResult?.({ correct, helped: attempt.current.helped });
   };
 
+  // Reset boxes on mount, new line/split/blanks, or leaving FEEDBACK — never when
+  // LISTENING transitions to INPUT on the same line, so early typing and IME stay intact.
+  const prevRef = useRef<{ mode: PracticeMode | null; targetText: string; wordTokens: Token[]; blankSet: Set<number> | null }>({
+    mode: null, targetText: '', wordTokens: [], blankSet: null,
+  });
   useEffect(() => {
-    if (mode === PracticeMode.INPUT) {
-      attempt.current = { helped: false, reported: false };
-      setInputs(wordTokens.map((w, i) => isBlank(i) ? '' : w.value));
-      setLeft(new Set());
-      refs.current = refs.current.slice(0, wordTokens.length);
-      refs.current[firstBlank()]?.focus();
+    const prev = prevRef.current;
+    prevRef.current = { mode, targetText, wordTokens, blankSet };
+    if (mode !== PracticeMode.INPUT && mode !== PracticeMode.LISTENING) return;
+    const sameLine = prev.targetText === targetText && prev.wordTokens === wordTokens && prev.blankSet === blankSet;
+    if (sameLine && prev.mode === PracticeMode.LISTENING && mode === PracticeMode.INPUT) {
+      // Keep user's typed text; if focus wandered away to body (e.g. clicked a word or button), put it back on the first open blank.
+      const inBox = refs.current.some(el => el && el === document.activeElement);
+      if (!inBox && (!document.activeElement || document.activeElement === document.body)) {
+        refs.current[firstBlank()]?.focus();
+      }
+      return;
     }
+    composingRef.current = false;
+    attempt.current = { helped: false, reported: false };
+    setInputs(wordTokens.map((w, i) => isBlank(i) ? '' : w.value));
+    setLeft(new Set());
+    refs.current = refs.current.slice(0, wordTokens.length);
+    refs.current[firstBlank()]?.focus();
   }, [mode, targetText, wordTokens, blankSet]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const clearPeek = () => {
@@ -139,7 +174,14 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     setPeek(null);
   };
   const clearReplay = () => { if (replayTimer.current) window.clearTimeout(replayTimer.current); replayTimer.current = null; };
-  useEffect(() => { clearPeek(); clearReplay(); }, [targetText, mode]);
+  const clearRef = useRef({ mode, targetText });
+  useEffect(() => {
+    const prev = clearRef.current;
+    clearRef.current = { mode, targetText };
+    if (prev.targetText === targetText && prev.mode === PracticeMode.LISTENING && mode === PracticeMode.INPUT) return;
+    clearPeek();
+    clearReplay();
+  }, [targetText, mode]);
   useEffect(() => () => { clearPeek(); clearReplay(); }, []);
 
   const showPeek = (i: number) => {
@@ -153,6 +195,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
   // composing: a Japanese (or Chinese) input method is still turning keystrokes
   // into text; the word is only judged once it is committed.
   const change = (i: number, value: string, composing = false) => {
+    if (mode === PracticeMode.LISTENING) onStartInput?.();
     autoNext.current = -1;
     const next = [...inputs];
     next[i] = value;
@@ -178,11 +221,19 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     }
   };
 
+  const allBlanksEmpty = () => !inputs.some((w, idx) => isBlank(idx) && w.trim().length > 0);
+  const reveal = () => { clearReplay(); report(false); onComplete(false); };
+
   const submit = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (mode !== PracticeMode.INPUT) return;
+    if (!typingMode) return;
     clearReplay();
-    if (!inputs.some(w => w.trim().length > 0)) return;
+    if (allBlanksEmpty()) {
+      if (mode === PracticeMode.LISTENING) return;
+      report(false);
+      onComplete(false);
+      return;
+    }
     const correct = areAllWordsCorrectFlexibleCase(tokens, inputs, lenient);
     report(correct);
     onComplete(correct);
@@ -192,7 +243,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     // Space picks a kanji and Enter commits it inside an input method; those keys
     // are not ours. Safari reports the committing Enter with keyCode 229.
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-    if (matches(e, 'blank.reveal')) { e.preventDefault(); e.stopPropagation(); report(false); onComplete(false); return; }
+    if (matches(e, 'blank.reveal')) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) reveal(); return; }
     if (matches(e, 'dict.replay')) { e.preventDefault(); e.stopPropagation(); clearReplay(); onReplay(false); return; }
     if (matches(e, 'dict.playFrom')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, spanOf(i)[0]); return; }
     if (matches(e, 'dict.playWord')) { e.preventDefault(); e.stopPropagation(); clearReplay(); attempt.current.helped = true; onReplay(false, ...spanOf(i)); return; }
@@ -210,11 +261,15 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     const at = (code: string, ok: boolean) => e.code !== code || ok;
     const caret = e.currentTarget.selectionStart;
     const zone = inReview ? 'reviewBlank' : 'dictBlank';
-    if (loose(e, 'blank.jump', zone) || loose(e, 'blank.submit', zone)) {
+    const isSubmit = loose(e, 'blank.submit', zone);
+    const isJump = loose(e, 'blank.jump', zone);
+    if (isSubmit || isJump) {
       e.preventDefault();
       autoNext.current = -1;
+      if (isSubmit && e.repeat) return;
       const nxt = areAllWordsCorrectFlexibleCase(tokens, inputs, lenient) ? -1 : stepBlank(i, 1);
-      if (nxt >= 0) refs.current[nxt]?.focus(); else submit();
+      if (nxt >= 0) refs.current[nxt]?.focus();
+      else if (isSubmit ? (mode !== PracticeMode.LISTENING || !allBlanksEmpty()) : !allBlanksEmpty()) submit();
     } else if ((loose(e, 'blank.back', zone) && at('Backspace', inputs[i] === '')) || (loose(e, 'blank.backLeft', zone) && at('ArrowLeft', caret === 0))) {
       const prev = stepBlank(i, -1);
       if (prev >= 0) { e.preventDefault(); refs.current[prev]?.focus(); }
@@ -227,6 +282,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
 
   const paste = (e: React.ClipboardEvent) => {
     e.preventDefault();
+    if (mode === PracticeMode.LISTENING) onStartInput?.();
     const words = e.clipboardData.getData('text').trim().split(/\s+/);
     const next = [...inputs];
     const slots = wordTokens.map((_, i) => i).filter(i => isBlank(i));
@@ -301,17 +357,25 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
     );
   }
 
-  // INPUT mode
+  // INPUT / LISTENING mode
   return (
     <div className="w-full">
       <form onSubmit={submit} className={`${LINE} pt-4`}>
-        {groups.map(g => {
+        {groups.map((g, gi) => {
           const punct = g.punct && <span className="text-mute select-none">{g.punct}</span>;
           if (g.wi < 0) return <span key={g.key}>{punct}</span>;
           const i = g.wi;
           const tk = g.word!;
           if (!isBlank(i)) {
-            return <span key={g.key} className="text-ink/40 select-none">{tk.value}{punct}</span>;
+            return (
+              <span key={g.key} className="inline-flex items-baseline">
+                <button type="button" tabIndex={-1} onClick={e => { e.currentTarget.blur(); lookup(wordAt(gi)); }} title={t('common.lookup')}
+                  className="rounded-md -mx-1 px-1 text-ink/45 hover:text-ink hover:bg-accent-soft transition-colors">
+                  {tk.value}
+                </button>
+                {punct}
+              </span>
+            );
           }
           const verdict = inputs[i] ? judgeWord(inputs[i], tk.value, tk.reading, lenient) : 'wrong';
           const ok = verdict === 'right';
@@ -326,7 +390,8 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
                   size={1}
                   value={inputs[i] || ''}
                   onChange={e => change(i, e.target.value, (e.nativeEvent as InputEvent).isComposing)}
-                  onCompositionEnd={e => settle(i, Object.assign([...inputs], { [i]: e.currentTarget.value }))}
+                  onCompositionStart={() => { composingRef.current = true; if (mode === PracticeMode.LISTENING) onStartInput?.(); }}
+                  onCompositionEnd={e => { composingRef.current = false; settle(i, Object.assign([...inputs], { [i]: e.currentTarget.value })); }}
                   onKeyDown={e => keyDown(i, e)}
                   onFocus={() => setLeft(prev => { if (!prev.has(i)) return prev; const n = new Set(prev); n.delete(i); return n; })}
                   onBlur={() => setLeft(prev => new Set(prev).add(i))}
@@ -347,6 +412,13 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onReplay
           );
         })}
       </form>
+      <div className="mt-5 flex items-center justify-center gap-2">
+        <Btn type="button" size="sm" flat onClick={e => { e.currentTarget.blur(); reveal(); }}
+          title={t('dictation.revealTitle', { key: formatCombo(getCombo('blank.reveal')) })}>
+          {t('dictation.revealBtn')}
+        </Btn>
+        {inputExtra}
+      </div>
     </div>
   );
 };

@@ -1,5 +1,6 @@
 import React, { createContext, useContext } from 'react';
 import { PracticeMode, Subtitle, VideoSection, AnkiConfig, LearningMode, BlurPlaybackMode } from '../types';
+import type { DictLang } from '../utils/dictionary';
 
 export interface PracticeContextPractice {
   videoId: string | null;
@@ -14,6 +15,7 @@ export interface PracticeContextPractice {
   learningMode: LearningMode;
   blurPlaybackMode: BlurPlaybackMode;
   videoName: string;
+  videoLang?: DictLang;
   watch: Set<number> | null; // custom set: ids of lines only watched; null = section by section
 }
 
@@ -59,6 +61,7 @@ export interface PracticeContextActions {
   onSetVolume: (volume: number) => void;
   onSetPlaybackSpeed: (speed: number) => void;
   onInputComplete: (wasCorrect: boolean) => void;
+  onStartInput?: () => void;
   onContinue: () => void;
   onDeleteSavedItem: (id: number, e: React.MouseEvent) => void;
   onJumpToSaved: (id: number) => void;

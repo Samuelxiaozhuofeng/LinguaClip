@@ -10,7 +10,7 @@ import { JaBanner } from '../components/JaSetup';
 import { useSavedLines } from '../hooks/useSavedLines';
 import { lineAt, lineEnded, parseSRT, passed } from '../utils/srtParser';
 import { buildSections, sectionAt, sectionLengthOf, sectionStart } from '../utils/sections';
-import { detectLang } from '../utils/dictionary';
+import { resolveDictLang } from '../utils/resolveDictLang';
 import { useJaVersion } from '../utils/japanese';
 import { settleSplits } from '../utils/jaSegments';
 import { videoSrcFromPath } from '../utils/desktop';
@@ -47,7 +47,7 @@ const ListenPage: React.FC<{ record: VideoRecord; onExit: () => void; onPractice
   const sections = useMemo(() => buildSections(lines, sectionLengthOf(record)), [lines]);
   const sectionOf = useMemo(() => new Map(sections.flatMap((s, i) => s.subtitles.map(l => [l.id, i] as const))), [sections]);
   const indexOf = useMemo(() => new Map(lines.map((l, i) => [l.id, i])), [lines]);
-  const dictLang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
+  const dictLang = useMemo(() => resolveDictLang(record.lang, lines.map(l => l.text)), [record.lang, lines]);
   const ja = dictLang === 'ja';
   const jaVersion = useJaVersion();
   const [kana] = useState(() => getWatchPrefs().kana);

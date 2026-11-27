@@ -171,4 +171,70 @@ assert.deepEqual(Object.fromEntries(langs), { a: 'es', b: 'ja', c: 'en', d: 'oth
 // Unreadable / empty subtitles are Unsorted, never a crash.
 assert.equal(L.videoLang({ id: 'x' }), 'other');
 
+// Combined queue (`deck === 'all'`): due lines first (oldest due first), then due words (oldest due first),
+// deferred cards at the end ordered by deferredAt, respecting `limit`.
+const mixed = [
+  mk('w2', 'word', now - 10),
+  mk('w1', 'word', now - 50),
+  mk('l2', 'line', now - 5),
+  mk('l1', 'line', now - 30),
+  mk('l3', 'line', now - 20),
+  mk('future-w', 'word', now + DAY),
+  mk('mute-w', 'word', now - 60, -1),
+  { ...mk('mastered-l', 'line', now - 70), mastered: now - 100 },
+];
+assert.deepEqual(
+  R.dueQueue(mixed, 'all', now, 10, {}).map(x => x.id),
+  ['l1', 'l3', 'l2', 'w1', 'w2'],
+  'all-deck queue puts lines before words, oldest due first',
+);
+assert.deepEqual(
+  R.dueQueue(mixed, 'all', now, 10, { l1: now - 10, w1: now - 20 }).map(x => x.id),
+  ['l3', 'l2', 'w2', 'w1', 'l1'],
+  'all-deck queue puts deferred cards last in deferredAt order regardless of deck',
+);
+assert.deepEqual(
+  R.dueQueue(mixed, 'all', now, 3, { l1: now - 10 }).map(x => x.id),
+  ['l3', 'l2', 'w1'],
+  'all-deck queue obeys limit',
+);
+
+// Safe undo of auto-added sentence cards (`revertAddedLine`):
+const clip = { kind: 'video', file: 'v1_1.mp4', from: 1 };
+// 1. Brand-new untouched card with only that reason → deleted (null).
+const freshWrong = { ...R.newCard(base, 'wrong', now), clip };
+assert.equal(R.revertAddedLine(freshWrong, { id: base.id, created: true, addedReason: true }, 'wrong'), null);
+// 2. Created card that was later bookmarked → kept (with clip!), only removes the auto-added reason.
+const thenSaved = R.withReason(freshWrong, 'saved');
+const revSaved = R.revertAddedLine(thenSaved, { id: base.id, created: true, addedReason: true }, 'wrong');
+assert.ok(revSaved && revSaved.saved === true);
+assert.deepEqual(revSaved.reasons, ['saved']);
+assert.deepEqual(revSaved.clip, clip);
+// 3. Created card that was already reviewed → kept (with clip & fsrs!), only removes the auto-added reason.
+const thenReviewed = R.schedule(freshWrong, 3, now + 1000);
+const revReviewed = R.revertAddedLine(thenReviewed, { id: base.id, created: true, addedReason: true }, 'wrong');
+assert.ok(revReviewed && !R.isNew(revReviewed));
+assert.deepEqual(revReviewed.reasons, []);
+assert.deepEqual(revReviewed.clip, clip);
+// 4. Created card that also got another stuck reason meanwhile → kept, removes only the undone reason.
+const thenPeek = R.withReason(freshWrong, 'peek');
+const revPeek = R.revertAddedLine(thenPeek, { id: base.id, created: true, addedReason: true }, 'wrong');
+assert.ok(revPeek);
+assert.deepEqual(revPeek.reasons, ['peek']);
+assert.deepEqual(revPeek.clip, clip);
+// 5. Previously mastered card unmastered by addLine → restores `mastered` and removes added reason, keeps clip.
+const wasMastered = { ...R.newCard(base, 'saved', now), mastered: now - 500, clip };
+const afterStuck = R.withReason(wasMastered, 'wrong');
+assert.ok(!('mastered' in afterStuck));
+const revMastered = R.revertAddedLine(afterStuck, { id: base.id, created: false, addedReason: true, prevMastered: now - 500 }, 'wrong');
+assert.ok(revMastered);
+assert.equal(revMastered.mastered, now - 500);
+assert.deepEqual(revMastered.reasons, ['saved']);
+assert.deepEqual(revMastered.clip, clip);
+// 6. Card already existed with the same reason and wasn't mastered → no-op (undefined).
+assert.equal(R.revertAddedLine(freshWrong, { id: base.id, created: false, addedReason: false }, 'wrong'), undefined);
+// 7. Card re-mastered meanwhile → does not overwrite newer mastered timestamp.
+const remastered = { ...afterStuck, mastered: now + 999 };
+assert.equal(R.revertAddedLine(remastered, { id: base.id, created: false, addedReason: false, prevMastered: now - 500 }, 'wrong'), undefined);
+
 console.log('test-review: all passed');

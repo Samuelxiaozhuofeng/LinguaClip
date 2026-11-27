@@ -13,7 +13,7 @@ import { useSavedLines } from '../hooks/useSavedLines';
 import { useAnkiIntegration } from '../hooks/useAnkiIntegration';
 import { lineAt, lineEnded, parseSRT } from '../utils/srtParser';
 import { isFullscreen, setFullscreen, videoSrcFromPath } from '../utils/desktop';
-import { detectLang } from '../utils/dictionary';
+import { resolveDictLang } from '../utils/resolveDictLang';
 import { settleSplits } from '../utils/jaSegments';
 import { addWord, lineCardsFor, ReviewCard } from '../utils/review';
 import { formatTimeCode, getWatchPos, getWatchPrefs, saveWatchPrefs, setWatchPos, WatchPrefs, WatchSubs } from '../utils/storage';
@@ -164,7 +164,7 @@ const WatchPage: React.FC<{ record: VideoRecord; onExit: () => void }> = ({ reco
   useEffect(() => { if (videoRef.current) videoRef.current.defaultPlaybackRate = videoRef.current.playbackRate = speed; }, [speed]);
 
   // --- Lookup: pauses the video; closing the card resumes it if it was playing ---
-  const dictLang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
+  const dictLang = useMemo(() => resolveDictLang(record.lang, lines.map(l => l.text)), [record.lang, lines]);
   useEffect(() => { settleSplits(record.id, lines.map(l => l.text)).catch(() => {}); }, [record.id, lines]); // words, and the reader's marks on them
   const { def, lookup, explain, closeDef } = useLookup(dictLang, shown?.text ?? '');
   const lookLine = useRef<Subtitle | null>(null);

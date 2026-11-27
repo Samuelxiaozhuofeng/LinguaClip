@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Play, Bookmark, RotateCcw, ArrowLeft, ArrowRight, Scissors, Repeat } from 'lucide-react';
 import { PracticeMode, LearningMode, BlurPlaybackMode, ClozeLevel } from '../types';
 import * as Storage from '../utils/storage';
 import { usePracticeContext } from '../hooks/usePracticeContext';
 import { useBreakdown } from '../hooks/useBreakdown';
 import { Btn, Card, Seg, MenuItem, Stamp } from './ui';
-import DictationLine, { LINE, slotEm } from './DictationLine';
+import DictationLine from './DictationLine';
 import { JaBanner } from './JaSetup';
 import BlurLine from './BlurLine';
 import Transport from './Transport';
@@ -19,7 +19,9 @@ import { useLookup, aroundOf } from '../hooks/useLookup';
 import { tokenizeText, getWordTokens } from '../utils/textTokenizer';
 import { useT } from '../utils/i18n';
 import { useLoop } from '../utils/loop';
-import { detectLang } from '../utils/dictionary';
+import { resolveDictLang } from '../utils/resolveDictLang';
+import UndoToast from './UndoToast';
+import { useStudioReview } from '../hooks/useStudioReview';
 import { canCloze, pickBlanks } from '../utils/aiDrills';
 import { getClozeJob, prepareCloze, subscribeCloze } from '../utils/clozePrep';
 import { hasKana, jaReady, useJaVersion } from '../utils/japanese';
@@ -27,7 +29,6 @@ import { jaCheckOn, prepareSegments, settleSplits } from '../utils/jaSegments';
 import { IS_WINDOWS } from '../utils/platform';
 import { loose, matches, formatCombo, useShortcuts } from '../utils/shortcuts';
 import { usePracticeClock } from '../utils/today';
-import { addLine, addWord, clearMastered, getAllCards, hasAudio, lineCardId, Reason, ReviewCard } from '../utils/review';
 import ReviewSession from './ReviewSession';
 import { useTimedWords } from '../utils/wordTimes';
 import { useTopAutoHide } from '../hooks/useTopAutoHide';
@@ -37,7 +38,7 @@ import { useTopAutoHide } from '../hooks/useTopAutoHide';
 const Studio: React.FC = () => {
   const t = useT();
   const { practice, video, saved, anki, actions } = usePracticeContext();
-  const { videoId, subtitles, fullSubtitles, sections, currentSectionIndex, currentSubtitleIndex, mode, showSectionComplete, showComplete, learningMode, blurPlaybackMode, videoName, watch } = practice;
+  const { videoId, subtitles, fullSubtitles, sections, currentSectionIndex, currentSubtitleIndex, mode, showSectionComplete, showComplete, learningMode, blurPlaybackMode, videoName, videoLang, watch } = practice;
   const { videoRef, videoSrc, isPlaying } = video;
   const loopOn = useLoop().on; // a looping line never stops by itself: keep the way on
   const { savedIds, showSavedList } = saved;
@@ -114,9 +115,10 @@ const Studio: React.FC = () => {
   }, [isBlur, effectiveLevel, rankedLines, lineTexts, clozeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Break it down: the points on a clean voice, then the whole line on the video's ---
-  // Only while typing a dictation line: leaving INPUT (feedback, a seek, a new
-  // line) drops any breakdown, so a late AI answer cannot start one elsewhere.
-  const bd = useBreakdown(!isBlur && mode === PracticeMode.INPUT ? currentSub : undefined, videoId);
+  // Active across LISTENING and INPUT so breakdown can start while playing; leaving
+  // (feedback, seek, new line) drops any breakdown, so a late AI answer cannot land elsewhere.
+  const canType = !isBlur && (mode === PracticeMode.INPUT || mode === PracticeMode.LISTENING);
+  const bd = useBreakdown(canType ? currentSub : undefined, videoId);
 
   const timedWords = useTimedWords(videoId, currentSub?.startTime ?? 0, currentSub?.endTime ?? 0);
   const bdActive = bd.state.status === 'active' ? bd.state : null;
@@ -127,40 +129,12 @@ const Studio: React.FC = () => {
   const bdReplay = () => { if (!bd.play()) actions.onReplayCurrent(); };
 
   // --- Review library: lines the learner got stuck on go into the sentence deck ---
-  // Writes never block practice. "Stuck" (wrong / helped / breakdown / blur) lines
-  // of this section can be redone straight from the section-done overlay.
-  const [stuck, setStuck] = useState<Set<string>>(new Set());
-  const [retry, setRetry] = useState<ReviewCard[] | null>(null);
-  useEffect(() => setStuck(new Set()), [currentSectionIndex]);
-  // Writes still in flight, so "redo" can wait for the last line's card instead of missing it.
-  const pending = useRef(new Set<Promise<void>>());
-  // Auto-add is a setting; when off, a stuck line only offers an "add" button.
-  const autoAdd = Storage.getPracticeConfig().autoAddReview ?? false;
-  const [offer, setOffer] = useState<{ reason: Reason; start: number } | null>(null);
-  const record = (reason: Reason, force = false) => {
-    if (!currentSub || !videoId) return;
-    if (!force) clearMastered(videoId, currentSub.startTime).catch(console.error); // stuck again: back into review (docs/review.md)
-    if (!autoAdd && !force) { setOffer({ reason, start: currentSub.startTime }); return; }
-    setOffer(null);
-    const p = addLine({ videoId, videoName, text: currentSub.text, start: currentSub.startTime, end: currentSub.endTime }, reason).catch(console.error);
-    pending.current.add(p);
-    p.finally(() => pending.current.delete(p));
-    setStuck(prev => new Set(prev).add(lineCardId(videoId, currentSub.startTime)));
-  };
+  const { stuck, retry, offer, autoUndo, record, undoAutoAdd, dismissUndo, keepWord, openRetry, clearStuck, closeRetry } = useStudioReview({
+    videoId, videoName, currentSub, currentSectionIndex, isPlaying, onPause: actions.onTogglePlay,
+  });
   const offerBtn = offer && currentSub && offer.start === currentSub.startTime && (
     <Btn className={bdActive || isBlur ? 'mt-3' : ''} onClick={() => record(offer.reason, true)}><Bookmark size={16} /> {t('studio.addToReview')}</Btn>
   );
-  const keepWord = (word: string, definition: string, example: string, ai: string) => {
-    if (!currentSub || !videoId) return;
-    addWord({ videoId, videoName, text: currentSub.text, start: currentSub.startTime, end: currentSub.endTime }, word, definition, example, ai).catch(console.error);
-  };
-  const openRetry = () => {
-    if (isPlaying) actions.onTogglePlay();
-    Promise.allSettled([...pending.current])
-      .then(() => getAllCards())
-      .then(all => setRetry(all.filter(c => stuck.has(c.id) && hasAudio(c))))
-      .catch(console.error);
-  };
   const retryBtn = stuck.size > 0 && <Btn onClick={openRetry}><Repeat size={16} /> {t('studio.retryStuck', { n: stuck.size })}</Btn>;
   useEffect(() => { if (bdActive) record('breakdown'); }, [bdActive?.lineId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -178,7 +152,7 @@ const Studio: React.FC = () => {
   useEffect(() => {
     if (!bdActive?.reviewing) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!loose(e, 'dict.continue', 'dictOut') || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.repeat || !loose(e, 'dict.continue', 'dictOut') || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       e.preventDefault();
       bdNext();
     };
@@ -192,7 +166,7 @@ const Studio: React.FC = () => {
   const [bdHint, setBdHint] = useState<string | null>(null);
   const bdBlocked = !hasClozeAi ? t('studio.breakdownNeedKey') : bd.tooShort ? t('studio.breakdownTooShort') : bd.state.status === 'loading' ? t('studio.breakdownLoading') : null;
   useEffect(() => {
-    if (isBlur || mode !== PracticeMode.INPUT || bdActive) return;
+    if (!canType || bdActive) return;
     const onKey = (e: KeyboardEvent) => {
       if (!matches(e, 'dict.breakdown')) return;
       e.preventDefault();
@@ -200,7 +174,7 @@ const Studio: React.FC = () => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isBlur, mode, bdActive, bdBlocked, isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [canType, bdActive, bdBlocked, isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!bdHint) return;
     const id = window.setTimeout(() => setBdHint(null), 2500);
@@ -221,7 +195,7 @@ const Studio: React.FC = () => {
   };
 
   // --- Word lookup (shared by both modes) ---
-  const dictLang = useMemo(() => detectLang(lineTexts), [lineTexts]);
+  const dictLang = useMemo(() => resolveDictLang(videoLang, lineTexts), [videoLang, lineTexts]);
   const { def, lookup, explain, closeDef } = useLookup(dictLang, currentSub?.text ?? '', aroundOf(fullSubtitles, lineIndex));
 
   useEffect(closeDef, [currentSubtitleIndex, currentSectionIndex]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -244,14 +218,19 @@ const Studio: React.FC = () => {
   const menuItems: MenuItem[] = [
     { label: <><Bookmark size={15} /> {t('studio.savedLinesFromVideo')}{savedIds.size > 0 && <span className="ml-auto text-mute">{savedIds.size}</span>}</>, onClick: () => actions.onToggleSavedList(true) },
   ];
-  if (!isBlur && mode === PracticeMode.INPUT && !bdActive) {
+  if (canType && hasClozeAi && !bdActive) {
     menuItems.push({
       label: <><Scissors size={15} /> {bd.state.status === 'loading' ? t('studio.breakdownLoading') : t('studio.breakdown')}<span className="ml-auto pl-3 text-mute">{formatCombo(combos['dict.breakdown'])}</span></>,
       onClick: startBreakdown,
-      disabled: !hasClozeAi || bd.tooShort || bd.state.status === 'loading',
-      title: !hasClozeAi ? t('studio.breakdownNeedKey') : bd.tooShort ? t('studio.breakdownTooShort') : t('studio.breakdownTitle'),
+      disabled: bd.tooShort || bd.state.status === 'loading',
+      title: bd.tooShort ? t('studio.breakdownTooShort') : t('studio.breakdownTitle'),
     });
   }
+  const bdBtn = hasClozeAi && !bdActive && !bd.tooShort ? (
+    <Btn type="button" size="sm" flat disabled={bd.state.status === 'loading'} onClick={e => { e.currentTarget.blur(); startBreakdown(); }} title={t('studio.breakdownTitle')}>
+      <Scissors size={14} /> {bd.state.status === 'loading' ? t('studio.breakdownLoading') : t('studio.breakdown')}
+    </Btn>
+  ) : null;
   const ratioRow = (
     <MenuRow label={t('studio.ratioLabel')}>
       <Seg size="sm" className="w-full [&>button]:flex-1" value={videoShare} onChange={setVideoShare} options={
@@ -266,15 +245,15 @@ const Studio: React.FC = () => {
         { value: BlurPlaybackMode.CONTINUOUS, label: t('studio.flowLabel'), title: t('studio.flowTitle') },
       ]} />
     </MenuRow>
-  ) : (
-    <MenuRow label={t('studio.clozeLabel')} hint={!hasClozeAi ? t('studio.clozeNeedKey') : undefined}>
+  ) : hasClozeAi ? (
+    <MenuRow label={t('studio.clozeLabel')}>
       <Seg size="sm" className="w-full [&>button]:flex-1" value={effectiveLevel} onChange={setLevel} options={[
-        { value: 'easy', label: hasClozeAi ? t('studio.clozeEasy') : <span className="opacity-40">{t('studio.clozeEasy')}</span>, title: hasClozeAi ? t('studio.clozeEasyTitle') : t('studio.clozeNeedKey') },
-        { value: 'medium', label: hasClozeAi ? t('studio.clozeMedium') : <span className="opacity-40">{t('studio.clozeMedium')}</span>, title: hasClozeAi ? t('studio.clozeMediumTitle') : t('studio.clozeNeedKey') },
+        { value: 'easy', label: t('studio.clozeEasy'), title: t('studio.clozeEasyTitle') },
+        { value: 'medium', label: t('studio.clozeMedium'), title: t('studio.clozeMediumTitle') },
         { value: 'full', label: t('studio.clozeFull'), title: t('studio.clozeFullTitle') },
       ]} />
     </MenuRow>
-  );
+  ) : null;
   const menuPanel = <>{modeRow}{ratioRow}</>;
 
   const topBar = useTopAutoHide();
@@ -368,8 +347,6 @@ const Studio: React.FC = () => {
                   ))}
                   {bdActive.reviewing && bdLast && <SoundNotes lineText={bdStep.text} sounds={bdActive.sounds} />}
                 </div>
-              ) : mode === PracticeMode.LISTENING ? (
-                <ListeningGhost text={currentSub.text} blanks={blanks} splitVersion={splitVersion} />
               ) : (
                 <>
                   <DictationLine
@@ -378,14 +355,16 @@ const Studio: React.FC = () => {
                     blanks={blanks}
                     splitVersion={splitVersion}
                     onComplete={correct => (correct && mode === PracticeMode.FEEDBACK ? actions.onContinue() : actions.onInputComplete(correct))}
+                    onStartInput={actions.onStartInput}
                     onReplay={actions.onReplayCurrent}
                     onTogglePlay={actions.onTogglePlay}
                     timedWords={timedWords}
                     onLookup={lookup}
                     extra={offerBtn}
+                    inputExtra={bdBtn}
                     onResult={o => { if (!o.correct) record('wrong'); else if (o.helped) record('peek'); }}
                   />
-                  {mode === PracticeMode.INPUT && (bd.state.status === 'failed' || (clozeProgress && effectiveLevel !== 'full')) && (
+                  {canType && (bd.state.status === 'failed' || (clozeProgress && effectiveLevel !== 'full')) && (
                     <p className="text-xs text-mute">
                       {bd.state.status === 'failed' ? t('studio.breakdownFailed') : t('studio.clozePreparing', clozeProgress!)}
                     </p>
@@ -420,7 +399,7 @@ const Studio: React.FC = () => {
         ]}>
           {retryBtn}
           <Btn onClick={actions.onExit}>{t('studio.backToVideosBtn')}</Btn>
-          <Btn tone="accent" onClick={() => { setStuck(new Set()); actions.onNextSet(); }} autoFocus>{t('studio.nextSet')} <ArrowRight size={16} /></Btn>
+          <Btn tone="accent" onClick={() => { clearStuck(); actions.onNextSet(); }} autoFocus>{t('studio.nextSet')} <ArrowRight size={16} /></Btn>
         </Overlay>
       )}
 
@@ -430,15 +409,17 @@ const Studio: React.FC = () => {
           [String(savedIds.size), t('studio.statSaved')],
         ]}>
           {retryBtn}
-          <Btn onClick={() => { setStuck(new Set()); actions.onRestart(); }}><RotateCcw size={16} /> {t('studio.startOver')}</Btn>
+          <Btn onClick={() => { clearStuck(); actions.onRestart(); }}><RotateCcw size={16} /> {t('studio.startOver')}</Btn>
           <Btn tone="accent" onClick={actions.onExit} autoFocus>{t('studio.backToVideosBtn')}</Btn>
         </Overlay>
       )}
 
-      {bdHint && (
+      {bdHint ? (
         <div className="absolute left-1/2 -translate-x-1/2 bottom-24 z-30">
           <Stamp tone="accent-soft" className="shadow-card">{bdHint}</Stamp>
         </div>
+      ) : autoUndo && (
+        <UndoToast nonce={autoUndo.n} message={t('studio.autoAddedToast')} undoLabel={t('studio.undo')} onUndo={undoAutoAdd} onDismiss={dismissUndo} />
       )}
 
 
@@ -447,7 +428,7 @@ const Studio: React.FC = () => {
         <DefinitionPanel key={def.word} def={def} onClose={closeDef} onWordToAnki={actions.onWordToAnki} onExplain={explain} onKeepWord={keepWord}
           say={currentSub && videoId ? { videoId, text: currentSub.text, start: currentSub.startTime, end: currentSub.endTime } : null} />
       )}
-      {retry && <ReviewSession cards={retry} onClose={() => { setRetry(null); setStuck(new Set()); }} />}
+      {retry && <ReviewSession cards={retry} onClose={closeRetry} />}
     </div>
   );
 };
@@ -459,21 +440,6 @@ const MenuRow: React.FC<{ label: string; hint?: string; children: React.ReactNod
     {hint && <span className="text-xs text-mute leading-snug max-w-[14rem]">{hint}</span>}
   </div>
 );
-
-// One covered slot per word while the line plays: given words show as text, blanks as underlines.
-const ListeningGhost: React.FC<{ text: string; blanks: number[]; splitVersion: number }> = ({ text, blanks, splitVersion }) => {
-  const words = useMemo(() => getWordTokens(tokenizeText(text)), [text, splitVersion]); // eslint-disable-line react-hooks/exhaustive-deps
-  const set = new Set(blanks);
-  return (
-    <div className={`${LINE} pt-4`}>
-      {words.map((w, i) => set.has(i) ? (
-        <span key={i} className="inline-block relative top-2.5 h-[38px] border-b-2 border-faint" style={{ width: `${slotEm(w.value)}em` }} />
-      ) : (
-        <span key={i} className="text-ink/40">{w.value}</span>
-      ))}
-    </div>
-  );
-};
 
 const Overlay: React.FC<{ title: string; body: string; stats?: [string, string][]; children: React.ReactNode }> = ({ title, body, stats, children }) => (
   <div className="absolute inset-0 z-20 flex items-end">

@@ -135,7 +135,6 @@ const CustomPanel: React.FC<{
   });
 
   const set = (patch: Partial<CustomConfig>) => setCfg(c => ({ ...c, ...patch }));
-  const dim = (label: string) => <span className="opacity-40">{label}</span>;
 
   let status: React.ReactNode = null;
   if (custom) {
@@ -204,12 +203,14 @@ const CustomPanel: React.FC<{
                 MINUTE_CHOICES.map(n => ({ value: n, label: t('custom.minutesN', { n }) }))
               } />
             </Row>
-            <Row label={t('custom.level')} hint={hasAi ? undefined : t('custom.levelNeedKey')}>
-              <Seg<Level | 'any'> size="sm" value={cfg.level ?? 'any'} onChange={v => { if (hasAi) set({ level: v === 'any' ? null : v }); }} options={[
-                { value: 'any', label: t('custom.anyLevel') },
-                ...LEVELS.map(l => ({ value: l, label: hasAi ? l : dim(l), title: hasAi ? undefined : t('custom.levelNeedKey') })),
-              ]} />
-            </Row>
+            {hasAi && (
+              <Row label={t('custom.level')}>
+                <Seg<Level | 'any'> size="sm" value={cfg.level ?? 'any'} onChange={v => set({ level: v === 'any' ? null : v })} options={[
+                  { value: 'any', label: t('custom.anyLevel') },
+                  ...LEVELS.map(l => ({ value: l, label: l })),
+                ]} />
+              </Row>
+            )}
             <Row label={t('custom.others')} hint={cfg.others === 'play' ? t('custom.playHint') : t('custom.skipHint')}>
               <Seg size="sm" value={cfg.others} onChange={others => set({ others })} options={[
                 { value: 'play', label: t('custom.play') },

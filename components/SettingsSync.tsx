@@ -6,11 +6,22 @@ import { SyncPairModal } from './SyncPairModal';
 import { formatSyncError, getDesktopSyncOpts, openDesktopSyncConfirm, triggerDesktopSyncNow } from './SyncHost';
 import { useLang, useT, type t as tr } from '../utils/i18n';
 import { pickSyncPackFile } from '../utils/desktop';
+import { enableLocalSaveClipsIfUnset } from '../utils/storage';
+import { downloadConvertTool, loadConvertTool } from '../utils/convertTool';
+import { retryClips } from '../utils/clips';
 import { getSyncConfig, JIANGUOYUN_URL, type WebDavConfig } from '../utils/syncConfig';
 import {
   disableSync, exportOfflineSyncPack, getSyncRuntimeStatus, previewOfflineSyncPack,
   subscribeSyncStatus, testAndEnableSync, type OfflineMergePreview, type SyncRunResult,
 } from '../utils/syncEngine';
+
+// When the user turns on sync (or exports a .zip pack) and has never explicitly chosen `saveClips`,
+// enable card clips locally (without touching sync timestamps) so cards play audio on the phone too.
+function maybeEnableClipsForSync(): boolean {
+  if (!enableLocalSaveClipsIfUnset()) return false;
+  loadConvertTool().then(st => st && !st.path ? downloadConvertTool() : true).finally(() => { retryClips(); }).catch(() => {});
+  return true;
+}
 
 const formatSyncWhen = (ms: number, lang: string, translate: typeof tr): string => {
   if (Date.now() - ms < 60_000) return translate('sync.syncedJustNow');
@@ -69,15 +80,15 @@ const SettingsSync: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [configOpen, testing, packPreview, packBusy]);
 
-  const handleRunResult = (res: SyncRunResult) => {
+  const handleRunResult = (res: SyncRunResult, suffix = '') => {
     if (res.status === 'needs_confirm') { openDesktopSyncConfirm(); return; }
     if (res.status === 'error') { setNote({ text: formatSyncError(res.error, t), warn: true }); return; }
     if (res.status === 'ok') {
       const s = res.summary;
       setNote({
-        text: s.addedVideos + s.addedCards > 0
+        text: (s.addedVideos + s.addedCards > 0
           ? t('sync.doneSummary', { v: s.addedVideos, c: s.addedCards })
-          : t('sync.doneClean'),
+          : t('sync.doneClean')) + suffix,
       });
     }
   };
@@ -117,15 +128,16 @@ const SettingsSync: React.FC = () => {
     } finally {
       setTesting(false);
     }
+    const autoClipsNote = maybeEnableClipsForSync() ? t('sync.autoClipsNote') : '';
     setCfg(getSyncConfig());
     setConfigOpen(false);
     setNote({
-      text: res.existingDevices > 0
+      text: (res.existingDevices > 0
         ? t('sync.connectedWithPeers', { n: res.existingDevices })
-        : t('sync.connected'),
+        : t('sync.connected')) + autoClipsNote,
     });
     setBusy(true);
-    try { handleRunResult(await triggerDesktopSyncNow()); } finally { setBusy(false); }
+    try { handleRunResult(await triggerDesktopSyncNow(), autoClipsNote); } finally { setBusy(false); }
   };
 
   const handleDisable = () => {
@@ -145,6 +157,7 @@ const SettingsSync: React.FC = () => {
 
   const handleExportPack = async (format: 'zip' | 'json' = 'zip') => {
     if (busy) return;
+    if (format === 'zip') maybeEnableClipsForSync();
     setBusy(true);
     try {
       const opts = await getDesktopSyncOpts();

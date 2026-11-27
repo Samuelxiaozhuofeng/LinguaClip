@@ -17,6 +17,9 @@ const { detectLang, parseYoudao, parseYoudaoJa, pickEudicTerms, senseToAnki, sen
 const enOut = join(tmpdir(), `dictionaryEn-${process.pid}.mjs`);
 await build({ entryPoints: ['utils/dictionaryEn.ts'], bundle: true, format: 'esm', outfile: enOut });
 const { parseWiktionary, parseJisho, htmlText } = await import(enOut);
+const resolveOut = join(tmpdir(), `resolveDictLang-${process.pid}.mjs`);
+await build({ entryPoints: ['utils/resolveDictLang.ts'], bundle: true, format: 'esm', outfile: resolveOut });
+const { resolveDictLang } = await import(resolveOut);
 
 // --- language of a whole subtitle file ---
 assert.equal(detectLang(["All right, what's the plan?", 'I think we should go to the station and wait.', 'It is what it is.']), 'en');
@@ -36,6 +39,13 @@ assert.equal(detectLang(['Jeg vet ikke hva du snakker om.', 'Det er mye som skje
 assert.equal(detectLang(['Jeg ved ikke hvad du taler om.', 'Det er meget som sker nu, og vi har ikke tid.', 'Hun sagde noget til mig på bussen.']), null, 'Danish is not Norwegian');
 assert.equal(detectLang(['Jag vet inte vad du pratar om.', 'Det är mycket som händer nu, och vi har inte tid.', 'Hon sa något till mig på bussen.']), null, 'nor is Swedish');
 assert.equal(detectLang(['Jeg er her.', 'Det er ikke']), 'no', 'a tie with Danish goes to Norwegian');
+
+// --- manual video language overrides subtitle guessing ---
+assert.equal(resolveDictLang('ja', ['Hello']), 'ja', 'manual ja wins when subtitles are too short to detect');
+assert.equal(resolveDictLang('es', []), 'es', 'manual es wins on empty subtitles');
+assert.equal(resolveDictLang('ja', ["All right, what's the plan?", 'I think we should go to the station and wait.']), 'ja', 'manual overrides detected lang');
+assert.equal(resolveDictLang(undefined, ['Quiero hablar contigo mañana por la tarde.', '¿Qué está pasando con los niños?']), 'es', 'falls back to detectLang when manual is unset');
+assert.equal(resolveDictLang(undefined, ['Hello']), null, 'unset + undetectable stays null');
 
 // --- Youdao: English `ec` ---
 const running = parseYoudao({ ec: { word: {

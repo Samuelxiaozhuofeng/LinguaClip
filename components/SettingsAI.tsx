@@ -146,6 +146,7 @@ const SettingsAI: React.FC<SettingsAIProps> = ({
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState('');
   const badKey = AI.isBadKey(aiApiKey);
+  const aiReady = !!aiApiKey && !badKey && !!aiBaseUrl.trim() && !!aiModel.trim();
 
   const fetchModels = async () => {
     setFetching(true);
@@ -162,6 +163,12 @@ const SettingsAI: React.FC<SettingsAIProps> = ({
 
   return (
     <div className="space-y-10">
+      {!aiReady && (
+        <div className="rounded-2xl bg-shade px-5 py-4 space-y-1.5">
+          <p className="text-sm font-semibold">{t('settingsAI.unlockTitle')}</p>
+          <p className="text-xs text-mute leading-relaxed">{t('settingsAI.unlockBody')}</p>
+        </div>
+      )}
       <Group title={t('settings.group.aiConnect')}>
         <Field
           label={t('settingsAI.apiKey')}

@@ -1,17 +1,27 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { fetch } from '@tauri-apps/plugin-http';
 import { Check, Loader2 } from 'lucide-react';
 import type { VideoRecord } from '../types';
-import { Btn } from '../components/ui';
+import { Btn, Seg } from '../components/ui';
 import { dialog } from '../components/Dialog';
 import * as VideoStorage from '../utils/videoStorage';
-import { startPodcastImport, subscribeImportJobs } from '../utils/importJob';
+import { retryImport, startPodcastImport, subscribeImportJobs } from '../utils/importJob';
+import { getWatchPrefs, saveWatchPrefs } from '../utils/storage';
 import { STARTER_FEED } from '../utils/sections';
 import { parseSRT } from '../utils/srtParser';
 import { episodeUuid } from '../utils/syncClock';
-import { getLang, useT } from '../utils/i18n';
+import { getLang, useLang, useT } from '../utils/i18n';
 import { epKey, episodeName, parseStarter, type StarterItem } from './podcastFeed';
+import { SHOW_LANGS, type ShowLang } from './podcastShows';
 import { writeTransCache } from './transPrep';
+
+const langLabel = (l: string, ui: string) => {
+  try { return new Intl.DisplayNames([ui === 'zh' ? 'zh-CN' : 'en'], { type: 'language' }).of(l) ?? l; } catch { return l; }
+};
+const firstLang = (): ShowLang => {
+  const saved = getWatchPrefs().podLang as ShowLang;
+  return SHOW_LANGS.includes(saved) ? saved : getLang() === 'en' ? 'ja' : 'en';
+};
 
 // Ready-made starter episodes (docs/starter.md): a list on our site, one episode per level,
 // each with a checked transcript and translations, so a first try needs no transcription
@@ -75,10 +85,30 @@ export const Starter: React.FC<{ lang: string; mine: Map<string, VideoRecord>; o
     try { await download(it); } catch (err) { console.error(err); dialog.alert(t('starter.fetchFail')); }
     finally { await onLoaded(); setBusy(null); }
   };
+  const retry = async (it: StarterItem, id: string) => {
+    if (busy) return;
+    setBusy(it.id);
+    try { waiting = id; await retryImport(id); } catch (err) { console.error(err); dialog.alert(t('starter.fetchFail')); }
+    finally { await onLoaded(); setBusy(null); }
+  };
   const status = (it: StarterItem) => {
     const r = mine.get(starterKey(it));
     if (busy === it.id) return <span className="text-xs text-mute inline-flex items-center gap-1.5"><Loader2 size={14} className="animate-spin" />{t('podcast.preparing')}</span>;
-    if (r?.importJob) return <span className="text-xs text-mute">{r.importJob.error ? t('podcast.importFailed') : t('podcast.importing')}</span>;
+    if (r?.importJob) {
+      if (r.importJob.error) return (
+        <span className="inline-flex items-center gap-2">
+          <span className="text-xs text-mute">{t('podcast.importFailed')}</span>
+          <Btn size="sm" disabled={!!busy} onClick={() => { retry(it, r.id).catch(console.error); }}>{t('podcast.retry')}</Btn>
+        </span>
+      );
+      const pct = r.importJob.percent;
+      return (
+        <span className="text-xs text-mute inline-flex items-center gap-1.5">
+          <Loader2 size={14} className="animate-spin" />
+          {pct !== undefined ? `${t('podcast.importing')} ${pct}%` : t('podcast.importing')}
+        </span>
+      );
+    }
     if (r) return <Btn size="sm" onClick={() => onOpen(r)}><Check size={14} />{t('starter.open')}</Btn>;
     return <Btn size="sm" tone="accent" disabled={!!busy} onClick={() => { start(it).catch(console.error); }}>{t('starter.start')}</Btn>;
   };
@@ -108,14 +138,34 @@ export const Starter: React.FC<{ lang: string; mine: Map<string, VideoRecord>; o
   );
 };
 
-// Mounted at the root. Lands a user with no videos yet on the podcast page (where the
-// starter is) once at launch, and opens a starter episode once it has downloaded — only
-// while the podcast page is still showing; leaving it drops that.
-export const StarterHost: React.FC<{ here: boolean; onLand: () => void; onOpen: (r: VideoRecord) => void }> = ({ here, onLand, onOpen }) => {
-  useEffect(() => {
-    // An unreadable library is not an empty one: stay on the videos.
-    VideoStorage.getAllVideoRecords().then(all => { if (!all.some(r => !r.podcast)) onLand(); }).catch(console.error);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+// Shown directly on the empty video home screen: language switch + ready-made starter episodes.
+export const HomeStarter: React.FC<{ onOpen: (r: VideoRecord) => void }> = ({ onOpen }) => {
+  const t = useT();
+  const ui = useLang();
+  const [lang, setLangState] = useState<ShowLang>(firstLang);
+  const setLang = (l: ShowLang) => { setLangState(l); saveWatchPrefs({ podLang: l }); };
+  const [mine, setMine] = useState<Map<string, VideoRecord>>(new Map());
+  const loadMine = useCallback(() =>
+    VideoStorage.getAllVideoRecords()
+      .then(all => setMine(new Map(all.filter(r => r.podcast).map(r => [epKey(r.podcast!.feed, r.podcast!.guid), r]))))
+      .catch(console.error),
+  []);
+  useEffect(() => { loadMine(); return subscribeImportJobs(() => { loadMine(); }); }, [loadMine]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-sm text-mute">{t('podcast.langPick')}</span>
+        <Seg<ShowLang> size="sm" value={lang} onChange={setLang} options={SHOW_LANGS.map(l => ({ value: l, label: langLabel(l, ui) }))} />
+      </div>
+      <Starter lang={lang} mine={mine} onOpen={onOpen} onLoaded={loadMine} />
+    </div>
+  );
+};
+
+// Mounted at the root. Opens a starter episode once it has downloaded — only while
+// the user is still on a landing screen (`here`); leaving it drops that.
+export const StarterHost: React.FC<{ here: boolean; onLand?: () => void; onOpen: (r: VideoRecord) => void }> = ({ here, onOpen }) => {
   useEffect(() => {
     if (!here) { waiting = null; return; }
     return subscribeImportJobs(() => {

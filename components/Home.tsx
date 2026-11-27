@@ -20,7 +20,7 @@ import { cancelPrep, getPrepJob, prepStatus, prepareBreakdowns, subscribePrep } 
 import { cancelLevels } from '../utils/levelPrep';
 import { forgetKeywords } from '../utils/keywordPrep';
 import { forgetPhrases } from '../utils/phrasePrep';
-import { cancelTrans } from '@pro';
+import { cancelTrans, HomeStarter } from '@pro';
 import { forgetLooked } from '../utils/readLooked';
 import { forgetMask } from '../utils/subtitleMask';
 import { cancelCloze, clozeStatus, getClozeJob, linesOf, prepareCloze, subscribeCloze } from '../utils/clozePrep';
@@ -57,7 +57,7 @@ const Line: React.FC<{ pct: number; className?: string }> = ({ pct, className = 
   </div>
 );
 
-const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsked, onAddHandled, onPodcasts, podcasts }) => {
+const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsked, onAddHandled, podcasts }) => {
   const t = useT();
   const lang = useLang();
   const [videos, setVideos] = useState<VideoRecord[] | null>(null);
@@ -417,14 +417,15 @@ const Home: React.FC<HomeProps> = ({ onResume, onOtherWay, onEmptyChange, addAsk
       ) : videos === null ? (
         <div className="pt-24 flex justify-center text-mute"><Loader2 className="animate-spin" size={20} /></div>
       ) : videos.length === 0 && podcasts ? podcasts.empty : videos.length === 0 ? (
-        <div className="pt-28 flex flex-col items-center text-center">
+        <div className="pt-16 flex flex-col items-center text-center">
           <p className="text-[40px] font-semibold tracking-[-0.02em] leading-tight">{t('home.nothingHereYet')}</p>
           <p className="mt-3 text-sm text-mute max-w-sm leading-relaxed">{t('home.nothingHereHint')}</p>
           <Btn tone="accent" size="lg" className="mt-8" onClick={() => setAdding({ path: null })}><Plus size={18} /> {t('home.addVideo')}</Btn>
+          {HomeStarter && <div className="mt-10 w-full max-w-2xl text-left"><HomeStarter onOpen={r => onResume(r, lastMode(r))} /></div>}
         </div>
       ) : (
         <>
-          {!podcasts && <TodayBar lead={lead && !finished(lead) ? lead : undefined} where={where} mode={cardMode} onResume={v => onResume(v, lastMode(v))} onNew={onPodcasts} />}
+          {!podcasts && <TodayBar lead={videos?.find(v => !v.importJob && !finished(v))} mode={cardMode} onResume={v => onResume(v, lastMode(v))} />}
           {lead && (() => {
             const w = where(lead);
             return (

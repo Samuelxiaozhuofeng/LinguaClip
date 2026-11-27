@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Play } from 'lucide-react';
 import { VideoRecord } from '../types';
-import { ReviewCard, dueQueue } from '../utils/review';
+import { ReviewCard, dueQueue, inReview } from '../utils/review';
 import { useDueSnapshot } from '../hooks/useDueSnapshot';
 import { DeckLang, cardLangs } from '../utils/deckLang';
 import { getAllVideosFromDB } from '../utils/fileSystemAccess';
@@ -10,16 +10,14 @@ import { useT } from '../utils/i18n';
 import { Btn } from './ui';
 import ReviewSession from './ReviewSession';
 
-// The video home's "Today" bar (docs/stats.md): what is due (starts a review round right here),
-// the big card's "continue" (same functions as the card; away when it says "finished"), and something new (the podcast page).
+// The video home's "Today" bar (docs/stats.md): combined due review (lines first, then words),
+// or a quiet "all done" note once every review card is caught up. Hidden when there are no reviewable cards.
 // Reads only; switched off in settings it renders nothing and reads nothing.
 const TodayBar: React.FC<{
   lead?: VideoRecord;
-  where: (v: VideoRecord) => { text: string };
   mode: (v: VideoRecord) => string;
   onResume: (v: VideoRecord) => void;
-  onNew?: () => void;
-}> = ({ lead, where, mode, onResume, onNew }) => {
+}> = ({ lead, mode, onResume }) => {
   const t = useT();
   const [on] = useState(getTodayBar);
   // The top bar's snapshot (same cards, same `now`); null = not read yet, or unreadable: no review cell.
@@ -30,30 +28,38 @@ const TodayBar: React.FC<{
   const start = async () => {
     if (!due) return;
     const { cards } = due;
-    const queue = dueQueue(cards, due.line ? 'line' : 'word', due.now);
+    const queue = dueQueue(cards, 'all', due.now);
     // Each card's own language for lookups, as on the library page; unreadable records: guessed per round.
     const records = await getAllVideosFromDB().catch(() => null);
     const langs = records ? cardLangs(cards, records) : null;
     setSession({ cards: queue, langOf: langs ? c => langs.get(c.id) ?? cardLangs([c], records!).get(c.id)! : undefined });
   };
   const what = due && [due.line && t(due.line === 1 ? 'home.reviewLineOne' : 'home.reviewLine', { n: due.line }), due.word && t(due.word === 1 ? 'home.reviewWordOne' : 'home.reviewWord', { n: due.word })].filter(Boolean).join(' · ');
+  const showBar = !!due && (!!what || due.cards.some(inReview));
+  if (!showBar && !session) return null;
+
+  const resume = lead ? {
+    name: lead.displayName,
+    label: t('home.continueMode', { mode: mode(lead) }),
+    onClick: () => { setSession(null); onResume(lead); },
+  } : undefined;
 
   return (
-    <section className="mb-5 flex items-center gap-3 min-w-0" aria-label={t('home.todayLabel')}>
-      <span className="shrink-0 text-[13px] font-medium text-mute">{t('home.todayLabel')}</span>
-      {what && (
-        <Btn tone="accent" onClick={start} className="shrink-0">
-          <Play size={14} fill="currentColor" /> {t('home.reviewDue', { what })}
-        </Btn>
+    <>
+      {showBar && (
+        <section className="mb-5 flex items-center gap-3 min-w-0" aria-label={t('home.todayLabel')}>
+          <span className="shrink-0 text-[13px] font-medium text-mute">{t('home.todayLabel')}</span>
+          {what ? (
+            <Btn tone="accent" onClick={start} className="shrink-0">
+              <Play size={14} fill="currentColor" /> {t('home.reviewDue', { what })}
+            </Btn>
+          ) : (
+            <span className="text-[13px] text-mute">· {t('home.todayAllDone')}</span>
+          )}
+        </section>
       )}
-      {lead && (
-        <Btn onClick={() => onResume(lead)} className="min-w-0" title={lead.displayName}>
-          <span className="truncate">{[t('home.todayResume', { mode: t('home.continueMode', { mode: mode(lead) }), name: lead.displayName }), where(lead).text].filter(Boolean).join(' · ')}</span>
-        </Btn>
-      )}
-      {onNew && <Btn onClick={onNew} className="shrink-0">{t('home.todayNew')}</Btn>}
-      {session && <ReviewSession cards={session.cards} onClose={() => setSession(null)} langOf={session.langOf} />}
-    </section>
+      {session && <ReviewSession cards={session.cards} deck="all" resume={resume} onClose={() => setSession(null)} langOf={session.langOf} />}
+    </>
   );
 };
 

@@ -76,6 +76,16 @@ export function openYouTube(): Promise<void> {
       notAdded: t('youtube.notAdded'),
       tryAgain: t('youtube.tryAgain'),
       backHome: t('youtube.backHome'),
+      needLoginTitle: t('youtube.needLoginTitle'),
+      needLoginBody: t('youtube.needLoginBody'),
+      loginBtn: t('youtube.loginBtn'),
+      loginOpenedBody: t('youtube.loginOpenedBody'),
+      noChromeBody: t('youtube.noChromeBody'),
+      winLoginTitle: t('youtube.winLoginTitle'),
+      winLoginBody: t('youtube.winLoginBody'),
+      downloadFailedTitle: t('youtube.downloadFailedTitle'),
+      retrying: t('youtube.retrying'),
+      dismiss: t('youtube.dismiss'),
     },
   );
 }

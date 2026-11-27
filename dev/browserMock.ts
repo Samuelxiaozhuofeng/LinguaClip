@@ -396,6 +396,8 @@ async function handle(cmd: string, args: Args): Promise<unknown> {
     case 'youtube_pick_done':
       mock.youtubePicksDone.push(args);
       return null;
+    case 'youtube_pick_error':
+      return null; // recorded in __MOCK__.calls
     case 'probe_video':
       if (!mock.convertTool) throw 'missing:ffmpeg';
       return mock.probe;

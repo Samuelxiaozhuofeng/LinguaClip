@@ -32,6 +32,8 @@ import { deleteCards, keepOrphans, orphanCards } from './utils/review';
 import { startClips } from './utils/clips';
 import { CustomConfig, CustomPick } from './utils/customPick';
 import { setCustomPos, setLastWay, type ReadBy } from './utils/storage';
+import { initAutoAddDefault } from './utils/autoAddReview';
+import type { DictLang } from './utils/dictionary';
 
 let orphansAsked = false; // StrictMode runs effects twice in dev
 async function askAboutOrphans() {
@@ -54,7 +56,7 @@ export default function App() {
   useEffect(() => { document.documentElement.lang = lang; }, [lang]);
 
   // Cards left by videos deleted in older versions: ask once whether they go too.
-  useEffect(() => { askAboutOrphans().catch(console.error); }, []);
+  useEffect(() => { initAutoAddDefault().catch(console.error); askAboutOrphans().catch(console.error); }, []);
   // Official build only: look for a new version once, quietly (docs/update.md).
   useEffect(() => { const id = setTimeout(() => { checkUpdate(); }, 5000); return () => clearTimeout(id); }, []);
 
@@ -64,20 +66,10 @@ export default function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    (async () => {
-      try {
-        await markInterruptedJobs();
-      } catch (err) {
-        console.error(err);
-      }
-      try {
-        const fn = await startImportListener();
-        if (cancelled) fn();
-        else unlisten = fn;
-      } catch (err) {
-        console.error(err);
-      }
-    })();
+    markInterruptedJobs().catch(console.error)
+      .then(() => startImportListener())
+      .then(fn => { if (cancelled) fn(); else unlisten = fn; })
+      .catch(console.error);
     return () => { cancelled = true; unlisten?.(); };
   }, []);
 
@@ -89,6 +81,7 @@ export default function App() {
   const [homeEmpty, setHomeEmpty] = useState(false); // no videos yet: the top bar drops its add button
   const [addAsked, setAddAsked] = useState(false); // the top bar's "+": Home opens its add dialog
   const [videoFileName, setVideoFileName] = useState<string | null>(null);
+  const [videoLang, setVideoLang] = useState<DictLang | undefined>(undefined);
   const [learningMode, setLearningMode] = useState<LearningMode>(LearningMode.DICTATION);
   const [blurPlaybackMode, setBlurPlaybackModeState] = useState<BlurPlaybackMode>(BlurPlaybackMode.SENTENCE_BY_SENTENCE);
   const [showComplete, setShowComplete] = useState(false);
@@ -282,6 +275,7 @@ export default function App() {
       if (record.learningMode !== lm) await VideoStorage.patchVideoRecord(record.id, { learningMode: lm });
       if (!record.podcast) setLastWay(record.id, choice.kind === 'custom' ? 'custom' : 'all');
       if (stale()) return;
+      setVideoLang(record.lang);
       const bpm = record.blurPlaybackMode ?? BlurPlaybackMode.SENTENCE_BY_SENTENCE;
       if (choice.kind === 'custom') {
         const { lines, practise } = choice.pick;
@@ -397,7 +391,7 @@ export default function App() {
   const keyboardShortcuts = useMemo(() => ([
     { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'dict.replay'), handler: () => replayCurrent() },
     { preventDefault: true, allowInEditable: false, condition: (e: KeyboardEvent) => inPractice && (matches(e, 'dict.play') || (isDefault('dict.play') && e.code === 'Space' && !e.shiftKey)), handler: () => togglePlayOrStep() },
-    { preventDefault: true, allowInEditable: false, condition: (e: KeyboardEvent) => inPractice && (mode === PracticeMode.FEEDBACK || blurStepPaused) && loose(e, 'dict.continue', 'dictOut'), handler: () => handleContinue() },
+    { preventDefault: true, allowInEditable: false, condition: (e: KeyboardEvent) => !e.repeat && inPractice && (mode === PracticeMode.FEEDBACK || blurStepPaused) && loose(e, 'dict.continue', 'dictOut'), handler: () => handleContinue() },
     { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'dict.loop'), handler: () => toggleLoopRef.current() },
     { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'dict.prev'), handler: () => handleSkip('prev') },
     { preventDefault: true, condition: (e: KeyboardEvent) => inPractice && matches(e, 'dict.next'), handler: () => handleSkip('next') },
@@ -426,8 +420,8 @@ export default function App() {
   ) : appState !== AppState.PRACTICE ? (
     <Shell active={appState} onNav={setAppState} podcasts={!!PodcastPicker} hideAdd={appState === homeRef.current && homeEmpty} onAdd={() => { setAppState(appState === AppState.PODCASTS ? AppState.PODCASTS : AppState.UPLOAD); setAddAsked(true); }}>
       {appState === AppState.SETTINGS ? <Settings /> :
-       appState === AppState.LIBRARY ? <ReviewPage key="line" deck="line" /> :
-       appState === AppState.CARDS ? <ReviewPage key="word" deck="word" /> :
+       appState === AppState.LIBRARY ? <ReviewPage key="line" deck="line" onResume={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} /> :
+       appState === AppState.CARDS ? <ReviewPage key="word" deck="word" onResume={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} /> :
        appState === AppState.PODCASTS && PodcastPicker ? (
         <Home key="podcasts" onResume={handleResume} onOtherWay={otherWay} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} podcasts={{
           empty: <PodcastPicker onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />,
@@ -435,12 +429,12 @@ export default function App() {
           rate: podcastRate,
         }} />
        ) :
-       <Home key="videos" onResume={handleResume} onOtherWay={otherWay} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} onPodcasts={PodcastPicker ? () => setAppState(AppState.PODCASTS) : undefined} />}
+       <Home key="videos" onResume={handleResume} onOtherWay={otherWay} onEmptyChange={setHomeEmpty} addAsked={addAsked} onAddHandled={() => setAddAsked(false)} />}
     </Shell>
   ) : (
     <PracticeProvider
       practice={{
-        videoId: currentVideoId,
+        videoId: currentVideoId, videoLang,
         subtitles, fullSubtitles, sections, currentSectionIndex, currentSubtitleIndex, mode,
         showSectionComplete, showComplete, learningMode, blurPlaybackMode,
         videoName: videoFileName || 'Video',
@@ -470,6 +464,7 @@ export default function App() {
         onSetVolume: setVolume,
         onSetPlaybackSpeed: setPlaybackSpeed,
         onInputComplete: handleInputComplete,
+        onStartInput: () => { if (mode === PracticeMode.LISTENING) setMode(PracticeMode.INPUT); },
         onContinue: unlessRecording(handleContinue),
         onDeleteSavedItem: deleteSavedItem,
         onJumpToSaved: unlessRecording(jumpToSaved),
@@ -488,8 +483,7 @@ export default function App() {
           onCancel={() => setPanel(null)} onStart={choice => { setPanel(null); openPractice(panel.record, panel.lm, choice); }} />
       )}
       {ProHost && <ProHost />}
-      {StarterHost && <StarterHost here={appState === AppState.PODCASTS} onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)}
-        onLand={() => setAppState(s => (s === AppState.UPLOAD ? AppState.PODCASTS : s))} />}
+      {StarterHost && <StarterHost here={appState === AppState.UPLOAD || appState === AppState.PODCASTS} onOpen={r => handleResume(r, r.learningMode ?? LearningMode.DICTATION)} />}
       <SyncHost busy={appState === AppState.PRACTICE || appState === AppState.WATCH || appState === AppState.LISTEN || appState === AppState.READ} />
       <UpdateDialog />
       <DialogHost />

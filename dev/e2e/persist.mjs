@@ -32,11 +32,9 @@ export default [
       await nav('句子');
       await see(page.getByText('共 0 个'), '「句子」页「共 0 个」');
       await gone(page.getByText(firstLine(sample)), '「句子」页里这张卡');
-      // Nothing left behind: no leftover-cards question after a reload.
+      // Nothing left behind: stays on Video Home, no leftover-cards question after a reload.
       await page.reload();
-      await see(page.getByText('先练一段现成的').or(page.getByText('从一集播客开始')), '空库刷新后落在播客页');
-      await nav('视频');
-      await see(page.getByText('这里还空着'), '刷新后首页仍是空的');
+      await see(page.getByText('这里还空着'), '空库刷新后停在视频首页');
       if (await page.getByRole('dialog').count()) throw new Error(`刷新后弹了窗：${await page.getByRole('dialog').first().innerText()}`);
     },
   },

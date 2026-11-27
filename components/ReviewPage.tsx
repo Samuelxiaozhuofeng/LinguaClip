@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import type { VideoRecord } from '../types';
 import { ReviewCard, Deck, getAllCards, subscribeCards, deckCounts, dueQueue, inReview } from '../utils/review';
-import { DeckLang, DECK_LANGS, LangSource, cardLangs, langName } from '../utils/deckLang';
-import { getAllVideosFromDB } from '../utils/fileSystemAccess';
+import { DeckLang, DECK_LANGS, cardLangs, langName } from '../utils/deckLang';
+import { getAllVideoRecords } from '../utils/videoStorage';
+import { parseSRT } from '../utils/srtParser';
+import { buildSections, sectionAt, sectionLengthOf } from '../utils/sections';
+import { getLastWay, getWatchPos } from '../utils/storage';
+import { ShelfPos, cardFinished, cardWhere, lastWayName, lastWaySec } from '../utils/lastWayCard';
 import { Play } from 'lucide-react';
 import { Btn, Seg } from './ui';
 import CardsPage from './CardsPage';
@@ -27,13 +32,13 @@ export const useCards = () => {
   return cards;
 };
 
-// The video records, re-read whenever the cards change (a card can come from a new video).
+// The video records (newest practised first), re-read whenever the cards change (a card can come from a new video).
 // null = not read yet, or unreadable: then there's no language switch, rather than every card "Unsorted".
 const useRecords = (cards: ReviewCard[] | null) => {
-  const [records, setRecords] = useState<LangSource[] | null>(null);
+  const [records, setRecords] = useState<VideoRecord[] | null>(null);
   useEffect(() => {
     let live = true;
-    getAllVideosFromDB().then(r => { if (live) setRecords(r); }).catch(e => { console.error(e); if (live) setRecords(null); });
+    getAllVideoRecords().then(r => { if (live) setRecords(r); }).catch(e => { console.error(e); if (live) setRecords(null); });
     return () => { live = false; };
   }, [cards]);
   return records;
@@ -46,7 +51,7 @@ const loadLang = (): DeckLang | 'all' => {
 };
 
 // One library per deck: start the due ones, the week ahead, then every card (CardsPage).
-const ReviewPage: React.FC<{ deck: Deck }> = ({ deck }) => {
+const ReviewPage: React.FC<{ deck: Deck; onResume?: (r: VideoRecord) => void }> = ({ deck, onResume }) => {
   const t = useT();
   const cards = useCards();
   const records = useRecords(cards);
@@ -56,6 +61,35 @@ const ReviewPage: React.FC<{ deck: Deck }> = ({ deck }) => {
     setPicked(v);
     try { localStorage.setItem(LANG_KEY, v); } catch { /* storage off: forgotten next launch */ }
   };
+
+  const lead = useMemo(() => {
+    if (!records) return undefined;
+    const isFinished = (v: VideoRecord) => {
+      try {
+        const subs = parseSRT(v.subtitleText);
+        const way = getLastWay(v.id);
+        const customSec = lastWaySec(v.id, way);
+        const end = subs[subs.length - 1]?.endTime ?? 0;
+        const sections = buildSections(subs, sectionLengthOf(v));
+        if (sections.length === 0) return v.completionRate >= 100;
+        let pos: ShelfPos;
+        if (v.podcast) {
+          pos = { part: sectionAt(sections, getWatchPos(v.id)), parts: sections.length, line: 0, lines: 0, listen: true };
+        } else {
+          const part = Math.min(Math.max(v.currentSectionIndex, 0), sections.length - 1);
+          const lines = sections[part].subtitles.length;
+          pos = {
+            part, parts: sections.length, line: Math.min(Math.max(v.currentSubtitleIndex, 0), lines), lines,
+            ...(customSec !== undefined ? { customSec, customPct: end ? Math.min(100, customSec / end * 100) : 0, watch: way === 'watch', read: way === 'read' } : {}),
+          };
+        }
+        return cardFinished(cardWhere(v, pos, t).pct, pos);
+      } catch {
+        return v.completionRate >= 100;
+      }
+    };
+    return records.find(r => !r.importJob && !!r.subtitleText && !isFinished(r));
+  }, [records, t]);
 
   const langs = useMemo(() => cards && records ? cardLangs(cards, records) : null, [cards, records]);
   const langOf = (c: ReviewCard) => langs?.get(c.id) ?? cardLangs([c], records ?? []).get(c.id)!;
@@ -114,7 +148,20 @@ const ReviewPage: React.FC<{ deck: Deck }> = ({ deck }) => {
 
       <CardsPage deck={deck} cards={cards && all} />
 
-      {session && <ReviewSession cards={session} onClose={() => setSession(null)} langOf={langs ? langOf : undefined} lang={lang} />}
+      {session && (
+        <ReviewSession
+          cards={session}
+          deck={deck}
+          onClose={() => setSession(null)}
+          langOf={langs ? langOf : undefined}
+          lang={lang}
+          resume={onResume && lead ? {
+            name: lead.displayName,
+            label: t('home.continueMode', { mode: t(lead.podcast ? 'custom.listen' : lastWayName(lead, getLastWay(lead.id))) }),
+            onClick: () => { setSession(null); onResume(lead); },
+          } : undefined}
+        />
+      )}
     </div>
   );
 };

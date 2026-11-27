@@ -23,7 +23,7 @@ const keys = [
   'linguaclip_practice_config', 'linguaclip_ai_config', 'linguaclip_transcribe_config', 'linguaclip_sync_auth', 'linguaclip_some_future_key',
   'import_lang', 'import_trash_original',
   'linguaclip_pro_license', 'linguaclip_anki_tpl', 'linguaclip_today', 'linguaclip_days', 'linguaclip_restore_pending',
-  'linguaclip_sync_device', 'linguaclip_sync_state', 'linguaclip_days_dev',
+  'linguaclip_sync_device', 'linguaclip_sync_state', 'linguaclip_days_dev', 'linguaclip_auto_add_default',
   'other_app_key', 'lang',
 ];
 assert.deepEqual(B.backupKeys(keys), [

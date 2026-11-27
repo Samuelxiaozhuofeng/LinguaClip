@@ -14,7 +14,7 @@ import { useClip } from '../components/ReviewSession';
 import { useLookup, aroundOf } from '../hooks/useLookup';
 import { lineAt, parseSRT } from '../utils/srtParser';
 import { buildSections, sectionLengthOf } from '../utils/sections';
-import { detectLang } from '../utils/dictionary';
+import { resolveDictLang } from '../utils/resolveDictLang';
 import { useJaVersion } from '../utils/japanese';
 import { settleSplits } from '../utils/jaSegments';
 import { addWord, lineCardsFor, type ReviewCard } from '../utils/review';
@@ -72,7 +72,7 @@ const ReaderPage: React.FC<{ record: VideoRecord; by: ReadBy; onExit: (looked: n
   });
   const [sec, setSec] = useState(() => Math.max(0, resumeAt ? sections.findIndex(s => s.subtitles.includes(resumeAt)) : 0)); // "section" mode: the one on the page
   const [resumeNote, setResumeNote] = useState(!!resumeAt);
-  const dictLang = useMemo(() => detectLang(lines.map(l => l.text)), [lines]);
+  const dictLang = useMemo(() => resolveDictLang(record.lang, lines.map(l => l.text)), [record.lang, lines]);
   const ja = dictLang === 'ja';
   const jaVersion = useJaVersion();
   useEffect(() => { settleSplits(record.id, lines.map(l => l.text)).catch(() => {}); }, [record.id, lines]);

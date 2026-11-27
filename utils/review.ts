@@ -103,14 +103,37 @@ export const previewDue = (card: ReviewCard, now: number): Record<Grade, number>
 export const inReview = (c: ReviewCard) => hasAudio(c) && !c.mastered;
 export const isDue = (c: ReviewCard, now = Date.now()) => inReview(c) && c.fsrs.due <= now;
 
-// 没打分就离开过的卡排在后面，按推后时间先后；其余照旧按 due（docs/review.md「没打分的卡排到后面」）。
-export const dueQueue = (cards: ReviewCard[], deck: Deck, now = Date.now(), limit = SESSION_SIZE, deferred: Deferred = readDeferred()) =>
-  cards.filter(c => c.deck === deck && isDue(c, now))
+// 没打分就离开过的卡排在后面，按推后时间先后；其余照旧按 due（deck === 'all' 时先句子后单词，docs/review.md「没打分的卡排到后面」）。
+export const dueQueue = (cards: ReviewCard[], deck: Deck | 'all', now = Date.now(), limit = SESSION_SIZE, deferred: Deferred = readDeferred()) =>
+  cards.filter(c => (deck === 'all' || c.deck === deck) && isDue(c, now))
     .map(c => ({ c, d: deferredAt(deferred, c.id, c.fsrs.last_review) }))
-    .sort((a, b) => a.d === undefined ? (b.d === undefined ? a.c.fsrs.due - b.c.fsrs.due : -1) : b.d === undefined ? 1 : a.d - b.d)
+    .sort((a, b) => {
+      if (a.d !== undefined || b.d !== undefined) return a.d === undefined ? -1 : b.d === undefined ? 1 : a.d - b.d;
+      if (deck === 'all' && a.c.deck !== b.c.deck) return a.c.deck === 'line' ? -1 : 1;
+      return a.c.fsrs.due - b.c.fsrs.due;
+    })
     .slice(0, limit).map(x => x.c);
 
 export const isNew = (c: ReviewCard) => c.fsrs.state === State.New;
+
+export interface AddLineResult { id: string; created: boolean; addedReason: boolean; prevMastered?: number }
+
+// Pure decision for safely undoing an auto-added line card without losing clips, bookmarks, or reviews.
+// Returns null to delete, a new ReviewCard (spreading cur to keep clip) to update, or undefined for no-op.
+export const revertAddedLine = (cur: ReviewCard, res: AddLineResult, reason: Reason): ReviewCard | null | undefined => {
+  if (res.created && isNew(cur) && !cur.saved && cur.reasons.length === 1 && cur.reasons[0] === reason) return null;
+  let dirty = false;
+  let next: ReviewCard = { ...cur };
+  if (res.addedReason && next.reasons.includes(reason)) {
+    next = { ...next, reasons: next.reasons.filter(r => r !== reason) };
+    dirty = true;
+  }
+  if (res.prevMastered !== undefined && !next.mastered) {
+    next = { ...next, mastered: res.prevMastered };
+    dirty = true;
+  }
+  return dirty ? next : undefined;
+};
 
 // "Remembered" on the home screen: a line likely still recalled a week from now, or marked "got it".
 export const REMEMBERED_DAYS = 7;
@@ -249,11 +272,60 @@ const withPath = async (ref: LineRef): Promise<LineRef> =>
   ref.videoPath ? ref : { ...ref, videoPath: (await getVideoFromDB(ref.videoId).catch(() => null))?.videoPath };
 
 // A line the learner got stuck on (or bookmarked). Creates the card or just adds the reason.
-export const addLine = async (ref: LineRef, reason: Reason) => {
-  if (!ref.videoId) return;
+export const addLine = async (ref: LineRef, reason: Reason): Promise<AddLineResult | null> => {
+  if (!ref.videoId) return null;
   const id = lineCardId(ref.videoId, ref.start), full = await withPath(ref);
-  await update(id, old => old ? withReason({ ...old, videoPath: full.videoPath ?? old.videoPath }, reason) : newCard({ id, deck: 'line', ...full }, reason),
-    false, (cards, tomb, old, card) => { if (card) SM.metaOnAddLine(cards, tomb, id, old, card, reason); });
+  let out: AddLineResult | null = null;
+  await update(id, old => {
+    out = {
+      id,
+      created: !old,
+      addedReason: !old || !old.reasons.includes(reason),
+      ...(STUCK.includes(reason) && old?.mastered ? { prevMastered: old.mastered } : {}),
+    };
+    return old ? withReason({ ...old, videoPath: full.videoPath ?? old.videoPath }, reason) : newCard({ id, deck: 'line', ...full }, reason);
+  }, false, (cards, tomb, old, card) => { if (card) SM.metaOnAddLine(cards, tomb, id, old, card, reason); });
+  return out;
+};
+
+// Safely undo a recent addLine: deletes only a brand-new untouched card; otherwise keeps it (and its clip),
+// stripping only the reason / mastered-clear added by that call. When restoring `mastered`, bumps it past
+// `sync_cards[id].unmasteredAt` in the same transaction so cross-device sync never wipes it back out.
+export type UndoAddResult = 'deleted' | 'updated' | 'noop';
+export const undoAddLine = async (res: AddLineResult, reason: Reason): Promise<UndoAddResult> => {
+  await migrateSavedLines().catch(console.error);
+  const t = (await db()).transaction([STORE, META], 'readwrite');
+  const s = t.objectStore(STORE), m = t.objectStore(META);
+  let outcome: UndoAddResult = 'noop';
+  const r = s.get(res.id);
+  r.onsuccess = () => {
+    const cur = (r.result as ReviewCard | undefined) ?? null;
+    if (!cur) return;
+    const next = revertAddedLine(cur, res, reason);
+    if (next === undefined) return;
+    if (next === null) {
+      outcome = 'deleted';
+      s.delete(res.id);
+      SM.touchCardMetaInTx(m, (cards, tomb) => SM.metaOnDeleteCards(cards, tomb, [cur]));
+      forget(t, [res.id]);
+    } else if (next.mastered !== undefined && !cur.mastered) {
+      outcome = 'updated';
+      SM.touchCardMetaInTx(m, cards => {
+        const unm = cards[res.id]?.unmasteredAt ?? 0;
+        const mastered = Math.max(next.mastered!, unm + 1, Date.now());
+        s.put({ ...next, mastered });
+      });
+    } else {
+      outcome = 'updated';
+      s.put(next);
+    }
+  };
+  await finished(t);
+  if (outcome !== 'noop') {
+    changed();
+    SM.notifySyncDirty();
+  }
+  return outcome;
 };
 
 // Kept again without an AI note (none asked this time): the earlier note stays.

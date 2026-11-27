@@ -43,6 +43,22 @@ export const savePracticeConfig = (config: PracticeConfig) => {
   touchSyncSetting(STORAGE_KEY_PRACTICE);
 };
 
+// Local-only auto-enable of `saveClips` when enabling sync: writes raw JSON without filling
+// defaults (`sectionLength`/`clozeLevel`) or bumping sync `settingAt`, so a fresh device
+// never overwrites another device's practice settings on first sync.
+export const enableLocalSaveClipsIfUnset = (): boolean => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_PRACTICE);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    if ((parsed as PracticeConfig).saveClips !== undefined) return false;
+    localStorage.setItem(STORAGE_KEY_PRACTICE, JSON.stringify({ ...parsed, saveClips: true }));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const getWordFront = (): WordFront => getPracticeConfig().wordFront === 'sentence' ? 'sentence' : 'word';
 export const getWordVoice = (): 'clip' | 'tts' => getPracticeConfig().wordVoice === 'clip' ? 'clip' : 'tts';
 export const getMasteredBtn = () => getPracticeConfig().masteredBtn !== false;

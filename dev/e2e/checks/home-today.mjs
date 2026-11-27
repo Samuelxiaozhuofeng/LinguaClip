@@ -26,7 +26,7 @@ try {
   });
   await page.reload();
 
-  // 1 三格都在，数字和顶栏角标一致
+  // 1 「今天」栏只放合并复习主按钮（不再重复大继续卡或「换个新素材」），数字与顶栏角标一致
   await see(bar, '「今天」一栏');
   const reviewBtn = bar.getByRole('button', { name: /该复习$/ });
   await see(reviewBtn, '「该复习」格');
@@ -34,93 +34,57 @@ try {
   const want = `${b['句子']} 句 · ${b['单词']} 个词该复习`;
   const got = (await reviewBtn.textContent()).trim();
   if (got !== want || b['句子'] !== 3 || b['单词'] !== 1) fail(`该复习格「${got}」和角标 句子 ${b['句子']} / 单词 ${b['单词']} 对不上`);
-  const resumeBtn = bar.getByRole('button', { name: '继续听写《Zoo》 · 1 / 3 句' });
-  await see(resumeBtn, '「接着练」格（和大卡同一段进度）');
+  if (await bar.getByRole('button', { name: /^继续/ }).count()) fail('「今天」栏不应再重复大继续卡的「继续」按钮');
+  if (await bar.getByRole('button', { name: '换个新素材' }).count()) fail('「今天」栏不应再有「换个新素材」按钮');
   await see(page.getByText('1 / 3 句 · 继续听写'), '大卡进度「1 / 3 句 · 继续听写」');
-  await see(bar.getByRole('button', { name: '换个新素材' }), '「换个新素材」格');
-  if ((await bar.getByRole('button').first().getAttribute('class')).includes('bg-accent') !== true) fail('第一格不是主按钮');
+  if ((await bar.getByRole('button').first().getAttribute('class')).includes('bg-accent') !== true) fail('复习按钮不是主按钮');
   await page.screenshot({ path: `${t.out}/today-due.png` });
-  ok(`三格都在，「${got}」= 顶栏角标`);
+  ok(`去重成功，「${got}」= 顶栏角标`);
 
-  // 2 点「该复习」→ 直接进复习第一张（句子先）
+  // 2 点「该复习」→ 直接进合并队列第一张（3 句 + 1 词 = 4 张）
   await reviewBtn.click();
-  await see(page.getByText('1 / 3', { exact: true }), '复习进度「1 / 3」');
+  await see(page.getByText('1 / 4', { exact: true }), '合并复习进度「1 / 4」');
   if (await page.getByRole('dialog', { name: '这次怎么练' }).count()) fail('点该复习弹了面板');
   await page.getByRole('button', { name: '结束', exact: true }).click();
   await see(bar, '退出复习回到首页');
-  ok('点「该复习」直接进复习第一张（3 句一轮），退出回首页');
+  ok('点「该复习」直接进合并队列（3 句 + 1 词 = 4 张），退出回首页');
 
-  // 3 「接着练」和大卡去同一个地方
-  await resumeBtn.click();
-  await see(page.getByText('第 2 / 3 句'), '接着练 → 练习页「第 2 / 3 句」');
-  if (await page.getByRole('dialog', { name: '这次怎么练' }).count()) fail('接着练弹了面板');
-  await page.getByRole('button', { name: '回到你的视频列表' }).click();
-  await see(bar, '回首页');
-  await page.getByRole('button', { name: '继续听写', exact: true }).first().click();
-  await see(page.getByText('第 2 / 3 句'), '大卡 → 练习页「第 2 / 3 句」');
-  await page.getByRole('button', { name: '回到你的视频列表' }).click();
-  ok('「接着练」和大卡都进「第 2 / 3 句」，不弹面板');
-
-  // 3b 读字幕读到一半 → 两处都写「继续读字幕 · 读到 00:07」，点了都回到阅读器接着读
-  await page.evaluate(() => {
-    localStorage.setItem('linguaclip_last_way', JSON.stringify({ v1: 'read' }));
-    localStorage.setItem('linguaclip_read_pos', JSON.stringify({ v1: 7.25 }));
-  });
-  await page.reload();
-  const readBtn = bar.getByRole('button', { name: '继续读字幕《Zoo》 · 读到 00:07' });
-  await see(readBtn, '上次读字幕 → 「继续读字幕《Zoo》 · 读到 00:07」');
-  await see(page.getByText('读到 00:07 · 继续读字幕'), '大卡同样「读到 00:07 · 继续读字幕」');
-  await readBtn.click();
-  await see(page.getByText('接着上次，从 00:07 开始'), '接着练 → 阅读器「接着上次，从 00:07 开始」');
-  await page.reload();
-  await page.getByRole('button', { name: '继续读字幕', exact: true }).first().click();
-  await see(page.getByText('接着上次，从 00:07 开始'), '大卡 → 阅读器「接着上次，从 00:07 开始」');
-  await page.reload();
-  ok('上次读字幕 → 两处都写「继续读字幕」，点了都接着读');
-
-  // 3c 练完了 → 大卡写「已练完」，这格不出现
-  await page.evaluate(async () => {
-    localStorage.setItem('linguaclip_last_way', JSON.stringify({ v1: 'all' }));
-    const { patchVideoRecord } = await import('/utils/videoStorage.ts');
-    await patchVideoRecord('v1', { currentSectionIndex: 0, currentSubtitleIndex: 3 });
-  });
-  await page.reload();
-  await see(page.getByText('3 / 3 句 · 已练完'), '大卡「3 / 3 句 · 已练完」');
-  await see(bar.getByRole('button', { name: '换个新素材' }), '「今天」栏还在');
-  if (await bar.getByRole('button', { name: /^继续/ }).count()) fail('大卡已练完，「接着练」格还在');
-  await page.evaluate(async () => (await import('/utils/videoStorage.ts')).patchVideoRecord('v1', { currentSubtitleIndex: 1 }));
-  ok('练完了：大卡「已练完」，接着练格不出现');
-
-  // 4 看剧过的写「继续看剧」
-  await page.evaluate(() => localStorage.setItem('linguaclip_last_way', JSON.stringify({ v1: 'watch' })));
-  await page.reload();
-  await see(bar.getByRole('button', { name: /^继续看剧《Zoo》 · 看到 / }), '上次看剧 → 「继续看剧《Zoo》 · 看到 …」');
-  await see(page.getByText(/看到 .* · 继续看剧/), '大卡同样「继续看剧」');
-  ok('上次看剧 → 两处都写「继续看剧」');
-
-  // 5 「换个新素材」→ 播客页，那里没有这栏
-  await bar.getByRole('button', { name: '换个新素材' }).click();
-  await see(page.getByRole('navigation').getByRole('button', { name: '播客', exact: true }).and(page.locator('[aria-current=page]')), '切到播客页');
+  // 3 播客页没有「今天」栏
+  await nav('播客');
   await see(page.getByText('Quien'), '播客页的单集');
   if (await bar.count()) fail('播客页出现了「今天」一栏');
-  ok('「换个新素材」到播客页，播客页没有这栏');
+  ok('播客页没有「今天」一栏');
 
-  // 6 没到期卡 → 第一格不出现，其余两格还在
+  // 4 所有卡推迟到未来（没到期但有卡）→ 显示「今天的复习做完了」
   await nav('视频');
+  await page.evaluate(async () => {
+    const db = await new Promise((res, rej) => { const q = indexedDB.open('linguaclip_review'); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+    const tx = db.transaction('cards', 'readwrite');
+    const store = tx.objectStore('cards');
+    const all = await new Promise((res, rej) => { const r = store.getAll(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    for (const c of all) store.put({ ...c, fsrs: { ...c.fsrs, due: Date.now() + 86_400_000 } });
+    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+    db.close();
+  });
+  await page.reload();
+  await see(bar.getByText('今天的复习做完了'), '全部清完显示「今天的复习做完了」');
+  if (await bar.getByRole('button', { name: /该复习$/ }).count()) fail('没到期卡还显示「该复习」');
+  await page.screenshot({ path: `${t.out}/today-done.png` });
+  ok('没到期但有卡：显示「今天的复习做完了」');
+
+  // 5 删光所有卡 → 整栏不出现
   await page.evaluate(async () => {
     const R = await import('/utils/review.ts');
     await R.deleteCards((await R.getAllCards()).map(c => c.id));
   });
   await page.reload();
-  await see(bar.getByRole('button', { name: '换个新素材' }), '没到期时「换个新素材」还在');
-  await see(bar.getByRole('button', { name: /^继续看剧《Zoo》/ }), '没到期时「接着练」还在');
-  if (await bar.getByRole('button', { name: /该复习$/ }).count()) fail('没到期卡还显示「该复习」');
+  await see(page.getByText('1 / 3 句 · 继续听写'), '大卡还在');
+  await gone(bar, '没有任何卡时「今天」栏不渲染');
   const b2 = await badges();
   if (b2['句子'] || b2['单词']) fail('顶栏角标没清零');
-  await page.screenshot({ path: `${t.out}/today-nodue.png` });
-  ok('没到期卡：只剩「接着练」「换个新素材」');
+  ok('没有任何卡：整栏不占位');
 
-  // 6b 首页开着时一张卡到期了 → 去设置再回来，「该复习」和顶栏角标还是同一个数
+  // 6 首页开着时一张卡到期了 → 去设置再回来，「该复习」和顶栏角标还是同一个数
   await page.evaluate(async () => {
     const R = await import('/utils/review.ts');
     await R.addLine({ videoId: 'v1', videoName: 'Zoo', text: 'Alright, so here we are', start: 0.55, end: 7.25 }, 'saved');
@@ -134,13 +98,12 @@ try {
     db.close();
   });
   await page.reload();
-  await see(bar.getByRole('button', { name: '换个新素材' }), '首页');
+  await see(bar.getByText('今天的复习做完了'), '未到期时显示做完了');
   if ((await badges())['句子'] || await bar.getByRole('button', { name: /该复习$/ }).count()) fail('卡还没到期就算进去了');
   await page.waitForTimeout(5000);
   await nav('设置');
   await nav('视频');
-  await see(bar.getByRole('button', { name: '换个新素材' }), '回到视频首页');
-  await page.waitForTimeout(500);
+  await see(bar.getByRole('button', { name: /该复习$/ }), '到期后回首页出现「该复习」');
   const b3 = await badges();
   const cell = await bar.getByRole('button', { name: /该复习$/ }).textContent().catch(() => null);
   const cellN = cell ? Number(cell.match(/(\d+) 句/)?.[1] ?? 0) : 0;
@@ -155,7 +118,7 @@ try {
   if (!(await box.isChecked())) fail('开关默认不是开');
   await box.uncheck();
   await nav('视频');
-  await see(page.getByRole('button', { name: '继续看剧', exact: true }), '大卡还在');
+  await see(page.getByRole('button', { name: '继续听写', exact: true }), '大卡还在');
   await gone(bar, '关掉后「今天」一栏');
   await page.screenshot({ path: `${t.out}/today-off.png` });
   ok('设置关掉：整栏消失，大卡还在');

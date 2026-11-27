@@ -21,7 +21,8 @@ await build({
       export * from './utils/syncConfig';
       export * from './utils/syncMerge';
       export * from './utils/qr';
-      export { newCard, schedule, lineCardId, wordCardId } from './utils/review';
+      export { newCard, schedule, lineCardId, wordCardId, revertAddedLine } from './utils/review';
+      export { enableLocalSaveClipsIfUnset, getPracticeConfig, savePracticeConfig } from './utils/storage';
     `,
     resolveDir: '.',
     loader: 'ts',
@@ -919,6 +920,55 @@ const reviewLocal = (card, meta, revId, grade, at) => {
   assert.equal(S.isSafeWebDavUrl('https://dav.example.com/dav?x=1'), false);
   assert.equal(S.isSafeWebDavUrl('https://dav.example.com/dav#frag'), false);
   assert.equal(S.isSafeWebDavUrl('http://.ts.net/dav'), false);
+}
+
+// =========================================================================
+// 13. Regression: local-only saveClips auto-enable never taints sync settingAt,
+//     and undo of unmastered card survives cross-device merge
+// =========================================================================
+{
+  const mem = new Map();
+  const prevLS = globalThis.localStorage;
+  globalThis.localStorage = {
+    getItem: k => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => { mem.set(k, String(v)); },
+    removeItem: k => { mem.delete(k); },
+  };
+  try {
+    // Fresh device: enables saveClips without filling defaults or touching sync settingAt
+    assert.equal(S.enableLocalSaveClipsIfUnset(), true);
+    assert.deepEqual(JSON.parse(mem.get('linguaclip_practice_config')), { saveClips: true });
+    assert.equal(S.getSyncState(globalThis.localStorage).settingAt?.linguaclip_practice_config, undefined,
+      'fresh device auto-enable must NOT stamp linguaclip_practice_config settingAt');
+    assert.equal(S.enableLocalSaveClipsIfUnset(), false, 'idempotent once set');
+
+    // Explicit saveClips: false must never be overwritten
+    mem.clear();
+    mem.set('linguaclip_practice_config', JSON.stringify({ saveClips: false }));
+    assert.equal(S.enableLocalSaveClipsIfUnset(), false);
+    assert.equal(S.getPracticeConfig().saveClips, false);
+    assert.equal(S.getSyncState(globalThis.localStorage).settingAt?.linguaclip_practice_config, undefined);
+
+    // Explicit savePracticeConfig DOES touch settingAt (sanity check)
+    S.savePracticeConfig({ sectionLength: 8, clozeLevel: 'medium', saveClips: true });
+    assert.ok((S.getSyncState(globalThis.localStorage).settingAt?.linguaclip_practice_config?.at ?? 0) > 0);
+  } finally {
+    if (prevLS === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = prevLS;
+  }
+
+  // Undo of stuck on a previously mastered card bumps mastered > unmasteredAt so sync preserves mastered
+  const baseAt = 1_700_000_000_000;
+  const { card: mCard, meta: mMeta } = makeCardWithMeta('v1', 42, 'Mastered line', baseAt, 'saved', { mastered: baseAt + 5 * DAY });
+  const unmAt = baseAt + 10 * DAY;
+  const afterStuck = (({ mastered: _, ...rest }) => ({ ...rest, reasons: [...rest.reasons, 'wrong'] }))(mCard);
+  const afterStuckMeta = { ...mMeta, unmasteredAt: unmAt };
+  const rev = S.revertAddedLine(afterStuck, { id: mCard.id, created: false, addedReason: true, prevMastered: mCard.mastered }, 'wrong');
+  assert.ok(rev && rev.mastered === mCard.mastered);
+  // Simulated undoAddLine bump: mastered = Math.max(rev.mastered, unmAt + 1)
+  const undoneCard = { ...rev, mastered: Math.max(rev.mastered, unmAt + 1) };
+  const merged = S.mergeCard(undoneCard, afterStuckMeta, 'dev-a', afterStuck, afterStuckMeta, 'dev-b');
+  assert.equal(merged.card.mastered, unmAt + 1, 'mastered restored past unmasteredAt survives sync merge');
 }
 
 console.log('test-sync-merge: all passed (including 100-round 3-device convergence + GC anti-zombie)');

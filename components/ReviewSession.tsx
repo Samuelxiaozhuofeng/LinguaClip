@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PracticeMode } from '../types';
 import { clipOf, useClip } from '../hooks/useClip';
 import { Rating, type Grade } from 'ts-fsrs';
-import { ReviewCard, recordOutcome, repointVideo, getAllCards, dueQueue, addWord, gradeOf, previewDue, schedule, setMastered, removeCard, restoreCard, type Removed } from '../utils/review';
+import { Deck, ReviewCard, recordOutcome, repointVideo, getAllCards, dueQueue, addWord, gradeOf, previewDue, schedule, setMastered, removeCard, restoreCard, type Removed } from '../utils/review';
 import { patchVideoRecord } from '../utils/videoStorage';
 import { deferCard } from '../utils/reviewDefer';
 import { getWordFront, getMasteredBtn, getWordVoice } from '../utils/storage';
@@ -44,7 +44,15 @@ export { clipOf, useClip } from '../hooks/useClip';
 // `langOf` (from a library page): each card's language deck. Then lookups use the card's
 // own language, and "more" after the round stays in the deck the round came from.
 // onFinish: the done screen's button, when finishing leads on (the listening page's next section); quitting stays onClose.
-const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFinish?: () => void; langOf?: (c: ReviewCard) => DeckLang; lang?: DeckLang | 'all' }> = ({ cards, onClose, onFinish, langOf, lang = 'all' }) => {
+const ReviewSession: React.FC<{
+  cards: ReviewCard[];
+  onClose: () => void;
+  onFinish?: () => void;
+  langOf?: (c: ReviewCard) => DeckLang;
+  lang?: DeckLang | 'all';
+  deck?: Deck | 'all';
+  resume?: { name: string; label: string; onClick: () => void };
+}> = ({ cards, onClose, onFinish, langOf, lang = 'all', deck, resume }) => {
   const t = useT();
   const [queue, setQueue] = useState(cards);
   const [round, setRound] = useState(0);
@@ -214,15 +222,16 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
 
   // Round over: anything still due in this deck? Waits for the grades to land first.
   useEffect(() => {
-    if (!done || queue.length === 0) return;
+    if (!done) return;
     let cancelled = false;
+    const moreDeck = deck ?? queue[0]?.deck ?? 'line';
     setMore(null);
     Promise.allSettled(writes.current)
       .then(() => getAllCards())
-      .then(all => { if (!cancelled) setMore(dueQueue(lang === 'all' || !langOf ? all : all.filter(c => langOf(c) === lang), queue[0].deck)); })
+      .then(all => { if (!cancelled) setMore(dueQueue(lang === 'all' || !langOf ? all : all.filter(c => langOf(c) === lang), moreDeck)); })
       .catch(e => { console.error(e); if (!cancelled) setMore([]); });
     return () => { cancelled = true; };
-  }, [done, queue, restored]);
+  }, [done, queue, restored, deck]);
 
   const grading = !!card && !!path && splitsReady && !done && (isWord ? turned : mode === PracticeMode.FEEDBACK);
   useEffect(() => { if (grading) setAt(Date.now()); }, [grading, card]);
@@ -395,9 +404,16 @@ const ReviewSession: React.FC<{ cards: ReviewCard[]; onClose: () => void; onFini
               <div className="flex flex-col items-center gap-3 fade-in">
                 <h2 className="text-[34px] font-semibold tracking-[-0.02em] leading-tight">{t('session.doneTitle')}</h2>
                 <p className="text-sm text-mute leading-relaxed max-w-md">{t('session.doneBody', { n: new Set(queue.map(c => c.id).filter(id => !removed.current.has(id))).size })}</p>
-                <div className="pt-4 flex gap-2.5">
+                <div className="pt-4 flex flex-wrap justify-center gap-2.5">
                   {!!more?.length && <Btn onClick={again}>{t('session.doneMore', { n: more.length })}</Btn>}
-                  <Btn tone="accent" onClick={onFinish ?? onClose} autoFocus>{t('session.back')}</Btn>
+                  {resume && !onFinish ? (
+                    <>
+                      <Btn tone="accent" onClick={resume.onClick} autoFocus>{t('home.todayResume', { mode: resume.label, name: resume.name })}</Btn>
+                      <Btn onClick={onClose}>{t('session.back')}</Btn>
+                    </>
+                  ) : (
+                    <Btn tone="accent" onClick={onFinish ?? onClose} autoFocus>{t('session.back')}</Btn>
+                  )}
                 </div>
               </div>
             ) : path === null ? (

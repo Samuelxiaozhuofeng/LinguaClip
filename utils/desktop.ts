@@ -108,6 +108,8 @@ export type YouTubePillText = {
   practice: string; langHint: string; confirmTitle: string; confirmBody: string; install: string; notNow: string;
   installing: string; failed: string; retry: string; adding: string; added: string; notAdded: string;
   tryAgain: string; backHome: string;
+  needLoginTitle: string; needLoginBody: string; loginBtn: string; loginOpenedBody: string; noChromeBody: string;
+  winLoginTitle: string; winLoginBody: string; downloadFailedTitle: string; retrying: string; dismiss: string;
 };
 export const openYouTubeWindow = (lang: string, langs: { code: string; label: string }[], text: YouTubePillText) =>
   invoke<void>('open_youtube_window', { lang, langs, text });
@@ -118,6 +120,11 @@ export type YouTubePick = { id: string; url: string; lang: string };
 export const onYouTubePick = (fn: (pick: YouTubePick) => void) => listen<YouTubePick>('youtube-pick', e => fn(e.payload));
 // Tells the YouTube window whether the picked video's card was saved.
 export const youtubePickDone = (id: string, ok: boolean) => invoke<void>('youtube_pick_done', { id, ok });
+export type YouTubeErrorKind = 'needLogin' | 'winLogin' | 'dlError';
+export const youtubePickError = (id: string, kind: YouTubeErrorKind, detail?: string) =>
+  invoke<void>('youtube_pick_error', { id, kind, detail: detail ?? null });
+export const onYouTubeRetry = (fn: (id: string) => void) =>
+  listen<{ id: string }>('youtube-retry', e => fn(e.payload.id));
 // index: among the subtitle tracks only. text: false for picture subtitles (unreadable).
 // Review cards' own clips (src-tauri/src/clips.rs), in <own dir>/clips.
 export const cutClip = (src: string, from: number, to: number, name: string, kind: 'video' | 'audio') =>

@@ -7,6 +7,7 @@ import { downloadConvertTool, loadConvertTool, useConvertTool } from '../utils/c
 import ConvertToolRow from './ConvertToolRow';
 import { useT } from '../utils/i18n';
 import { getAudioPaddingConfig, getMasteredBtn, getPracticeConfig, getWordFront, getWordVoice, saveAudioPaddingConfig, savePracticeConfig, setPracticeFlag } from '../utils/storage';
+import { getAutoAddReview } from '../utils/autoAddReview';
 import type { WordFront } from '../types';
 
 // Cards keep their own clip of the line (utils/clips.ts): on / off, which kind, and how far along.
@@ -115,7 +116,7 @@ const WordVoicePicker: React.FC<{ onSaved: () => void }> = ({ onSaved }) => {
 // Settings → Cards & review: what goes into review and how cards look; `children` is the Anki group.
 const SettingsCards: React.FC<{ onSaved: () => void; children: React.ReactNode }> = ({ onSaved, children }) => {
   const t = useT();
-  const [autoAdd, setAutoAdd] = useState(() => getPracticeConfig().autoAddReview ?? false);
+  const [autoAdd, setAutoAdd] = useState(getAutoAddReview);
   const [masteredBtn, setMasteredBtn] = useState(getMasteredBtn);
   const [audioPadding, setPadding] = useState(getAudioPaddingConfig);
   const setAudioPadding = (v: typeof audioPadding) => { setPadding(v); saveAudioPaddingConfig(v); onSaved(); };

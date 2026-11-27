@@ -40,6 +40,16 @@ pub struct PillText {
   not_added: String,
   try_again: String,
   back_home: String,
+  need_login_title: String,
+  need_login_body: String,
+  login_btn: String,
+  login_opened_body: String,
+  no_chrome_body: String,
+  win_login_title: String,
+  win_login_body: String,
+  download_failed_title: String,
+  retrying: String,
+  dismiss: String,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -203,6 +213,19 @@ fn valid_id(id: &str) -> bool {
   id.len() == 11 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
+fn valid_error_kind(kind: &str) -> bool {
+  matches!(kind, "needLogin" | "winLogin" | "dlError")
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn login_reply(id: &str, result: Result<(), String>) -> serde_json::Value {
+  match result {
+    Ok(()) => serde_json::json!({ "kind": "loginOpened", "v": id }),
+    Err(e) if e.contains("missing:") => serde_json::json!({ "kind": "noChrome", "v": id }),
+    Err(e) => serde_json::json!({ "kind": "dlError", "v": id, "detail": e }),
+  }
+}
+
 fn param(url: &Url, key: &str) -> Option<String> {
   url.query_pairs().find(|(k, _)| k == key).map(|(_, v)| v.into_owned())
 }
@@ -230,6 +253,31 @@ fn command(app: &AppHandle, url: &Url) {
       } else {
         let mb = crate::yt_tools::missing_bytes().div_ceil(1_000_000);
         tell(app, serde_json::json!({ "kind": "confirm", "mb": mb, "v": id }));
+      }
+    }
+    "/login" => {
+      let id = param(url, "v").unwrap_or_default();
+      if !valid_id(&id) {
+        return;
+      }
+      #[cfg(target_os = "macos")]
+      {
+        tell(app, login_reply(&id, crate::import::open_youtube_login()));
+      }
+      #[cfg(not(target_os = "macos"))]
+      {
+        tell(app, serde_json::json!({ "kind": "winLogin", "v": id }));
+      }
+    }
+    "/retry" => {
+      let id = param(url, "v").unwrap_or_default();
+      if !valid_id(&id) {
+        return;
+      }
+      clear_pick(&id);
+      tell(app, serde_json::json!({ "kind": "retrying", "v": id }));
+      if app.emit_to("main", "youtube-retry", serde_json::json!({ "id": id })).is_err() {
+        tell(app, serde_json::json!({ "kind": "notAdded", "v": id }));
       }
     }
     _ => {}
@@ -282,17 +330,37 @@ pub fn youtube_pick_done(app: AppHandle, id: String, ok: bool) {
   }
 }
 
-fn pick_done(app: &AppHandle, id: &str, ok: bool) {
+// The main window reports a download/login error for a picked video back to the pill.
+#[tauri::command]
+pub fn youtube_pick_error(app: AppHandle, id: String, kind: String, detail: Option<String>) {
+  if !valid_id(&id) || !valid_error_kind(&kind) {
+    return;
+  }
+  clear_pick(&id);
+  tell(&app, serde_json::json!({ "kind": kind, "v": id, "detail": detail.unwrap_or_default() }));
+}
+
+fn clear_pick(id: &str) {
+  if let Some(s) = SESSION.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+    s.picks.remove(id);
+  }
+}
+
+fn record_pick_done(id: &str, ok: bool) {
   if let Some(s) = SESSION.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
     if ok {
-      if let Some(p) = s.picks.get_mut(id) {
-        p.1 = true;
-      }
+      // Insert (not just get_mut): after an error/retry cleared the slot, a successful
+      // retry must re-arm the 10s duplicate-click guard.
+      s.picks.insert(id.to_string(), (Instant::now(), true));
     } else {
       // Not saved: the next click must try again, not be taken for a double click.
       s.picks.remove(id);
     }
   }
+}
+
+fn pick_done(app: &AppHandle, id: &str, ok: bool) {
+  record_pick_done(id, ok);
   tell(app, serde_json::json!({ "kind": if ok { "added" } else { "notAdded" }, "v": id }));
 }
 
@@ -369,8 +437,11 @@ mod tests {
     assert!(!is_google(&Url::parse("http://www.youtube.com/").unwrap()));
   }
 
+  static TEST_LOCK: Mutex<()> = Mutex::new(());
+
   #[test]
   fn one_pick_per_video_and_failed_picks_can_retry() {
+    let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     use PickState::*;
     *SESSION.lock().unwrap() = Some(Session { nonce: "n".into(), picks: HashMap::new() });
     assert_eq!(fresh_pick("aaaaaaaaaaa"), Fresh);
@@ -389,6 +460,44 @@ mod tests {
     // A pick the main window could not save is forgotten.
     mark("aaaaaaaaaaa", false);
     assert_eq!(fresh_pick("aaaaaaaaaaa"), Fresh);
+  }
+
+  #[test]
+  fn clear_pick_allows_immediate_retry_and_done_rearms_guard() {
+    let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    *SESSION.lock().unwrap() = Some(Session { nonce: "n".into(), picks: HashMap::new() });
+    assert_eq!(fresh_pick("ccccccccccc"), PickState::Fresh);
+    assert_eq!(fresh_pick("ccccccccccc"), PickState::Pending);
+    clear_pick("ccccccccccc");
+    // Retry succeeds without going through fresh_pick again -> must re-arm the 10s Saved guard.
+    record_pick_done("ccccccccccc", true);
+    assert_eq!(fresh_pick("ccccccccccc"), PickState::Saved);
+    clear_pick("ccccccccccc");
+    assert_eq!(fresh_pick("ccccccccccc"), PickState::Fresh);
+  }
+
+  #[test]
+  fn error_kinds_are_whitelisted() {
+    for ok in ["needLogin", "winLogin", "dlError"] {
+      assert!(valid_error_kind(ok), "{ok}");
+    }
+    for bad in ["", "added", "confirm", "loginOpened", "noChrome", "retrying", "script"] {
+      assert!(!valid_error_kind(bad), "{bad}");
+    }
+  }
+
+  #[test]
+  fn login_reply_maps_ok_missing_chrome_and_other_errors() {
+    let id = "dQw4w9WgXcQ";
+    assert_eq!(login_reply(id, Ok(())), serde_json::json!({ "kind": "loginOpened", "v": id }));
+    assert_eq!(
+      login_reply(id, Err("missing:Google Chrome".into())),
+      serde_json::json!({ "kind": "noChrome", "v": id })
+    );
+    assert_eq!(
+      login_reply(id, Err("login:could not launch".into())),
+      serde_json::json!({ "kind": "dlError", "v": id, "detail": "login:could not launch" })
+    );
   }
 
   #[test]

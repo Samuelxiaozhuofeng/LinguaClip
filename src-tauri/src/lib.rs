@@ -134,6 +134,7 @@ pub fn run() {
       sync_packs::sync_rekey_files,
       youtube_window::open_youtube_window,
       youtube_window::youtube_pick_done,
+      youtube_window::youtube_pick_error,
       yt_tools::youtube_tool_status,
       yt_tools::install_youtube_tool,
       trash_file

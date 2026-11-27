@@ -14,6 +14,7 @@ import {
   type Data, type Manifest, type Pending, type Problem,
 } from './backup';
 import { autoBackup, saveBackup } from './backupData';
+import { AUTO_ADD_DEFAULT_KEY } from './autoAddReview';
 import { dialog } from '../components/Dialog';
 import { t } from './i18n';
 
@@ -96,6 +97,8 @@ async function run(p: Pending): Promise<void> {
   );
   for (const [k, v] of plan.set) localStorage.setItem(k, v);
   for (const k of plan.remove) localStorage.removeItem(k);
+  // Restoring an existing user's backup on a fresh install keeps their legacy autoAddReview default.
+  if (data.videos.length > 0 || data.cards.length > 0) localStorage.setItem(AUTO_ADD_DEFAULT_KEY, '0');
   localStorage.removeItem(PENDING_KEY);
   await backupRemove([STAGED]).catch(console.error);
   const relicense = manifest.hadLicense && localStorage.getItem(LICENSE_KEY) === null;
