@@ -77,7 +77,7 @@ export const DictPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                     role="radio"
                     aria-checked={priority === opt.mode}
                     onClick={() => setPriority(opt.mode)}
-                    className={`min-h-[40px] px-3.5 rounded-full text-[13px] ${priority === opt.mode ? 'bg-ink text-white font-medium' : 'bg-page text-mute shadow-card'}`}
+                    className={`min-h-[40px] px-3.5 rounded-full text-[13px] ${priority === opt.mode ? 'bg-ink text-inverse font-medium' : 'bg-page text-mute shadow-card'}`}
                   >
                     {opt.label}
                   </button>

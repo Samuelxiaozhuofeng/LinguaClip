@@ -1,7 +1,8 @@
 import { fetch } from '@tauri-apps/plugin-http';
+import { aiRouter } from './aiConfig';
 import { getAIConfig, readJsonBody } from './aiConfig';
 import { withAiSlot } from './aiLimit';
-import { clozeRouter, hashSrt } from './aiDrills';
+import { hashSrt } from './aiDrills';
 import { readCacheText, writeCacheText } from './desktop';
 import { getLang, type Lang } from './i18n';
 import { findWord, keywordLines } from './keywordPrep';
@@ -102,12 +103,12 @@ ${rows.join('\n')}`;
 }
 
 async function askOnce(lines: Line[], from: number, to: number, lang: Lang): Promise<Phrase[]> {
-  const router = clozeRouter();
+  const router = aiRouter('keywords');
   if (!router) throw new Error('no router configured');
   const res = await fetch(`${router.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${router.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: phrasePrompt(lines, from, to, lang) }] }),
+    headers: router.headers,
+    body: JSON.stringify({ model: router.model, ...router.extra, messages: [{ role: 'user', content: phrasePrompt(lines, from, to, lang) }] }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`router ${res.status}`);
@@ -131,7 +132,7 @@ export function preparePhrases(recordId: string, subtitleText: string): Promise<
   job.promise = (async () => {
     const lines = keywordLines(subtitleText);
     const saved = parsePhraseCache(await readCacheText(recordId, 'phrases').catch(() => null), lines);
-    if (saved || !lines.length || !clozeRouter()) return saved;
+    if (saved || !lines.length || !aiRouter('keywords')) return saved;
     const lang = getLang();
     // ponytail: all batches or nothing; keep per-batch results if long films fail often.
     // Deleted meanwhile, or another batch already failed (the whole job is lost): a batch still

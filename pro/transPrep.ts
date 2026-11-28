@@ -1,7 +1,8 @@
 import { fetch } from '@tauri-apps/plugin-http';
+import { aiRouter } from '../utils/aiConfig';
 import { readJsonBody } from '../utils/aiConfig';
 import { withAiSlot } from '../utils/aiLimit';
-import { batchLinesByWords, clozeRouter, extractLines, hashSrt } from '../utils/aiDrills';
+import { batchLinesByWords, extractLines, hashSrt } from '../utils/aiDrills';
 import { readCacheText, writeCacheText } from '../utils/desktop';
 
 // The reader's folded translation: one line of the user's UI language per subtitle
@@ -49,12 +50,12 @@ ${texts.map((t, i) => `${i}\t${t.replace(/\s+/g, ' ')}`).join('\n')}`;
 }
 
 async function askOnce(texts: string[], to: TransTo): Promise<(string | null)[]> {
-  const router = clozeRouter();
+  const router = aiRouter('translate');
   if (!router) throw new Error('no router configured');
   const res = await fetch(`${router.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${router.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: transPrompt(texts, to) }] }),
+    headers: router.headers,
+    body: JSON.stringify({ model: router.model, ...router.extra, messages: [{ role: 'user', content: transPrompt(texts, to) }] }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`router ${res.status}`);
@@ -96,7 +97,7 @@ export function prepareTrans(recordId: string, texts: string[], to: TransTo): Pr
     const cached = raw && parseTransCache(raw, srt, to, texts.length);
     if (cached) { job.lines = cached; notify(); }
     const missing = job.lines.flatMap((l, i) => (l === null ? [i] : []));
-    if (missing.length === 0 || !clozeRouter()) return job.lines;
+    if (missing.length === 0 || !aiRouter('translate')) return job.lines;
     const groups = batchLinesByWords(missing.map(i => texts[i]));
     job.total = groups.length;
     notify();

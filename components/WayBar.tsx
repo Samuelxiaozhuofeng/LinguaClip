@@ -137,7 +137,7 @@ const WayBar: React.FC<WayBarProps> = ({
             onClick={e => { e.currentTarget.blur(); if (!active) onSelect(w); }}
             className={`press h-8 px-3 rounded-full text-[13px] font-medium whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               active
-                ? 'bg-ink text-white'
+                ? 'bg-ink text-inverse'
                 : 'text-mute hover:text-ink hover:bg-shade/70'
             }`}
           >

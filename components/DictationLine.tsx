@@ -412,7 +412,7 @@ const DictationLine: React.FC<Props> = ({ targetText, mode, onComplete, onStartI
               </span>
               {punct}
               {peek === i && (
-                <span className="absolute -top-12 left-1/2 -translate-x-1/2 rounded-md bg-ink text-white px-3 py-1 font-serif text-xl leading-7 whitespace-nowrap pointer-events-none z-10 fade-in">
+                <span className="absolute -top-12 left-1/2 -translate-x-1/2 rounded-md bg-ink text-inverse px-3 py-1 font-serif text-xl leading-7 whitespace-nowrap pointer-events-none z-10 fade-in">
                   {tk.value}
                 </span>
               )}

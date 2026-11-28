@@ -125,7 +125,7 @@ export const DictDock: React.FC<DictDockProps> = ({
           type="button"
           onMouseDown={keepFocus}
           onClick={runKeepFocus(onReplay)}
-          className="flex-auto min-h-[40px] px-2 rounded-xl bg-ink text-white text-[12px] font-medium flex items-center justify-center gap-1 whitespace-nowrap active:opacity-80"
+          className="flex-auto min-h-[40px] px-2 rounded-xl bg-ink text-inverse text-[12px] font-medium flex items-center justify-center gap-1 whitespace-nowrap active:opacity-80"
         >
           <span aria-hidden>▶</span>
           <span>{t('m.dictReplay')}</span>

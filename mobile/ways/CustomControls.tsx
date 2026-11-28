@@ -130,7 +130,7 @@ export const CustomControls: React.FC<CustomControlsProps> = ({
                 aria-pressed={cfg.minutes === m}
                 onClick={() => pickOption({ minutes: m })}
                 className={`shrink-0 min-h-[40px] px-3 rounded-full text-xs font-medium ${
-                  cfg.minutes === m ? 'bg-ink text-white' : 'bg-shade text-mute'
+                  cfg.minutes === m ? 'bg-ink text-inverse' : 'bg-shade text-mute'
                 }`}
               >
                 {t('custom.minutesN', { n: m })}
@@ -144,7 +144,7 @@ export const CustomControls: React.FC<CustomControlsProps> = ({
               aria-pressed={cfg.level === null}
               onClick={() => pickOption({ level: null })}
               className={`shrink-0 min-h-[40px] px-3 rounded-full text-xs font-medium ${
-                cfg.level === null ? 'bg-ink text-white' : 'bg-shade text-mute'
+                cfg.level === null ? 'bg-ink text-inverse' : 'bg-shade text-mute'
               }`}
             >
               {t('custom.anyLevel')}
@@ -157,7 +157,7 @@ export const CustomControls: React.FC<CustomControlsProps> = ({
                 aria-pressed={cfg.level === lv}
                 onClick={() => pickOption({ level: lv })}
                 className={`shrink-0 min-h-[40px] px-3 rounded-full text-xs font-medium disabled:opacity-35 ${
-                  cfg.level === lv ? 'bg-ink text-white' : 'bg-shade text-mute'
+                  cfg.level === lv ? 'bg-ink text-inverse' : 'bg-shade text-mute'
                 }`}
               >
                 {lv}

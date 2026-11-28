@@ -177,7 +177,7 @@ export const ConfigSyncSheet: React.FC<{
       <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label={t('sync.presetLabel')}>
         {(['jianguoyun', 'custom'] as const).map(p => (
           <button key={p} type="button" role="radio" aria-checked={form.preset === p} disabled={busy} onClick={() => setPreset(p)}
-            className={`min-h-[40px] px-3.5 rounded-full text-[13px] ${form.preset === p ? 'bg-ink text-white font-medium' : 'bg-shade text-mute'}`}>
+            className={`min-h-[40px] px-3.5 rounded-full text-[13px] ${form.preset === p ? 'bg-ink text-inverse font-medium' : 'bg-shade text-mute'}`}>
             {t(p === 'jianguoyun' ? 'sync.presetJianguoyun' : 'sync.presetCustom')}
           </button>
         ))}

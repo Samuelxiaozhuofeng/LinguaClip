@@ -268,10 +268,10 @@ export const CardLibrary: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                   role="radio"
                   aria-checked={active}
                   onClick={() => { setPickedLang(p.lang); setSwipedId(null); }}
-                  className={`shrink-0 min-h-[44px] px-3.5 rounded-full text-[13px] flex items-center gap-1.5 ${active ? 'bg-ink text-white font-medium' : 'bg-page text-ink shadow-card'}`}
+                  className={`shrink-0 min-h-[44px] px-3.5 rounded-full text-[13px] flex items-center gap-1.5 ${active ? 'bg-ink text-inverse font-medium' : 'bg-page text-ink shadow-card'}`}
                 >
                   <span>{label}</span>
-                  <span className={`text-[12px] tabular-nums ${active ? 'text-white/75' : 'text-mute'}`}>{p.count}</span>
+                  <span className={`text-[12px] tabular-nums ${active ? 'text-inverse/75' : 'text-mute'}`}>{p.count}</span>
                 </button>
               );
             })}

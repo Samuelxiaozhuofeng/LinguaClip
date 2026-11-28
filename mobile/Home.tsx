@@ -86,7 +86,7 @@ function BatteryHint({ onOpenSettings }: { onOpenSettings: () => void }) {
       <span className="flex-1">{t('m.batteryBanner')}</span>
       <button
         type="button"
-        className="min-h-[36px] px-2.5 rounded-lg bg-ink text-white text-[13px] font-medium shrink-0"
+        className="min-h-[36px] px-2.5 rounded-lg bg-ink text-inverse text-[13px] font-medium shrink-0"
         onClick={onOpenSettings}
       >
         {t('m.batteryGo')}

@@ -11,6 +11,9 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import RestoreFailed from './components/RestoreFailed';
 import { afterStart, bootRestore } from './utils/restore';
+import { initTheme } from './utils/theme';
+
+initTheme();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

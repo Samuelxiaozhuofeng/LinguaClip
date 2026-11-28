@@ -7,7 +7,8 @@
 const CACHE = 'linguaclip-app-v1';
 const SCOPE = new URL(self.registration.scope).pathname; // '/app/'
 
-// The page and the build files it names, so the first visit already opens offline.
+// The page, the build files it names and the first-paint theme script, so the first
+// visit already opens offline.
 // Failing never holds the install up.
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(async c => {
@@ -15,7 +16,7 @@ self.addEventListener('install', e => {
     if (!res.ok) return;
     const html = await res.clone().text();
     await c.put(SCOPE, res);
-    await c.addAll([...new Set(html.match(new RegExp(`${SCOPE}assets/[^"'\\s)>]+`, 'g')) ?? [])]);
+    await c.addAll([...new Set([...(html.match(new RegExp(`${SCOPE}assets/[^"'\\s)>]+`, 'g')) ?? []), `${SCOPE}theme-boot.js`])]);
   }).catch(() => {}));
   self.skipWaiting();
 });

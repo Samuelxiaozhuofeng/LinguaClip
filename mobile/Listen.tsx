@@ -206,7 +206,7 @@ export const Listen: React.FC<{
                   aria-pressed={L.mode === m}
                   onClick={() => L.setMode(m)}
                   className={`min-h-[40px] px-3 rounded-full text-xs whitespace-nowrap ${
-                    L.mode === m ? 'bg-ink text-white font-medium' : 'text-mute'
+                    L.mode === m ? 'bg-ink text-inverse font-medium' : 'text-mute'
                   }`}
                 >
                   {t(`listen.mode_${m}`)}
@@ -252,7 +252,7 @@ export const Listen: React.FC<{
       ) : <StepBar step={step} onStep={L.goStep} />}
 
       <div className="flex-1 min-h-0 overflow-y-auto relative">{body}</div>
-      {toast && <p role="status" className={`fixed left-1/2 -translate-x-1/2 ${embedded ? 'top-[calc(env(safe-area-inset-top)+112px)]' : 'top-[calc(env(safe-area-inset-top)+64px)]'} z-20 px-4 py-2 rounded-full bg-ink text-white text-sm`}>{toast}</p>}
+      {toast && <p role="status" className={`fixed left-1/2 -translate-x-1/2 ${embedded ? 'top-[calc(env(safe-area-inset-top)+112px)]' : 'top-[calc(env(safe-area-inset-top)+64px)]'} z-20 px-4 py-2 rounded-full bg-ink text-inverse text-sm`}>{toast}</p>}
 
       <div className="px-4 pt-2">
         {L.inDrill ? <DrillBar n={L.qAt + 1} total={L.queue!.length} play={L.play} tries={L.tries} shown={L.shown} onShow={L.drillShow} onNext={L.drillNext} />
@@ -290,7 +290,7 @@ export const Listen: React.FC<{
       <div className="px-5 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] flex items-center justify-between">
         <button type="button" className={`${round} text-[13px] text-mute`} onClick={L.cycleSpeed} aria-label={t('m.speed')}>{L.speed === 1 ? '1.0' : L.speed}×</button>
         <button type="button" className={round} aria-label={t('m.prevLine')} onClick={L.prev}><Icon d="M15 18l-6-6 6-6M6 6v12" size={22} /></button>
-        <button type="button" className="w-[60px] h-[60px] rounded-full bg-ink text-white flex items-center justify-center" aria-label={t(L.playing ? 'm.pause' : 'm.play')} onClick={L.toggle} disabled={!L.ready || !!failed}>
+        <button type="button" className="w-[60px] h-[60px] rounded-full bg-ink text-inverse flex items-center justify-center" aria-label={t(L.playing ? 'm.pause' : 'm.play')} onClick={L.toggle} disabled={!L.ready || !!failed}>
           {L.playing ? <Icon d="M9 6v12M15 6v12" size={24} /> : <Icon d="M7 4l13 8-13 8z" fill size={24} />}
         </button>
         <button type="button" className={round} aria-label={t('m.nextLine')} onClick={nextBtn}><Icon d="M9 18l6-6-6-6M18 6v12" size={22} /></button>

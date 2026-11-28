@@ -430,7 +430,7 @@ export const Review: React.FC<{
           <div className="bg-page rounded-2xl shadow-card px-4 py-[18px] flex flex-col gap-3.5">
             {!isWord && (
               <div className="flex items-center gap-2.5">
-                <button type="button" aria-label={t('m.replayLine')} disabled={!src} onClick={playCard} className="w-12 h-12 rounded-full bg-ink text-white flex items-center justify-center disabled:opacity-30">▶</button>
+                <button type="button" aria-label={t('m.replayLine')} disabled={!src} onClick={playCard} className="w-12 h-12 rounded-full bg-ink text-inverse flex items-center justify-center disabled:opacity-30">▶</button>
                 <span className="text-[13px] text-mute truncate">{card.videoName}</span>
               </div>
             )}

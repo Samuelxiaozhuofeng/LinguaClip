@@ -107,14 +107,14 @@ const TrackList: React.FC<{
                 !supported
                   ? 'bg-shade/60 text-mute opacity-60 cursor-not-allowed'
                   : selected
-                    ? 'bg-ink text-white font-medium'
+                    ? 'bg-ink text-inverse font-medium'
                     : 'bg-shade text-ink'
               }`}
             >
               <span className="truncate">{formatTrackLabel(tr, pos)}</span>
               <span className="shrink-0 flex items-center gap-1.5 text-[13px]">
                 {tr.isDefault && supported && (
-                  <span className={`px-2 py-0.5 rounded-full ${selected ? 'bg-white/20 text-white' : 'bg-page text-mute'}`}>
+                  <span className={`px-2 py-0.5 rounded-full ${selected ? 'bg-inverse/20 text-inverse' : 'bg-page text-mute'}`}>
                     {t('m.trackDefault')}
                   </span>
                 )}
@@ -287,7 +287,7 @@ export const ImportSheet: React.FC<ImportSheetProps> = ({
                   aria-checked={active}
                   onClick={() => chooseLang(code)}
                   className={`min-h-[40px] px-3.5 rounded-full text-[13px] ${
-                    active ? 'bg-ink text-white font-medium' : 'bg-shade text-ink'
+                    active ? 'bg-ink text-inverse font-medium' : 'bg-shade text-ink'
                   }`}
                 >
                   {label}

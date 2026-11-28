@@ -310,7 +310,7 @@ export const BlurWay: React.FC<WayProps> = ({ record, startSec, onPos, onLine, o
           type="button"
           onClick={() => (player.playing ? player.pause() : player.playLine(idx, pad))}
           aria-label={t(player.playing ? 'm.pause' : 'm.replayLine')}
-          className="flex-auto min-h-[44px] px-3 rounded-full bg-ink text-white text-[13px] font-semibold flex items-center justify-center gap-1 whitespace-nowrap active:opacity-80"
+          className="flex-auto min-h-[44px] px-3 rounded-full bg-ink text-inverse text-[13px] font-semibold flex items-center justify-center gap-1 whitespace-nowrap active:opacity-80"
         >
           <span aria-hidden>{player.playing ? '⏸' : '▶'}</span>
           <span>{player.playing ? t('m.pause') : t('m.dictReplay')}</span>

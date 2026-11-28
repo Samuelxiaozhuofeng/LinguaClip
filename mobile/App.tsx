@@ -272,7 +272,7 @@ export function App() {
   const wrap = (body: React.ReactNode) => (
     <div className={`min-h-[100vh] supports-[height:1dvh]:min-h-[100dvh] flex flex-col pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] ${showTabBar ? 'pb-[calc(62px+env(safe-area-inset-bottom))]' : ''}`}>
       {shareNote && (
-        <div role="alert" className="mx-4 mt-2 px-3.5 py-2.5 rounded-xl bg-accent-soft text-[#8A2E1B] text-[13px] flex items-center gap-2">
+        <div role="alert" className="mx-4 mt-2 px-3.5 py-2.5 rounded-xl bg-accent-soft text-[#8A2E1B] dark:text-accent text-[13px] flex items-center gap-2">
           <span className="flex-1 break-words">{shareNote}</span>
           <button
             type="button"

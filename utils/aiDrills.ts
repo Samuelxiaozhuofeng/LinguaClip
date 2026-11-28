@@ -1,8 +1,7 @@
 import { fetch } from '@tauri-apps/plugin-http';
 import { ClozeLevel } from '../types';
-import { getAIConfig, readJsonBody } from './aiConfig';
+import { aiRouter, getAIConfig, readJsonBody, type AiRouter } from './aiConfig';
 import { withAiSlot } from './aiLimit';
-import { getRouter } from './resegment';
 import { tokenizeText, getWordTokens } from './textTokenizer';
 import { hasKana } from './japanese';
 
@@ -115,10 +114,9 @@ export function pickBlanks(ranked: number[] | null | undefined, wordCount: numbe
   return ranked.slice(0, n);
 }
 
-type Router = { baseUrl: string; apiKey: string; model: string };
-
-export function clozeRouter(): Router | null {
-  return getRouter();
+// "Is AI set up at all" for the batch jobs (each call then routes by its own feature).
+export function clozeRouter(): AiRouter | null {
+  return aiRouter('cloze');
 }
 
 export function canCloze(): boolean {
@@ -147,13 +145,13 @@ ${blocks.join('\n\n')}`;
 }
 
 async function askOnce(texts: string[]): Promise<(number[] | null)[]> {
-  const router = clozeRouter();
+  const router = aiRouter('cloze');
   if (!router) throw new Error('no router configured');
   const { prompt, counts } = promptFor(texts);
   const res = await fetch(`${router.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${router.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: prompt }] }),
+    headers: router.headers,
+    body: JSON.stringify({ model: router.model, ...router.extra, messages: [{ role: 'user', content: prompt }] }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`router ${res.status}`);
@@ -341,13 +339,13 @@ ${listing}`;
 // One short prompt to the router; the answer text, or null. A network hiccup
 // gets one retry; an answer that fails the checks does not.
 async function askShort(prompt: string): Promise<string | null> {
-  const router = clozeRouter();
+  const router = aiRouter('breakdown');
   if (!router) return null;
   const once = async (): Promise<string | null> => {
     const res = await fetch(`${router.baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${router.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: prompt }] }),
+      headers: router.headers,
+      body: JSON.stringify({ model: router.model, ...router.extra, messages: [{ role: 'user', content: prompt }] }),
       signal: AbortSignal.timeout(BREAKDOWN_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`router ${res.status}`);

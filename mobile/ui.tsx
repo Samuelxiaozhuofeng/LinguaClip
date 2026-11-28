@@ -11,7 +11,7 @@ import { resumeSecOf } from './resumePos';
 
 export const btnPrimary = 'h-[52px] rounded-[14px] bg-accent text-white text-[15px] font-semibold disabled:opacity-50';
 export const btnPlain = 'h-[52px] rounded-[14px] bg-page text-ink text-[15px] font-semibold shadow-card disabled:opacity-50';
-export const btnSmall = 'min-h-[44px] px-4 rounded-[10px] bg-ink text-white text-sm font-medium disabled:opacity-50';
+export const btnSmall = 'min-h-[44px] px-4 rounded-[10px] bg-ink text-inverse text-sm font-medium disabled:opacity-50';
 export const btnSoft = 'min-h-[44px] px-4 rounded-[10px] bg-shade text-ink text-sm font-medium';
 export const sheet = 'bg-page rounded-2xl';
 
@@ -32,7 +32,7 @@ export function LangBar<L extends string>({ langs, value, onChange, ui }: { lang
     <div className="flex gap-1.5 overflow-x-auto pb-1" role="radiogroup">
       {langs.map(l => (
         <button key={l} role="radio" aria-checked={l === value} onClick={() => onChange(l)}
-          className={`shrink-0 min-h-[44px] px-3.5 rounded-full text-[13px] ${l === value ? 'bg-ink text-white' : 'bg-page text-mute shadow-card'}`}>
+          className={`shrink-0 min-h-[44px] px-3.5 rounded-full text-[13px] ${l === value ? 'bg-ink text-inverse' : 'bg-page text-mute shadow-card'}`}>
           {langName(l, ui)}
         </button>
       ))}

@@ -1,6 +1,6 @@
 import { fetch } from '@tauri-apps/plugin-http';
 import { t, getLang } from './i18n';
-import { getAIConfig, getEndpoint, readJsonBody, DEFAULT_PROMPT } from './aiConfig';
+import { aiRouter, getAIConfig, readJsonBody, sendsTemperature, DEFAULT_PROMPT } from './aiConfig';
 
 export { getAIConfig, saveAIConfig, listModels, getCachedModels, isBadKey, DEFAULT_PROMPT } from './aiConfig';
 
@@ -37,22 +37,22 @@ const aroundText = (around: string) => (around.trim() ? `\nThe lines around it, 
 const CULTURE_KEY = () => `"culture": "<in ${answerLang()}, 1-3 sentences: the connotation, cultural background, reference or wordplay behind it here; if it simply means what it says, say so in a few words>"`;
 
 // Word lookup can use AI: the same check chat() makes before asking.
-export const aiReady = (): boolean => !!getEndpoint() && !!getAIConfig().model?.trim();
+export const aiReady = (): boolean => aiRouter('lookup') !== null;
 
 // One user message to the configured model; returns the reply text. Errors come
 // out already worded for the user.
 const chat = async (prompt: string): Promise<string> => {
     try {
-        const endpoint = getEndpoint();
-        const config = getAIConfig();
-        if (!endpoint || !config.model?.trim()) throw new Error('API Key missing');
+        const router = aiRouter('lookup');
+        if (!router) throw new Error('API Key missing');
 
-        const res = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+        const res = await fetch(`${router.baseUrl}/chat/completions`, {
             method: 'POST',
-            headers: { Authorization: `Bearer ${endpoint.apiKey}`, 'Content-Type': 'application/json' },
+            headers: router.headers,
             body: JSON.stringify({
-                model: config.model,
-                temperature: config.temperature,
+                model: router.model,
+                ...router.extra,
+                ...(sendsTemperature(router.baseUrl, router.model) ? { temperature: getAIConfig().temperature } : {}),
                 messages: [{ role: 'user', content: prompt }],
             }),
             signal: AbortSignal.timeout(60_000),

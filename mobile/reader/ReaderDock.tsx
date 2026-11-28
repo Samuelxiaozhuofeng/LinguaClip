@@ -17,7 +17,7 @@ const Chip: React.FC<{ on: boolean; onClick: () => void; children: React.ReactNo
     aria-label={label}
     onClick={onClick}
     className={`min-h-[40px] min-w-[44px] px-2 rounded-full text-[13px] whitespace-nowrap tabular-nums ${
-      on ? 'bg-ink text-white font-medium' : 'bg-page shadow-card text-mute'
+      on ? 'bg-ink text-inverse font-medium' : 'bg-page shadow-card text-mute'
     }`}
   >
     {children}
@@ -69,7 +69,7 @@ export const ReaderDock: React.FC<{
             disabled={disabled}
             onClick={onToggle}
             aria-label={t(playing ? 'm.pause' : 'm.play')}
-            className="w-12 h-12 shrink-0 rounded-full bg-ink text-white flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
+            className="w-12 h-12 shrink-0 rounded-full bg-ink text-inverse flex items-center justify-center disabled:opacity-40 active:scale-95 transition-transform"
           >
             {playing ? (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>

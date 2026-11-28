@@ -1,19 +1,23 @@
 /** @type {import('tailwindcss').Config} */
 // "Cinema": light ground, white sheets, near-black type, one vermilion accent. Nothing else.
 export default {
+  darkMode: 'class', // utils/theme.ts puts `dark` on <html>
   content: ['./index.html', './*.tsx', './components/**/*.tsx', './hooks/**/*.{ts,tsx}', './utils/**/*.ts', './pro/**/*.{ts,tsx}', './mobile/**/*.{html,ts,tsx}'],
   theme: {
     extend: {
+      // Each colour reads a CSS variable (space-separated RGB) that index.css sets for light
+      // (:root) and dark (html.dark), so `bg-ink/40`-style opacity keeps working.
       colors: {
-        paper: '#FAFAFA',   // app background
-        page: '#FFFFFF',    // raised surfaces: sheets, dialogs, menus
-        shade: '#F4F4F3',   // quiet fills: inputs, pills, hover
-        line: '#E7E5E4',    // hairlines
-        faint: '#D6D3D1',   // placeholders, empty word slots
-        mute: '#78716C',    // secondary text
-        ink: '#1C1917',     // primary text
-        accent: '#E8492B',  // the one colour: caret, current word, wrong word, primary action
-        'accent-soft': '#FDECE8',
+        paper: 'rgb(var(--c-paper) / <alpha-value>)',   // app background
+        page: 'rgb(var(--c-page) / <alpha-value>)',     // raised surfaces: sheets, dialogs, menus
+        shade: 'rgb(var(--c-shade) / <alpha-value>)',   // quiet fills: inputs, pills, hover
+        line: 'rgb(var(--c-line) / <alpha-value>)',     // hairlines
+        faint: 'rgb(var(--c-faint) / <alpha-value>)',   // placeholders, empty word slots
+        mute: 'rgb(var(--c-mute) / <alpha-value>)',     // secondary text
+        ink: 'rgb(var(--c-ink) / <alpha-value>)',       // primary text
+        inverse: 'rgb(var(--c-inverse) / <alpha-value>)', // text on a bg-ink fill (white in light, dark in dark)
+        accent: 'rgb(var(--c-accent) / <alpha-value>)', // the one colour: caret, current word, wrong word, primary action
+        'accent-soft': 'rgb(var(--c-accent-soft) / <alpha-value>)',
       },
       fontFamily: {
         sans: ['"Instrument Sans"', '"PingFang SC"', '"Microsoft YaHei"', 'system-ui', 'sans-serif'],
@@ -22,8 +26,8 @@ export default {
         mono: ['"Instrument Sans"', '"PingFang SC"', 'system-ui', 'sans-serif'],
       },
       boxShadow: {
-        card: '0 1px 3px rgba(0,0,0,.08)',
-        lift: '0 16px 40px rgba(0,0,0,.14)',
+        card: 'var(--shadow-card)',
+        lift: 'var(--shadow-lift)',
       },
     },
   },

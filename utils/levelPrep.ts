@@ -1,4 +1,5 @@
 import { fetch } from '@tauri-apps/plugin-http';
+import { aiRouter } from './aiConfig';
 import { readJsonBody } from './aiConfig';
 import { withAiSlot } from './aiLimit';
 import { batchLinesByWords, clozeRouter, extractLines, hashSrt } from './aiDrills';
@@ -59,12 +60,12 @@ ${rows.join('\n')}`;
 }
 
 async function askOnce(lines: Line[]): Promise<LineLabel[]> {
-  const router = clozeRouter();
+  const router = aiRouter('cloze');
   if (!router) throw new Error('no router configured');
   const res = await fetch(`${router.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${router.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: levelPrompt(lines) }] }),
+    headers: router.headers,
+    body: JSON.stringify({ model: router.model, ...router.extra, messages: [{ role: 'user', content: levelPrompt(lines) }] }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`router ${res.status}`);

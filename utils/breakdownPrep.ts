@@ -1,4 +1,5 @@
 import { fetch } from '@tauri-apps/plugin-http';
+import { aiRouter } from './aiConfig';
 import { readJsonBody } from './aiConfig';
 import { withAiSlot } from './aiLimit';
 import { BREAKDOWN_MIN_WORDS, Breakdown, breakdownRules, clozeRouter, soundsOn, spaceWords, validateBreakdown } from './aiDrills';
@@ -80,12 +81,12 @@ export function parseBatchResponse(content: string, lines: string[]): (Breakdown
 }
 
 async function askBatch(lines: string[], lang: 'zh' | 'en'): Promise<(Breakdown | null)[]> {
-  const router = clozeRouter();
+  const router = aiRouter('breakdown');
   if (!router) throw new Error('no router configured');
   const res = await fetch(`${router.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${router.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: batchPrompt(lines, lang) }] }),
+    headers: router.headers,
+    body: JSON.stringify({ model: router.model, ...router.extra, messages: [{ role: 'user', content: batchPrompt(lines, lang) }] }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`router ${res.status}`);

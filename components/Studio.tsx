@@ -272,7 +272,7 @@ const Studio: React.FC = () => {
           <p className="text-white/70 text-sm">{t('studio.noVideoLoaded')}</p>
         )}
         {slowReplay && (
-          <span className="pointer-events-none absolute right-4 bottom-3 z-20 px-2.5 py-1 rounded-full bg-ink/80 text-white text-xs font-medium">{t('studio.slowReplayPill')}</span>
+          <span className="pointer-events-none absolute right-4 bottom-3 z-20 px-2.5 py-1 rounded-full bg-ink/80 dark:bg-inverse/80 text-white text-xs font-medium">{t('studio.slowReplayPill')}</span>
         )}
         {showCenterPlay && (
           <button onClick={actions.onTogglePlay} className="absolute inset-0 flex items-center justify-center" aria-label={t('studio.playAriaLabel')}>

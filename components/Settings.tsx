@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Languages } from 'lucide-react';
+import { Languages, SunMoon } from 'lucide-react';
 import { AnkiConfig, AIConfig, AnkiCardTemplateConfig } from '../types';
 import * as Anki from '../utils/anki';
 import * as AI from '../utils/ai';
 import * as Storage from '../utils/storage';
 import { useAnkiConnection } from '../hooks/useAnkiConnection';
 import { useT, useLang, setLang, Lang } from '../utils/i18n';
+import { useThemePref, ThemePref } from '../utils/theme';
 import { Seg, Stamp } from './ui';
 import SettingsPractice from './SettingsPractice';
 import SettingsLookup from './SettingsLookup';
@@ -36,6 +37,7 @@ type AnkiPatch = {
 const Settings: React.FC = () => {
   const t = useT();
   const lang = useLang();
+  const [themePref, setThemePref] = useThemePref();
   const [deckName, setDeckName] = useState('');
   const [modelName, setModelName] = useState('');
   const [fieldMapping, setFieldMapping] = useState<Record<string, string>>({});
@@ -133,6 +135,7 @@ const Settings: React.FC = () => {
 
   const saveAI = (next: Partial<AIConfig> & { prompt?: string } = {}) => {
     AI.saveAIConfig({
+      ...AI.getAIConfig(), // keep fields this page does not show (phone's provider / per-feature models)
       model: next.model ?? aiModel,
       temperature: next.temperature ?? aiTemperature,
       promptTemplate: next.promptTemplate ?? next.prompt ?? aiPrompt,
@@ -171,9 +174,19 @@ const Settings: React.FC = () => {
           { value: 'importAi', label: t('settings.layerImportAi') },
           { value: 'data', label: t('settings.layerData') },
         ]} />
-        <div className="flex items-center gap-2 text-mute" title={t('settings.language')}>
-          <Languages size={16} aria-hidden />
-          <Seg<Lang> size="sm" value={lang} onChange={v => { setLang(v); flashSaved(); }} options={LANG_OPTS} />
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-mute">
+          <div className="flex items-center gap-2" title={t('settings.language')}>
+            <Languages size={16} aria-hidden />
+            <Seg<Lang> size="sm" value={lang} onChange={v => { setLang(v); flashSaved(); }} options={LANG_OPTS} />
+          </div>
+          <div className="flex items-center gap-2" title={`${t('theme.title')}：${t('theme.hint')}`}>
+            <SunMoon size={16} aria-hidden />
+            <Seg<ThemePref> size="sm" value={themePref} onChange={v => { setThemePref(v); flashSaved(); }} options={[
+              { value: 'system', label: t('theme.system') },
+              { value: 'light', label: t('theme.light') },
+              { value: 'dark', label: t('theme.dark') },
+            ]} />
+          </div>
         </div>
       </div>
 

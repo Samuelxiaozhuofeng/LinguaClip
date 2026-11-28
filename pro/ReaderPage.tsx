@@ -418,7 +418,7 @@ const ReaderPage: React.FC<{
 
         <aside style={{ width: asideW }} className="shrink-0 py-5 pl-7 border-l border-line flex flex-col gap-4 min-h-0">
           <div className={`card !shadow-none overflow-hidden shrink-0 ${clip?.view ? '' : 'hidden'}`}>
-            <div className="relative aspect-video max-h-[calc(100vh-200px)] bg-ink">
+            <div className="relative aspect-video max-h-[calc(100vh-200px)] bg-ink dark:bg-inverse">
               {video('absolute inset-0 w-full h-full object-contain')}
               <button type="button" onClick={closePlayer} title={t('reader.closePlayer')} aria-label={t('reader.closePlayer')}
                 className="absolute top-2 right-2 w-8 h-8 rounded-lg bg-black/45 text-white inline-flex items-center justify-center hover:bg-black/70"><X size={16} /></button>

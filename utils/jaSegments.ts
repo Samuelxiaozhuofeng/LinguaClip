@@ -1,6 +1,7 @@
 import { fetch } from '@tauri-apps/plugin-http';
+import { aiRouter } from './aiConfig';
 import { getAIConfig, readJsonBody } from './aiConfig';
-import { clozeRouter, extractLines } from './aiDrills';
+import { extractLines } from './aiDrills';
 import { withAiSlot } from './aiLimit';
 import { readCacheText, writeCacheText } from './desktop';
 import { getVideoRecord } from './videoStorage';
@@ -29,7 +30,7 @@ export function subscribeSeg(fn: () => void): () => void {
   return () => { listeners.delete(fn); };
 }
 
-export const jaCheckOn = () => !!getAIConfig().jaSegmentAi && clozeRouter() !== null;
+export const jaCheckOn = () => !!getAIConfig().jaSegmentAi && aiRouter('segment') !== null;
 
 const validOffsets = (v: unknown, len: number): v is number[] =>
   Array.isArray(v) && v.length > 0 && v.every((n, i) => Number.isInteger(n) && n >= 0 && n < len && (i === 0 || n > v[i - 1]));
@@ -153,12 +154,12 @@ export function parseSegmentResponse(content: string, batch: string[]): (number[
 }
 
 async function ask(batch: string[]): Promise<(number[] | null)[]> {
-  const router = clozeRouter();
+  const router = aiRouter('segment');
   if (!router) throw new Error('no router configured');
   const res = await fetch(`${router.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${router.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: segmentPrompt(batch) }] }),
+    headers: router.headers,
+    body: JSON.stringify({ model: router.model, ...router.extra, messages: [{ role: 'user', content: segmentPrompt(batch) }] }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`router ${res.status}`);

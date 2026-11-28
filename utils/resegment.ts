@@ -1,5 +1,5 @@
 import { fetch } from '@tauri-apps/plugin-http';
-import { getAIConfig, getEndpoint, readJsonBody } from './aiConfig';
+import { aiRouter, readJsonBody, type AiRouter } from './aiConfig';
 import { withAiSlot } from './aiLimit';
 
 // Whisper breaks a transcript wherever its decoder happened to stop, which
@@ -19,15 +19,9 @@ const REQUEST_TIMEOUT_MS = 90_000;
 // (src-tauri/src/dtw.rs GAP_MS, the same number; docs/import.md「字幕行时间」).
 export const GAP_MS = 3000;
 
-// Only the user's own AI settings: the segment model if set, else the main one.
-type Router = { baseUrl: string; apiKey: string; model: string };
-
-export function getRouter(): Router | null {
-  const config = getAIConfig();
-  const endpoint = getEndpoint();
-  const model = config.segmentModel?.trim() || config.model?.trim();
-  if (!endpoint || !model) return null;
-  return { ...endpoint, model };
+// Only the user's own AI settings: the line-splitting model (utils/aiConfig.ts modelFor).
+export function getRouter(): AiRouter | null {
+  return aiRouter('segment');
 }
 
 export function canResegment(): boolean {
@@ -148,12 +142,12 @@ export function enforceCeiling(starts: number[], words: Word[], ok: CutOk = anyC
 async function askOnce(words: Word[]): Promise<number[]> {
   // Without a deadline a router that accepts the connection and then goes quiet
   // leaves the import stuck on "shaping lines" with no way out.
-  const router = getRouter();
+  const router = aiRouter('segment');
   if (!router) throw new Error('no router configured');
   const res = await fetch(`${router.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${router.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: prompt(words) }] }),
+    headers: router.headers,
+    body: JSON.stringify({ model: router.model, ...router.extra, messages: [{ role: 'user', content: prompt(words) }] }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`router ${res.status}`);

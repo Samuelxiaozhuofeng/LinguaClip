@@ -311,7 +311,7 @@ export const BreakdownSheet: React.FC<BreakdownSheetProps> = ({
               <button
                 type="button"
                 onClick={() => setAttempt(n => n + 1)}
-                className="min-h-[44px] px-4 rounded-[10px] bg-ink text-white text-sm font-medium shrink-0"
+                className="min-h-[44px] px-4 rounded-[10px] bg-ink text-inverse text-sm font-medium shrink-0"
               >
                 {t('m.retry')}
               </button>

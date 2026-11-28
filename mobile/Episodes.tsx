@@ -240,7 +240,7 @@ export const Episodes: React.FC<{ show: ShowRef; records: VideoRecord[]; onBack:
               <p className={`font-serif text-[17px] leading-snug break-words ${big ? 'text-mute' : ''}`}>{ep.title}</p>
               {big ? <>
                 <p className="text-[13px] text-mute">{meta}</p>
-                <p className="text-[13px] text-[#8A2E1B] bg-accent-soft rounded-lg px-2.5 py-2">{t('m.tooLong')}</p>
+                <p className="text-[13px] text-[#8A2E1B] dark:text-accent bg-accent-soft rounded-lg px-2.5 py-2">{t('m.tooLong')}</p>
               </> : (
                 <div className="flex items-center gap-2.5 text-[13px] text-mute">
                   <span className="flex-1 flex items-center flex-wrap gap-1.5">
@@ -277,7 +277,7 @@ export const Episodes: React.FC<{ show: ShowRef; records: VideoRecord[]; onBack:
                   )}
                 </div>
               )}
-              {job?.error && <p role="alert" className="text-[13px] text-[#8A2E1B] bg-accent-soft rounded-lg px-2.5 py-2">{errText(job.error)}</p>}
+              {job?.error && <p role="alert" className="text-[13px] text-[#8A2E1B] dark:text-accent bg-accent-soft rounded-lg px-2.5 py-2">{errText(job.error)}</p>}
             </div>
           );
         })}

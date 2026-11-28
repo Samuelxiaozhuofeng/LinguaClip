@@ -485,9 +485,9 @@ const ReviewSession: React.FC<{
         )}
       </section>
       {undo && (
-        <div key={undo.n} className="fixed left-1/2 -translate-x-1/2 top-3 z-[60] h-10 pl-4 pr-1.5 rounded-full bg-ink text-white text-sm flex items-center gap-2 shadow-card fade-in">
+        <div key={undo.n} className="fixed left-1/2 -translate-x-1/2 top-3 z-[60] h-10 pl-4 pr-1.5 rounded-full bg-ink text-inverse text-sm flex items-center gap-2 shadow-card fade-in">
           {t(undo.gone ? 'review.deletedToast' : 'review.masteredToast')}
-          <button type="button" onClick={e => { e.currentTarget.blur(); unmaster(); }} className="press h-7 px-3 rounded-full bg-white/15 font-medium">{t('review.undo')}</button>
+          <button type="button" onClick={e => { e.currentTarget.blur(); unmaster(); }} className="press h-7 px-3 rounded-full bg-inverse/15 font-medium">{t('review.undo')}</button>
         </div>
       )}
       {defOpen && <DefinitionPanel key={def.word} def={def} onClose={closeDef} onExplain={explain} onKeepWord={keepWord}

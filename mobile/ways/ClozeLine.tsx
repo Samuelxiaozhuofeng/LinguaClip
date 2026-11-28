@@ -196,7 +196,7 @@ export const ClozeBar: React.FC<ClozeBarProps> = ({
       <button
         type="button"
         onClick={onReplay}
-        className="min-h-[42px] px-3.5 rounded-xl bg-ink text-white text-[13px] font-medium flex items-center gap-1 whitespace-nowrap active:opacity-80"
+        className="min-h-[42px] px-3.5 rounded-xl bg-ink text-inverse text-[13px] font-medium flex items-center gap-1 whitespace-nowrap active:opacity-80"
       >
         <span aria-hidden>▶</span>
         <span>{t('m.dictReplay')}</span>

@@ -197,7 +197,7 @@ export const Study: React.FC<{
                 data-locked={locked || undefined}
                 onClick={() => switchTo(w)}
                 className={`min-h-[40px] px-2.5 rounded-full text-[13px] whitespace-nowrap shrink-0 ${
-                  active ? 'bg-ink text-white font-medium' : locked ? 'text-mute/50' : 'text-mute'
+                  active ? 'bg-ink text-inverse font-medium' : locked ? 'text-mute/50' : 'text-mute'
                 }`}
               >
                 {t(WAY_LABEL_KEY[w])}
@@ -209,7 +209,7 @@ export const Study: React.FC<{
             aria-haspopup="dialog"
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen(true)}
-            className={`min-h-[40px] min-w-0 px-2.5 rounded-full text-[13px] whitespace-nowrap flex items-center gap-1 ${isMoreActive ? 'bg-ink text-white font-medium' : 'text-mute'}`}
+            className={`min-h-[40px] min-w-0 px-2.5 rounded-full text-[13px] whitespace-nowrap flex items-center gap-1 ${isMoreActive ? 'bg-ink text-inverse font-medium' : 'text-mute'}`}
           >
             <span className="truncate">{isMoreActive ? t(WAY_LABEL_KEY[activeWay]) : t('m.moreWays')}</span>
             <span aria-hidden className="text-[10px] leading-none">▾</span>
@@ -280,7 +280,7 @@ export const Study: React.FC<{
         <p
           role="status"
           data-testid="way-switch-toast"
-          className="fixed left-1/2 -translate-x-1/2 max-w-[calc(100vw-32px)] top-[calc(env(safe-area-inset-top)+60px)] z-30 px-4 py-2 rounded-2xl bg-ink text-white text-[13px] text-center shadow-lift pointer-events-none"
+          className="fixed left-1/2 -translate-x-1/2 max-w-[calc(100vw-32px)] top-[calc(env(safe-area-inset-top)+60px)] z-30 px-4 py-2 rounded-2xl bg-ink text-inverse text-[13px] text-center shadow-lift pointer-events-none"
         >
           {toast}
         </p>

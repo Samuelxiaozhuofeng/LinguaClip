@@ -12,7 +12,7 @@ export const toneBg: Record<Tone, string> = {
   shade: 'bg-shade text-ink',
   accent: 'bg-accent text-white',
   'accent-soft': 'bg-accent-soft text-accent',
-  ink: 'bg-ink text-white',
+  ink: 'bg-ink text-inverse',
 };
 
 type BtnProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {

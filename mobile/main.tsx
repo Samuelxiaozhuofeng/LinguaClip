@@ -18,6 +18,9 @@ import { PENDING_KEY } from '../utils/backup';
 import { t } from '../utils/i18n';
 import { isAndroidNative } from './platform/androidBridge';
 import { initAndroidNative } from './platform/androidInit';
+import { initTheme } from '../utils/theme';
+
+initTheme();
 
 // Another window started or ended a restore: this one stops writing and starts over.
 window.addEventListener('storage', e => {

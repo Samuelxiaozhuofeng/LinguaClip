@@ -148,7 +148,7 @@ const SubtitleMask: React.FC<Props> = ({ videoId, media, edit = true, peekKey, o
     <>
       <div ref={picRef} className="absolute pointer-events-none overflow-visible" style={frame.pic}>
         {rect && (drawing || (showing && !peek)) && (
-          <div data-subtitle-mask className={`absolute bg-ink ${edit ? 'z-10' : ''} ${drawing ? 'ring-2 ring-accent' : ''} ${movable ? `group pointer-events-auto cursor-move ${NO_CURSOR}` : ''}`} style={at(rect)}
+          <div data-subtitle-mask className={`absolute bg-ink dark:bg-inverse ${edit ? 'z-10' : ''} ${drawing ? 'ring-2 ring-accent' : ''} ${movable ? `group pointer-events-auto cursor-move ${NO_CURSOR}` : ''}`} style={at(rect)}
             onPointerDown={movable ? down('move') : undefined} {...(movable ? handlers : {})}>
             {movable && GRIPS.map(([g, cls]) => (
               <div key={g} className={`absolute ${cls} ${NO_CURSOR} opacity-0 group-hover:opacity-100`} onPointerDown={down(g)} {...handlers} />

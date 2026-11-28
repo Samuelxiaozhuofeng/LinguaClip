@@ -98,6 +98,17 @@ export interface AnkiConfig {
 }
 
 // AI Configuration
+// One provider's own settings, kept so switching providers back and forth on the
+// phone does not lose a key or the model picks (mobile/settings/AiSection.tsx).
+export interface AIProfile {
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  segmentModel?: string;
+  featureModels?: AIConfig['featureModels'];
+  models?: string[]; // last fetched model list
+}
+
 export interface AIConfig {
   model: string;
   temperature: number;
@@ -105,6 +116,9 @@ export interface AIConfig {
   apiKey?: string;      // User's own key for the OpenAI-compatible endpoint
   baseUrl?: string;     // OpenAI-compatible base URL; required
   segmentModel?: string; // model used to re-cut transcript lines on import
+  provider?: 'openai' | 'claude' | 'gemini' | 'custom'; // phone AI tab preset (utils/aiConfig.ts AI_PRESETS)
+  featureModels?: Partial<Record<'lookup' | 'breakdown' | 'translate' | 'segment' | 'cloze' | 'keywords', string>>; // per-job model; empty = fallback (aiConfig.modelFor)
+  profiles?: Partial<Record<'openai' | 'claude' | 'gemini' | 'custom', AIProfile>>; // what each provider had when the phone switched away from it
   autoBreakdown?: boolean; // prepare breakdowns as soon as an import finishes
   breakdownSounds?: boolean; // breakdowns also point out what makes the line hard to hear (docs/breakdown.md); default on
   autoCloze?: boolean;     // prepare cloze blanks as soon as an import finishes

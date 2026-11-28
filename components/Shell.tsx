@@ -38,10 +38,10 @@ const Shell: React.FC<{
             onClick={() => onNav(state)}
             aria-current={on ? 'page' : undefined}
             className={`h-8 px-4 rounded-full flex items-center gap-1.5 text-[13px] transition-colors
-              ${on ? 'bg-ink text-white' : 'text-mute hover:text-ink'}`}
+              ${on ? 'bg-ink text-inverse' : 'text-mute hover:text-ink'}`}
           >
             {label}
-            {!!badge && <span className={`text-xs tabular-nums ${on ? 'text-white' : 'text-accent'}`}>{badge}</span>}
+            {!!badge && <span className={`text-xs tabular-nums ${on ? 'text-inverse' : 'text-accent'}`}>{badge}</span>}
           </button>
         ))}
       </nav>

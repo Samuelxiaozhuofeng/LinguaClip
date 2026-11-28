@@ -1,7 +1,8 @@
 import { fetch } from '@tauri-apps/plugin-http';
+import { aiRouter } from './aiConfig';
 import { getAIConfig, readJsonBody } from './aiConfig';
 import { withAiSlot } from './aiLimit';
-import { clozeRouter, hashSrt } from './aiDrills';
+import { hashSrt } from './aiDrills';
 import { readCacheText, writeCacheText } from './desktop';
 import { parseSRT } from './srtParser';
 import { getLang, type Lang } from './i18n';
@@ -116,12 +117,12 @@ ${rows.join('\n')}`;
 }
 
 async function askOnce(lines: Line[], lang: Lang): Promise<{ summary: string; words: Keyword[] }> {
-  const router = clozeRouter();
+  const router = aiRouter('keywords');
   if (!router) throw new Error('no router configured');
   const res = await fetch(`${router.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${router.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: router.model, messages: [{ role: 'user', content: keywordPrompt(lines, lang) }] }),
+    headers: router.headers,
+    body: JSON.stringify({ model: router.model, ...router.extra, messages: [{ role: 'user', content: keywordPrompt(lines, lang) }] }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`router ${res.status}`);
@@ -152,7 +153,7 @@ export function prepareKeywords(recordId: string, subtitleText: string, urgent =
   job.promise = (async () => {
     const lines = keywordLines(subtitleText);
     const saved = parseKeywordCache(await readCacheText(recordId, 'keywords').catch(() => null), lines);
-    if (saved || !lines.length || !clozeRouter()) return saved;
+    if (saved || !lines.length || !aiRouter('keywords')) return saved;
     const lang = getLang();
     const got = await withAiSlot('cloze', () => askOnce(lines, lang).catch(() => askOnce(lines, lang)), () => job.urgent).catch(() => null);
     if (!got || job.cancelled) return null;

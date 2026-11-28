@@ -266,7 +266,7 @@ export const LocalDictPanel: React.FC = () => {
                           type="button"
                           disabled={!!job}
                           onClick={() => { setNotice(''); void downloadPhoneDict(r); }}
-                          className="shrink-0 min-h-[38px] px-3.5 rounded-[10px] bg-ink text-white text-[13px] font-medium disabled:opacity-45"
+                          className="shrink-0 min-h-[38px] px-3.5 rounded-[10px] bg-ink text-inverse text-[13px] font-medium disabled:opacity-45"
                         >
                           {t('ja.download')}
                         </button>
