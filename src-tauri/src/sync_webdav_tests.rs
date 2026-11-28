@@ -494,7 +494,7 @@ fn merge_pack_write_read_and_selective_unpack_roundtrip() {
   .unwrap();
   let out_path = PathBuf::from(&out);
   assert!(out_path.is_file());
-  assert!(out.contains("tmp/exports/") && out.ends_with(".zip"));
+  assert!(out_path.starts_with(src_own.join("tmp").join("exports")) && out.ends_with(".zip"));
 
   let meta = read_merge_pack_at(&out_path).unwrap();
   assert_eq!(meta.snapshot_json, snap);
